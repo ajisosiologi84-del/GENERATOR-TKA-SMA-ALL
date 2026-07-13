@@ -1,0 +1,371 @@
+import express from "express";
+import path from "path";
+import { createServer as createViteServer } from "vite";
+import { GoogleGenAI, Type } from "@google/genai";
+import dotenv from "dotenv";
+
+// Load environment variables
+dotenv.config();
+
+const app = express();
+const PORT = 3000;
+
+// Enable JSON parsing
+app.use(express.json({ limit: "10mb" }));
+
+// Lazy init Gemini client to avoid crashes if GEMINI_API_KEY is not yet present
+let aiInstance: GoogleGenAI | null = null;
+
+function getGeminiClient(): GoogleGenAI {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "GEMINI_API_KEY tidak ditemukan di environment variables. Hubungi admin atau atur di tab Secrets."
+    );
+  }
+  if (!aiInstance) {
+    aiInstance = new GoogleGenAI({
+      apiKey: apiKey,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
+    });
+  }
+  return aiInstance;
+}
+
+// Robust content generation with retries (exponential backoff) and model fallbacks (e.g. gemini-3.1-flash-lite)
+async function generateContentWithFallbackAndRetry(
+  ai: GoogleGenAI,
+  params: {
+    contents: any;
+    config?: any;
+  }
+): Promise<any> {
+  const modelsToTry = ["gemini-3.5-flash", "gemini-3.1-flash-lite"];
+  let lastError: any = null;
+
+  for (const model of modelsToTry) {
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`Calling Gemini API using model ${model} (attempt ${attempt}/${maxRetries})...`);
+        const response = await ai.models.generateContent({
+          model,
+          contents: params.contents,
+          config: params.config,
+        });
+        return response;
+      } catch (error: any) {
+        lastError = error;
+        console.error(`Attempt ${attempt} for model ${model} failed with error:`, error);
+        
+        // If it's a 503/UNAVAILABLE or 429/RESOURCE_EXHAUSTED, wait and retry
+        const errorMsg = error.message || "";
+        const errorStr = typeof error === "object" ? JSON.stringify(error) : String(error);
+        const isRetryable = 
+          error.status === "UNAVAILABLE" || 
+          error.code === 503 ||
+          errorMsg.includes("503") ||
+          errorMsg.includes("UNAVAILABLE") ||
+          errorStr.includes("503") ||
+          errorStr.includes("UNAVAILABLE") ||
+          error.status === "RESOURCE_EXHAUSTED" ||
+          error.code === 429 ||
+          errorMsg.includes("429") ||
+          errorStr.includes("429");
+          
+        if (isRetryable && attempt < maxRetries) {
+          const delay = attempt * 1500; // 1.5s, 3s
+          console.log(`Temporary issue detected. Waiting ${delay}ms before retrying...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        } else {
+          // If not retryable or max retries reached, exit this loop to try next model
+          break;
+        }
+      }
+    }
+  }
+
+  throw lastError || new Error("Gagal memproses AI setelah mencoba beberapa model dan percobaan ulang.");
+}
+
+// API Routes
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok", apiKeyPresent: !!process.env.GEMINI_API_KEY });
+});
+
+// Endpoint 1: Generate Kisi-Kisi (Matriks Asesmen) via AI
+app.post("/api/generate-kisi", async (req, res) => {
+  try {
+    const {
+      mataPelajaran,
+      definisi,
+      muatan,
+      kompetensi,
+      elemenMateri,
+      subElemenMateri,
+      count = 3,
+    } = req.body;
+
+    if (!mataPelajaran) {
+      return res.status(400).json({ error: "Mata Pelajaran harus diisi" });
+    }
+
+    const ai = getGeminiClient();
+
+    const systemInstruction = `Anda adalah ahli kurikulum pendidikan menengah SMA di Indonesia (khususnya untuk penyusunan Tes Kemampuan Akademik / TKA). 
+Tugas Anda adalah membuat rancangan KISI-KISI SOAL dalam bentuk MATRIKS ASESMEN sesuai dengan Kurikulum Merdeka atau K-13 tingkat SMA kelas X, XI, atau XII.
+Rancanglah kisi-kisi soal yang berbobot, valid, dan seimbang berdasarkan input dari pengguna.`;
+
+    const prompt = `Buatkan ${count} baris matriks asesmen kisi-kisi soal untuk mata pelajaran berikut:
+Mata Pelajaran: ${mataPelajaran}
+${definisi ? `Definisi/Tujuan: ${definisi}` : ""}
+${muatan ? `Muatan Kurikulum: ${muatan}` : ""}
+${kompetensi ? `Kompetensi Umum: ${kompetensi}` : ""}
+${elemenMateri ? `Elemen/Materi Utama: ${elemenMateri}` : ""}
+${subElemenMateri ? `Sub-Elemen/Submateri: ${subElemenMateri}` : ""}
+
+Aturan Penyusunan Matriks:
+1. Setiap baris harus bervariasi jenis bentuk soalnya: 'pilihan_ganda_sederhana' (PG Sederhana), 'mcma' (PG Kompleks Multiple Choice Multiple Answers), atau 'kategori' (PG Kompleks kategori Benar/Salah atau Sesuai/Tidak Sesuai).
+2. Tingkat kognitif harus bervariasi antara: 'level_1' (Pemahaman / Knowing: Mengenali, mengingat, dan memahami konsep dasar), 'level_2' (Penerapan / Applying: Menerapkan konsep pada fenomena nyata), atau 'level_3' (Penalaran / Reasoning: Berpikir kritis dan menalar secara logis).
+3. Buat rincian elemen, sub-elemen, kompetensi yang diukur, serta batasan materi secara logis dan mendalam.
+4. Distribusikan jumlah soal per kisi-kisi (misalnya antara 3-10 soal per baris).`;
+
+    const response = await generateContentWithFallbackAndRetry(ai, {
+      contents: prompt,
+      config: {
+        systemInstruction,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              bentukSoal: { 
+                type: Type.STRING, 
+                description: "Nilai wajib berupa salah satu dari: 'pilihan_ganda_sederhana', 'mcma', atau 'kategori'" 
+              },
+              levelKognitif: { 
+                type: Type.STRING, 
+                description: "Nilai wajib berupa salah satu dari: 'level_1', 'level_2', atau 'level_3'" 
+              },
+              elemenMateri: { type: Type.STRING, description: "Nama elemen atau materi utama" },
+              subElemenMateri: { type: Type.STRING, description: "Nama sub-elemen atau sub-materi spesifik" },
+              kompetensi: { type: Type.STRING, description: "Deskripsi kompetensi spesifik yang akan diukur" },
+              batasanCatatan: { type: Type.STRING, description: "Batasan materi, batasan variabel, atau catatan khusus" },
+              jumlahSoal: { type: Type.INTEGER, description: "Jumlah soal yang dialokasikan untuk kisi-kisi ini" }
+            },
+            required: [
+              "bentukSoal",
+              "levelKognitif",
+              "elemenMateri",
+              "subElemenMateri",
+              "kompetensi",
+              "batasanCatatan",
+              "jumlahSoal"
+            ]
+          }
+        }
+      }
+    });
+
+    const resultText = response.text || "[]";
+    const parsed = JSON.parse(resultText);
+    res.json(parsed);
+  } catch (error: any) {
+    console.error("Error generating kisi-kisi:", error);
+    res.status(500).json({ error: error.message || "Gagal membuat kisi-kisi" });
+  }
+});
+
+// Endpoint 2: Generate Soal (Pembuat Soal) dari Kisi-Kisi via AI
+app.post("/api/generate-soal", async (req, res) => {
+  try {
+    const {
+      kisi,
+      mataPelajaran,
+      definisi,
+      muatan,
+      jumlahOpsi = 5,
+      jenisSoal = "tunggal",
+      konteksLokal = [],
+      stimulusKonten = [],
+      kualitasChecklist = [],
+      noSoalStart = 1,
+    } = req.body;
+
+    if (!kisi) {
+      return res.status(400).json({ error: "Data Kisi-Kisi wajib dilampirkan" });
+    }
+
+    const ai = getGeminiClient();
+
+    const systemInstruction = `Anda adalah ahli pembuat soal ujian nasional, UTBK SBMPTN, dan TKA (Tes Kemampuan Akademik) SMA di Indonesia.
+Anda sangat terampil menyusun soal tingkat tinggi (HOTS - Higher Order Thinking Skills), bervariasi, mendalam, dan bebas dari bias.
+Patuhi instruksi bentuk soal dan parameter kognitif yang ditentukan pengguna secara presisi.`;
+
+    // Build context strings
+    const konteksStr = konteksLokal.length > 0 
+      ? `Integrasikan KONTEKS LOKAL INDONESIA berikut ke dalam stimulus atau soal: ${konteksLokal.join(", ")}.`
+      : "";
+
+    const stimulusStr = stimulusKonten.length > 0
+      ? `Gunakan tipe STIMULUS DAN PENGEMBANGAN KONTEN berikut: ${stimulusKonten.join(", ")} (misal teks bacaan, data/tabel, berita, kasus nyata).`
+      : "Gunakan stimulus yang relevan jika sesuai dengan kompetensi.";
+
+    const checklistStr = kualitasChecklist.length > 0
+      ? `Pastikan memenuhi KUALITAS SOAL berikut: ${kualitasChecklist.join(", ")}.`
+      : "";
+
+    const bentukSoalDesc = 
+      kisi.bentukSoal === "pilihan_ganda_sederhana"
+        ? "Pilihan ganda sederhana: Hanya ada satu jawaban yang benar. Sediakan pilihan A sampai " + (jumlahOpsi === 5 ? "E" : "D") + "."
+        : kisi.bentukSoal === "mcma"
+        ? "Pilihan ganda kompleks model multiple choice multiple answers (MCMA): Ada lebih dari satu jawaban yang benar. Peserta diminta memilih semua jawaban benar. Kunci jawaban harus menyebutkan semua pilihan yang benar (misal: 'A, C'). Sediakan pilihan A sampai " + (jumlahOpsi === 5 ? "E" : "D") + "."
+        : "Pilihan ganda kompleks kategori: Menyajikan beberapa pernyataan (minimal 3-4 pernyataan) yang semuanya harus direspon, misalnya dengan pilihan 'Benar'/'Salah' atau 'Sesuai'/'Tidak Sesuai'. Kunci jawaban harus merinci status setiap pernyataan (misal: '1. Benar, 2. Salah, 3. Benar').";
+
+    const countRequired = Number(req.body.count) || Number(kisi.jumlahSoal) || 1;
+
+    const prompt = `Buatkan tepat sebanyak ${countRequired} butir soal ujian TKA SMA yang berbeda untuk Mata Pelajaran ${mataPelajaran}.
+    
+PENTING: Jumlah objek soal yang dihasilkan dalam array JSON HARUS tepat sebanyak ${countRequired} butir soal, tidak kurang dan tidak lebih.
+Setiap butir soal harus unik, bervariasi, dan didasarkan pada kisi-kisi berikut.
+
+INFORMASI MATRIKS ASESMEN KISI-KISI:
+- No Soal Mulai: ${noSoalStart}
+- Bentuk Soal: ${kisi.bentukSoal} (${bentukSoalDesc})
+- Tingkat Kognitif: ${kisi.levelKognitif} (${kisi.levelKognitif === 'level_1' ? 'Pemahaman (Knowing) - Mengenali, mengingat, dan memahami konsep dasar' : kisi.levelKognitif === 'level_2' ? 'Penerapan (Applying) - Menerapkan konsep pada fenomena nyata' : 'Penalaran (Reasoning) - Berpikir kritis dan menalar secara logis'})
+- Elemen/Materi: ${kisi.elemenMateri}
+- Sub-Elemen/Submateri: ${kisi.subElemenMateri}
+- Kompetensi yang Diuji: ${kisi.kompetensi}
+- Batasan/Catatan Khusus: ${kisi.batasanCatatan || "Tidak ada"}
+- Jenis Soal: ${jenisSoal} (Soal Tunggal atau Soal Grup/Terhubung)
+
+PANDUAN EKSTRA:
+1. ${konteksStr}
+2. ${stimulusStr}
+3. ${checklistStr}
+4. Kunci jawaban harus sangat akurat dan pembahasan harus lengkap, ilmiah, edukatif, dan terstruktur dengan rapi agar mudah dipahami siswa SMA. Tambahkan juga field 'kataKunci' yang berisi kata kunci atau konsep penting/topik utama yang digunakan/diuji dalam soal ini (misal: 'Sistem Persamaan Linear', 'Gaya Gravitasi', 'Asimilasi Sosial').
+5. JIKA soal membutuhkan visual pendukung (seperti grafik fungsi, diagram kartesius, bangun geometri, siklus biologi, diagram sirkuit, kurva ekonomi, dsb.), Anda disarankan untuk membuat kode SVG inline yang valid (dimulai dengan '<svg' dan ditutup '</svg>' lengkap dengan viewBox, stroke, fill, teks label agar indah dan responsive) ATAU mencantumkan URL gambar Unsplash yang relevan pada field 'gambarUrl'. Jika tidak membutuhkan visual, isi 'gambarUrl' dengan string kosong "".
+6. Harap sesuaikan bahasa agar baku, formal, sesuai EBI (Ejaan Bahasa Indonesia), namun mudah dimengerti.
+7. Hasilkan tepat ${countRequired} objek soal di dalam array hasil.`;
+
+    const response = await generateContentWithFallbackAndRetry(ai, {
+      contents: prompt,
+      config: {
+        systemInstruction,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              kompetensi: { type: Type.STRING },
+              subKompetensi: { type: Type.STRING },
+              bentukSoal: { type: Type.STRING },
+              stimulus: { type: Type.STRING, description: "Paragraf stimulus atau pengantar soal (bila ada)" },
+              soal: { type: Type.STRING, description: "Pertanyaan atau pokok soal utama" },
+              opsi: { 
+                type: Type.ARRAY, 
+                items: { type: Type.STRING }, 
+                description: "Array pilihan jawaban (misal ['A. ...', 'B. ...']) atau daftar pernyataan untuk tipe kategori" 
+              },
+              kunciJawaban: { type: Type.STRING, description: "Kunci jawaban yang tepat dan presisi" },
+              pembahasan: { type: Type.STRING, description: "Pembahasan mendalam, terstruktur, dan ilmiah" },
+              kataKunci: { type: Type.STRING, description: "Kata kunci atau konsep utama yang digunakan dalam soal ini" },
+              gambarUrl: { type: Type.STRING, description: "Kode SVG inline lengkap (dimulai dengan '<svg' dan diakhiri '</svg>') atau URL gambar eksternal, atau string kosong '' jika tidak ada ilustrasi." }
+            },
+            required: ["kompetensi", "subKompetensi", "bentukSoal", "soal", "opsi", "kunciJawaban", "pembahasan", "kataKunci", "gambarUrl"]
+          }
+        }
+      }
+    });
+
+    const resultText = response.text || "[]";
+    const parsed = JSON.parse(resultText);
+    res.json(parsed);
+  } catch (error: any) {
+    console.error("Error generating soal:", error);
+    res.status(500).json({ error: error.message || "Gagal membuat soal" });
+  }
+});
+
+// Endpoint 3: Generate Custom SVG Illustration/Graphic via AI Gemini
+app.post("/api/generate-illustration", async (req, res) => {
+  try {
+    const { prompt, context } = req.body;
+    if (!prompt) {
+      return res.status(400).json({ error: "Permintaan ilustrasi (prompt) harus diisi." });
+    }
+
+    const ai = getGeminiClient();
+    const systemInstruction = `Anda adalah desainer grafis dan ahli ilustrasi ilmiah/edukatif profesional untuk soal ujian SMA.
+Tugas Anda adalah menghasilkan kode inline SVG (<svg> ... </svg>) yang valid, indah, bersih, modern, dan sangat responsif untuk mendukung pemahaman soal ujian.
+
+Ketentuan pembuatan SVG:
+1. Hasilkan HANYA kode SVG mentah tanpa penjelasan, tanpa teks pengantar, tanpa markdown, dan tanpa pembungkus backticks (jangan gunakan \`\`\`xml atau \`\`\`svg). Mulai langsung dengan '<svg' dan akhiri dengan '</svg>'.
+2. Buat desain yang modern, estetis, dan profesional:
+   - Gunakan palet warna modern yang bersih dan kontras tinggi (misalnya Indigo, Emerald, Violet, Amber, Slate, Rose, Sky).
+   - Gunakan garis stroke tebal dan jelas (misal stroke-width="2"), marker panah yang rapi, dan grid yang presisi.
+   - Tambahkan teks label, sumbu koordinat, keterangan, atau rumus dengan font-family="system-ui, -apple-system, sans-serif" agar serasi dengan antarmuka web modern dan mudah dibaca (font-size minimal 11px-12px, font-weight bold jika penting).
+   - Atur viewBox secara proporsional agar responsive (misal viewBox="0 0 500 280"). Gunakan background warna netral atau transparan, tapi berikan padding yang cukup agar elemen tidak mepet ke tepi.
+   - Pastikan teks label tidak terpotong dan koordinat teks diletakkan dengan presisi di sebelah objek/garis/titik yang dirujuk.
+3. Konten visual harus merepresentasikan permintaan pengguna dengan sangat akurat secara ilmiah/matematis (misalnya: jika diminta grafik parabola kuadrat, gambar kurva mulus berbentuk parabola yang memotong sumbu dengan benar; jika diminta rangkaian listrik, gambarkan simbol resistor/baterai/saklar standar dengan label nilai hambatannya).
+4. Gambar harus bersifat mandiri (self-contained), murni berbasis elemen vektor SVG (<rect>, <circle>, <path>, <text>, <line>, <g>, dll.), tidak bergantung pada file eksternal.`;
+
+    const userPrompt = `Buatlah kode SVG inline yang merepresentasikan ilustrasi berikut:
+Permintaan Pengguna: "${prompt}"
+${context ? `Konteks Soal yang berkaitan: "${context}"` : ""}
+
+Ingat, hanya hasilkan kode SVG langsung tanpa penanda kode atau pembungkus markdown apapun. Dimulai dari '<svg' sampai '</svg>'.`;
+
+    const response = await generateContentWithFallbackAndRetry(ai, {
+      contents: userPrompt,
+      config: {
+        systemInstruction,
+        temperature: 0.2,
+      },
+    });
+
+    let svgCode = response.text || "";
+    // Clean up potential markdown code block wrappers if any slips through
+    svgCode = svgCode.trim();
+    if (svgCode.startsWith("```")) {
+      svgCode = svgCode.replace(/^```[a-zA-Z]*\n/, "").replace(/\n```$/, "").trim();
+    }
+    
+    res.json({ svg: svgCode });
+  } catch (error: any) {
+    console.error("Error generating illustration:", error);
+    res.status(500).json({ error: error.message || "Gagal menghasilkan ilustrasi" });
+  }
+});
+
+// Serve frontend static assets in production, or let Vite handle it in dev
+if (process.env.NODE_ENV !== "production") {
+  const startDevServer = async () => {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+    
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`[DEV] Server running on http://localhost:${PORT}`);
+    });
+  };
+  startDevServer();
+} else {
+  const distPath = path.join(process.cwd(), "dist");
+  app.use(express.static(distPath));
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(distPath, "index.html"));
+  });
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`[PROD] Server running on port ${PORT}`);
+  });
+}
