@@ -222,7 +222,7 @@ app.post("/api/generate-soal", async (req, res) => {
 
     const ai = getGeminiClient();
 
-    const systemInstruction = `Anda adalah ahli pembuat soal ujian nasional, UTBK SBMPTN, dan TKA (Tes Kemampuan Akademik) SMA di Indonesia.
+    const systemInstruction = `Anda adalah ahli pembuat soal ujian nasional dan TKA (Tes Kemampuan Akademik) SMA di Indonesia.
 Anda sangat terampil menyusun soal tingkat tinggi (HOTS - Higher Order Thinking Skills), bervariasi, mendalam, dan bebas dari bias.
 Patuhi instruksi bentuk soal dan parameter kognitif yang ditentukan pengguna secara presisi.`;
 
@@ -388,7 +388,7 @@ Buat prompt dalam bahasa Indonesia yang berwibawa, rapi, terstruktur menggunakan
 - Jumlah Soal yang Diminta: ${kisi.jumlahSoal} butir soal
 
 Draf Megaprompt yang Anda buat harus memuat:
-1. Peran AI yang diinstruksikan (misal: "Anda adalah dosen/guru senior pembuat soal UTBK...").
+1. Peran AI yang diinstruksikan (misal: "Anda adalah dosen/guru senior pembuat soal TKA SMA...").
 2. Spesifikasi lengkap materi dan tingkat kognitif (C1-C6/HOTS).
 3. Aturan pembuatan stimulus (kontekstual, studi kasus, riil, atau data ilmiah).
 4. Aturan pengecoh pilihan ganda yang homogen dan tidak terlalu mudah tereliminasi.

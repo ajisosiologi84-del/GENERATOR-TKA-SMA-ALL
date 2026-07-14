@@ -1335,22 +1335,21 @@ export default function App() {
   // Navigation Tabs: 'config' (Generator & Prompt), 'kisi' (Matriks Asesmen), 'soal' (Pembuat Soal)
   const [activeTab, setActiveTab] = useState<'config' | 'kisi' | 'soal'>('config');
 
-  // Input States for Generator Config
   const [config, setConfig] = useState<GeneratorConfig>({
-    mataPelajaran: '',
-    definisi: '',
-    muatan: '',
-    kompetensi: '',
+    mataPelajaran: 'Sosiologi',
+    definisi: 'Asesmen Akhir Semester (AAS) Ganjil',
+    muatan: 'Kurikulum Merdeka - Fase F Kelas XII',
+    kompetensi: 'Mendeskripsikan dan menganalisis pengertian dan perkembangan serta manfaat sosiologi sebagai ilmu pengetahuan.',
     bentukSoal: 'pilihan_ganda_sederhana',
     levelKognitif: 'level_2',
-    elemenMateri: '',
-    subElemenMateri: '',
-    batasanCatatan: '',
+    elemenMateri: 'Sosiologi sebagai Ilmu',
+    subElemenMateri: 'Pengertian dan perkembangan sosiologi dan manfaat sosiologi dalam kehidupan masyarakat.',
+    batasanCatatan: 'Sejarah sosiologi, objek kajian sosiologi, fungsi dan manfaat sosiologi bagi masyarakat.',
     jumlahOpsi: 5,
     jenisSoal: 'tunggal',
-    jumlahSoal: 5,
-    konteksLokal: [],
-    stimulusKonten: [],
+    jumlahSoal: 1,
+    konteksLokal: ['Kontekstual Indonesia', 'Kearifan Lokal'],
+    stimulusKonten: ['Studi Kasus Konkrit', 'Data Statistik/Infografis', 'Wacana Ilmiah/Berita'],
     kualitasChecklist: [
       'Konstruksi Soal', 
       'Kesesuaian Materi', 
@@ -1362,10 +1361,104 @@ export default function App() {
   });
 
   // State for Kisi-Kisi Matriks Asesmen list
-  const [kisiList, setKisiList] = useState<KisiKisiItem[]>([]);
+  const [kisiList, setKisiList] = useState<KisiKisiItem[]>([
+    {
+      id: "kisi-sosiologi-ref-1",
+      no: 1,
+      bentukSoal: "pilihan_ganda_sederhana",
+      levelKognitif: "level_1",
+      elemenMateri: "Sosiologi sebagai Ilmu",
+      subElemenMateri: "Pengertian dan perkembangan sosiologi dan manfaat sosiologi dalam kehidupan masyarakat.",
+      kompetensi: "Mendeskripsikan dan menganalisis pengertian dan perkembangan serta manfaat sosiologi sebagai ilmu pengetahuan.",
+      batasanCatatan: "Sejarah sosiologi, objek kajian sosiologi, fungsi dan manfaat sosiologi bagi masyarakat.",
+      jumlahSoal: 1
+    },
+    {
+      id: "kisi-sosiologi-ref-2",
+      no: 2,
+      bentukSoal: "kategori",
+      levelKognitif: "level_2",
+      elemenMateri: "Hubungan dan Gejala Sosial",
+      subElemenMateri: "Ragam gejala sosial.",
+      kompetensi: "Menjelaskan ragam gejala sosial di lingkungan sekitar.",
+      batasanCatatan: "Perilaku menyimpang, masalah sosial, sosiologi perkotaan/pedesaan, dan dampaknya bagi keteraturan sosial.",
+      jumlahSoal: 1
+    },
+    {
+      id: "kisi-sosiologi-ref-3",
+      no: 3,
+      bentukSoal: "mcma",
+      levelKognitif: "level_3",
+      elemenMateri: "Penelitian Sosial",
+      subElemenMateri: "Langkah penelitian sosial dan metode penelitian.",
+      kompetensi: "Menjelaskan dan menganalisis berbagai langkah dan metode penelitian sosial.",
+      batasanCatatan: "Rancangan penelitian, jenis penelitian (kualitatif/kuantitatif), teknik sampling, pengumpulan data, dan penyusunan laporan.",
+      jumlahSoal: 1
+    }
+  ]);
 
   // State for Question list
-  const [questions, setQuestions] = useState<Question[]>([]);
+  const [questions, setQuestions] = useState<Question[]>([
+    {
+      id: "question-sosiologi-ref-1",
+      noSoal: 1,
+      kisiKisiId: "kisi-sosiologi-ref-1",
+      kompetensi: "Mendeskripsikan dan menganalisis pengertian dan perkembangan serta manfaat sosiologi sebagai ilmu pengetahuan.",
+      subKompetensi: "Mengidentifikasi objek kajian sosiologi di era masyarakat digital.",
+      bentukSoal: "pilihan_ganda_sederhana",
+      stimulus: "Sosiologi merupakan ilmu pengetahuan murni yang membatasi diri pada apa yang nyata-nyata terjadi saat ini (das sein) dan bukan membicarakan apa yang seharusnya terjadi (das sollen). Di tengah era disrupsi teknologi digital saat ini, berbagai fenomena interaksi sosial baru bermunculan, mulai dari maraknya penggunaan media sosial, kecanduan gawai, hingga pola komunikasi virtual di kalangan remaja yang menggeser norma-norma konvensional di masyarakat.",
+      soal: "Berdasarkan ilustrasi di atas, objek kajian sosiologi yang paling tepat ditunjukkan oleh pernyataan...",
+      opsi: [
+        "A. Dampak radiasi gelombang elektromagnetik gawai terhadap kesehatan mata dan fisik remaja secara klinis.",
+        "B. Kecanduan teknologi yang mengubah pola interaksi, cara berpikir, dan perilaku sosial di kalangan remaja dalam kehidupan sehari-hari.",
+        "C. Kerusakan jaringan infrastruktur internet nasional akibat dari maraknya serangan keamanan siber (cyber attack).",
+        "D. Penurunan nilai tukar mata uang asing yang memengaruhi harga jual gawai di pasar lokal secara signifikan.",
+        "E. Perancangan algoritma kecerdasan buatan pada aplikasi media sosial untuk meningkatkan efisiensi komputasi."
+      ],
+      kunciJawaban: "B",
+      pembahasan: "Objek kajian sosiologi berpusat pada masyarakat dan segala fenomena interaksi sosial serta gejala sosial yang terjadi di dalamnya. Dampak sosial kemajuan teknologi (kecanduan gawai yang mengubah pola interaksi, cara berpikir, dan perilaku sosial remaja) merupakan gejala sosial nyata yang menjadi objek kajian sosiologi (das sein). Pilihan lainnya berada di luar ranah kajian sosiologi, seperti kesehatan fisik/klinis (A), teknik informatika/cyber (C & E), dan ekonomi makro (D).",
+      kataKunci: "Objek Kajian Sosiologi, Gejala Sosial, Disrupsi Teknologi"
+    },
+    {
+      id: "question-sosiologi-ref-2",
+      noSoal: 2,
+      kisiKisiId: "kisi-sosiologi-ref-2",
+      kompetensi: "Menjelaskan ragam gejala sosial di lingkungan sekitar.",
+      subKompetensi: "Menerapkan konsep sosialisasi dan ragam gejala sosial terkait pembatasan screen-time pada anak.",
+      bentukSoal: "kategori",
+      stimulus: "Perhatikan anjuran durasi aman layar (screen-time) bagi anak-anak berikut ini!\nMenurut rekomendasi para ahli evaluasi perkembangan anak, anak usia 0 sampai 1,5 tahun disarankan sama sekali tidak terpapar layar gawai (0 jam). Anak usia 1,5 sampai 2 tahun diperbolehkan mengakses program yang berkualitas tinggi maksimal selama 1 jam dengan pendampingan ketat oleh orang tua. Anak usia 2 sampai 5 tahun juga dibatasi maksimal 1 jam per hari dengan pendampingan, sementara anak di atas 5 tahun harus memiliki batas waktu penggunaan gawai yang konsisten dan seimbang demi menjaga kesehatan fisik dan mental mereka.",
+      soal: "Evaluasilah kesesuaian pernyataan terkait gejala penggunaan gawai pada anak berdasarkan anjuran tersebut! Tentukan SESUAI atau TIDAK SESUAI untuk setiap pernyataan berikut.",
+      opsi: [
+        "Pernyataan 1: Penggunaan gawai pada anak usia dini perlu diawasi ketat oleh orang tua agar proses sosialisasi primer anak tidak terhambat secara negatif.",
+        "Pernyataan 2: Anak berusia 1 tahun diperbolehkan bermain gawai sendiri tanpa pendampingan asalkan kontennya edukatif dengan batas waktu maksimal 1 jam per hari.",
+        "Pernyataan 3: Pola asuh yang terlalu longgar terhadap akses teknologi digital dapat mengganggu pembentukan karakter dan kepribadian sosial anak.",
+        "Pernyataan 4: Pembatasan waktu layar secara konsisten bagi anak usia di atas 5 tahun dapat mengurangi risiko deviasi sosial berupa kecanduan gawai."
+      ],
+      kunciJawaban: "SESUAI, TIDAK SESUAI, SESUAI, SESUAI",
+      pembahasan: "- Pernyataan 1 [SESUAI]: Sesuai dengan anjuran dalam stimulus bahwa pendampingan orang tua sangat krusial dalam masa sosialisasi primer anak usia dini.\n- Pernyataan 2 [TIDAK SESUAI]: Anak usia 1 tahun (berada di rentang 0-1,5 tahun) direkomendasikan sama sekali tidak terpapar layar (0 jam), serta tidak boleh dilepas bermain gawai sendiri.\n- Pernyataan 3 [SESUAI]: Sesuai dengan konsep sosiologi bahwa pengawasan/pendampingan penting untuk mencegah dampak negatif pembentukan kepribadian akibat paparan gawai yang bebas.\n- Pernyataan 4 [SESUAI]: Pembatasan waktu layar secara konsisten dan seimbang bagi anak di atas 5 tahun membantu mencegah risiko penyimpangan berupa kecanduan gawai.",
+      kataKunci: "Sosialisasi, Pola Asuh, Gejala Sosial, Screen-Time"
+    },
+    {
+      id: "question-sosiologi-ref-3",
+      noSoal: 3,
+      kisiKisiId: "kisi-sosiologi-ref-3",
+      kompetensi: "Menjelaskan dan menganalisis berbagai langkah dan metode penelitian sosial.",
+      subKompetensi: "Menganalisis rancangan metode penelitian sosial kuantitatif dan menyempurnakannya secara metodologis.",
+      bentukSoal: "mcma",
+      stimulus: "Seorang peneliti sosiologi SMA ingin meneliti pengaruh intensitas pergaulan kelompok teman sebaya (peer group) terhadap kelekatan hubungan antar-anggota keluarga di kalangan siswa kelas XII. Peneliti tersebut merumuskan masalah: 'Apakah terdapat hubungan antara pergaulan sebaya dengan kelekatan hubungan keluarga?' Peneliti menyusun instrumen pengumpulan data berupa daftar pertanyaan terbuka sebanyak 10 butir untuk wawancara mendalam. Namun, pada saat yang sama, ia juga berencana menganalisis kekuatan hubungan antar-variabel tersebut secara kuantitatif melalui uji korelasi statistik menggunakan aplikasi pengolah data.",
+      soal: "Berdasarkan rancangan penelitian di atas, manakah rekomendasi metodologis yang paling tepat dan logis untuk menyempurnakan penelitian tersebut agar valid? (Pilihlah semua jawaban yang benar! Jawaban benar lebih dari satu)",
+      opsi: [
+        "A. Peneliti perlu mengubah daftar pertanyaan terbuka menjadi kuesioner tertutup berskala Likert agar data kuantitatif yang diperoleh dapat diolah dengan uji korelasi statistik secara valid.",
+        "B. Peneliti harus menentukan teknik sampling (seperti simple random sampling atau stratified random sampling) dan ukuran sampel yang representatif terlebih dahulu sebelum menyebarkan instrumen.",
+        "C. Peneliti sebaiknya menghapus rumusan masalah utama karena analisis statistik kuantitatif tidak memerlukan perumusan masalah yang detail terkait interaksi sosial.",
+        "D. Peneliti wajib menggunakan metode observasi partisipatif penuh (peneliti tinggal bersama keluarga responden selama minimal satu tahun penuh) untuk mempercepat proses kuantifikasi.",
+        "E. Peneliti perlu melakukan operasionalisasi konsep variabel bebas (intensitas pergaulan sebaya) dan variabel terikat (kelekatan hubungan keluarga) untuk mempermudah penyusunan indikator instrumen kuesioner."
+      ],
+      kunciJawaban: "A, B, E",
+      pembahasan: "Penelitian ini memiliki kontradiksi metodologis: ingin menguji hubungan kuantitatif (korelasi statistik) tetapi instrumennya adalah pertanyaan terbuka (kualitatif). Maka rekomendasi penyempurnaan yang logis:\n1. [A BENAR] Pertanyaan terbuka harus diubah menjadi tertutup (seperti skala Likert) agar datanya berbentuk angka dan dapat diproses secara statistik.\n2. [B BENAR] Penentuan teknik sampling probabilitas dan jumlah sampel representatif sangat penting untuk penelitian kuantitatif agar hasil uji hubungan bisa digeneralisasi.\n3. [E BENAR] Operasionalisasi konsep variabel sangat krusial dalam kuantitatif untuk menerjemahkan teori sosiologi ke dalam indikator kuesioner yang valid.\nOpsi C salah karena rumusan masalah adalah fondasi utama penelitian. Opsi D tidak tepat karena observasi partisipatif penuh adalah metode khas kualitatif (etnografi) yang sangat lama dan bertolak belakang dengan kebutuhan pengujian korelasi kuantitatif cepat.",
+      kataKunci: "Metodologi Penelitian, Penelitian Kuantitatif, Teknik Sampling, Validitas"
+    }
+  ]);
 
   // Loading States
   const [isGeneratingKisi, setIsGeneratingKisi] = useState(false);
@@ -1412,7 +1505,7 @@ export default function App() {
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
   
   // State for preset subject selection in the matrix UI
-  const [selectedPresetSubject, setSelectedPresetSubject] = useState<'Matematika' | 'Bahasa Indonesia' | 'Bahasa Inggris' | 'Matematika Tingkat Lanjut' | 'Bahasa Indonesia Tingkat Lanjut' | 'Bahasa Inggris Tingkat Lanjut' | 'Fisika' | 'Kimia' | 'Biologi' | 'PPKN' | 'Ekonomi' | 'Geografi' | 'Sosiologi' | 'Sejarah Tingkat Lanjut' | 'Antropologi' | 'Bahasa Jepang' | 'Produk Kreatif dan Kewirausahaan'>('Matematika');
+  const [selectedPresetSubject, setSelectedPresetSubject] = useState<'Matematika' | 'Bahasa Indonesia' | 'Bahasa Inggris' | 'Matematika Tingkat Lanjut' | 'Bahasa Indonesia Tingkat Lanjut' | 'Bahasa Inggris Tingkat Lanjut' | 'Fisika' | 'Kimia' | 'Biologi' | 'PPKN' | 'Ekonomi' | 'Geografi' | 'Sosiologi' | 'Sejarah Tingkat Lanjut' | 'Antropologi' | 'Bahasa Jepang' | 'Produk Kreatif dan Kewirausahaan'>('Sosiologi');
 
   // Sync preset subject selection with config mataPelajaran if applicable
   useEffect(() => {
@@ -1578,29 +1671,38 @@ Tuliskan blok kode JSON valid (di dalam format \`\`\`json) yang berisi array of 
 ]
 \`\`\``;
 
-    // 2. Prompt Pembuat Soal
-    const promptSoalText = `Buatkan butir-butir soal TKA SMA bermutu tinggi berbasis kurikulum pendidikan Indonesia.
+    // 2. Prompt Pembuat Soal (Megaprompt)
+    const promptSoalText = `Anda adalah seorang ahli penyusun soal TKA (Tes Kemampuan Akademik) SMA tingkat nasional dan pakar evaluasi kurikulum pendidikan di Indonesia.
+Tugas Anda adalah merancang butir soal TKA SMA bermutu tinggi, berorientasi HOTS (Higher Order Thinking Skills), valid, dan objektif berdasarkan spesifikasi di bawah ini.
 
-INFORMASI SOAL:
+INFORMASI SPESIFIKASI SOAL:
 - MATA PELAJARAN: ${config.mataPelajaran}
-- MATERI/ELEMEN: ${config.elemenMateri} / ${config.subElemenMateri}
-- KOMPETENSI DIUJI: ${config.kompetensi}
+- MATERI UTAMA/ELEMEN: ${config.elemenMateri || 'Tidak ditentukan'}
+- SUB-ELEMEN/SUBMATERI: ${config.subElemenMateri || 'Tidak ditentukan'}
+- KOMPETENSI UTAMA YANG DIUJI: ${config.kompetensi || 'Menganalisis dan memecahkan masalah'}
+- TINGKAT KOGNITIF: ${getLevelKognitifLabel(config.levelKognitif)} (${config.levelKognitif})
 - BENTUK SOAL: ${getBentukSoalLabel(config.bentukSoal)}
-- PILIHAN/OPSI JAWABAN: ${config.jumlahOpsi} Pilihan (A s.d ${config.jumlahOpsi === 5 ? 'E' : 'D'})
-- JENIS SOAL: ${config.jenisSoal === 'grup' ? 'Soal Grup (Berbasis stimulus terintegrasi)' : 'Soal Tunggal'}${contextList}${stimulusList}${qualityList}
+- PILIHAN JAWABAN: ${config.jumlahOpsi} Pilihan (A s.d ${config.jumlahOpsi === 5 ? 'E' : 'D'})
+- JENIS STRUKTUR: ${config.jenisSoal === 'grup' ? 'Soal Grup (Beberapa butir soal didasarkan pada satu stimulus terintegrasi)' : 'Soal Tunggal'}${contextList}${stimulusList}${qualityList}
 
-Format keluaran wajib mengikuti pola teks terstruktur Indonesia:
+PANDUAN PENYUSUNAN SOAL:
+1. **Pendekatan HOTS**: Fokuskan pertanyaan pada keterampilan berpikir kritis, analisis mendalam, pemecahan masalah, atau evaluasi konsep. Hindari pertanyaan hafalan mentah.
+2. **Kekuatan Stimulus**: Gunakan stimulus berupa teks bacaan ilmiah, tabel data, grafik, ilustrasi kasus nyata, atau berita faktual yang kaya informasi dan logis. Pertanyaan harus bersandar kuat pada stimulus tersebut.
+3. **Kualitas Pilihan Pengecoh**: Pilihan jawaban (A s.d ${config.jumlahOpsi === 5 ? 'E' : 'D'}) harus homogen secara tata bahasa, logis, dan ilmiah. Distraktor tidak boleh terlalu mudah ditebak dan harus menuntut siswa untuk berpikir analitis sebelum memilih.
+4. **Kunci & Pembahasan Komprehensif**: Berikan penjelasan analitis langkah-demi-langkah yang ilmiah, objektif, dan logis untuk membuktikan mengapa kunci jawaban tersebut benar dan mengapa opsi lainnya kurang tepat.
+
+SAJIKAN SOAL DALAM FORMAT TEKS TERSTRUKTUR BERIKUT:
 ===========================================
-No Soal : [Nomor]
+No Soal : [Nomor Soal]
 Kompetensi : [Kompetensi yang diuji]
 Sub Kompetensi : [Sub kompetensi spesifik]
 Bentuk Soal : [Jenis bentuk soal]
 
-Stimulus: (Jika ada)
-[Paragraf stimulus, data, kasus, atau ilustrasi]
+Stimulus:
+[Paragraf stimulus, data/tabel, atau situasi kontekstual]
 
 Soal:
-[Pertanyaan utama]
+[Pertanyaan utama atau instruksi pengerjaan]
 
 Pilihan Jawaban:
 A. [Pilihan A]
@@ -1608,10 +1710,10 @@ B. [Pilihan B]
 C. [Pilihan C]
 D. [Pilihan D]
 ${config.jumlahOpsi === 5 ? 'E. [Pilihan E]\n' : ''}
-Kunci Jawaban: [Kunci tepat]
+Kunci Jawaban: [Kunci Jawaban yang tepat, misal: A]
 
 Pembahasan:
-[Penjelasan langkah demi langkah ilmiah dan terstruktur]
+[Penjelasan analitis langkah demi langkah secara ilmiah dan terstruktur]
 ===========================================`;
 
     setGeneratedKisiPrompt(promptKisiText);
@@ -1748,28 +1850,49 @@ Pembahasan:
     setCopiedPrompt(false);
     
     // Generate a beautiful, highly useful default prompt locally first (instant)
-    const localPrompt = `Buatlah ${item.jumlahSoal || 5} butir soal ${getBentukSoalLabel(item.bentukSoal)} HOTS (Higher Order Thinking Skills) untuk mata pelajaran ${config.mataPelajaran || "Umum"} tingkat SMA, Kelas XII.
+    const localPrompt = `Anda adalah seorang ahli penyusun soal TKA (Tes Kemampuan Akademik) SMA tingkat nasional dan pakar evaluasi kurikulum pendidikan di Indonesia.
+Tugas Anda adalah merancang ${item.jumlahSoal || 5} butir soal ${getBentukSoalLabel(item.bentukSoal)} berorientasi HOTS (Higher Order Thinking Skills) untuk mata pelajaran ${config.mataPelajaran || "Umum"} tingkat SMA, Kelas XII.
 
-Spesifikasi Butir Soal:
+SPESIFIKASI BUTIR SOAL:
+- Mata Pelajaran: ${config.mataPelajaran || "Umum"}
 - Lingkup Materi / Kompetensi: ${item.kompetensi}
 - Materi Pokok (Elemen): ${item.elemenMateri}
 - Sub-materi (Sub-elemen) / Indikator Soal: ${item.subElemenMateri || '-'}
 - Level Kognitif: ${getLevelKognitifLabel(item.levelKognitif)} (${item.levelKognitif})
 - Bentuk Soal: ${getBentukSoalLabel(item.bentukSoal)}
 
-Ketentuan Penting:
-1. Soal wajib mengukur kemampuan berpikir tingkat tinggi (HOTS): analisis (C4), evaluasi (C5), atau kreasi (C6).
-2. Setiap soal wajib menyertakan stimulus berupa wacana kontekstual, studi kasus nyata, grafik data, atau kutipan literatur.
-3. Pilihan jawaban pengecoh (distraktor) harus homogen, ilmiah, logis, dan menantang bagi siswa.
-4. Sertakan kunci jawaban beserta pembahasan/analisis jawaban secara mendalam untuk setiap opsi.
+PANDUAN PENYUSUNAN SOAL:
+1. **Analisis HOTS (C4-C6)**: Pertanyaan harus mengukur kemampuan menganalisis, mengevaluasi, atau merancang/berpikir kritis siswa, bukan hafalan tekstual.
+2. **Kekuatan Stimulus**: Wajib menyertakan stimulus kontekstual yang kaya data, kutipan studi kasus, grafik, atau skenario kehidupan nyata di Indonesia.
+3. **Pengecoh Homogen & Ilmiah**: Seluruh pilihan jawaban (opsi) harus homogen secara sintaksis, setara panjangnya, logis, dan menantang siswa untuk mengeliminasi distraktor secara analitis.
+4. **Pembahasan Ilmiah**: Sertakan pembahasan langkah demi langkah yang logis, mendalam, serta membuktikan kebenaran kunci jawaban.
 
-Format Output:
-Tampilkan soal dengan format yang sangat jelas:
-1. Stimulus
-2. Pertanyaan
-3. Opsi pilihan jawaban (A, B, C, D, E)
-4. Kunci Jawaban
-5. Pembahasan Analitis`;
+Sajikan output Anda dengan format teks terstruktur yang rapi seperti di bawah ini:
+
+===========================================
+No Soal : [Nomor Soal]
+Kompetensi : [Kompetensi yang diuji]
+Sub Kompetensi : [Sub kompetensi spesifik]
+Bentuk Soal : [Jenis bentuk soal]
+
+Stimulus:
+[Paragraf stimulus, data/tabel, atau situasi kontekstual]
+
+Soal:
+[Pertanyaan utama atau instruksi pengerjaan]
+
+Pilihan Jawaban:
+A. [Pilihan A]
+B. [Pilihan B]
+C. [Pilihan C]
+D. [Pilihan D]
+E. [Pilihan E] (Jika bentuk soal pilihan ganda sederhana/kompleks)
+
+Kunci Jawaban: [Kunci Jawaban yang tepat, misal: A]
+
+Pembahasan:
+[Penjelasan analitis langkah demi langkah secara ilmiah dan terstruktur]
+===========================================`;
 
     setGeneratedPromptText(localPrompt);
     setIsPromptModalOpen(true);
@@ -2929,7 +3052,7 @@ Tampilkan soal dengan format yang sangat jelas:
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-300 uppercase tracking-wide">
-                        PROMPT 2: PEMBUAT SOAL UTBK/TKA
+                        PROMPT 2: PEMBUAT SOAL TKA SMA
                       </span>
                       <button
                         onClick={() => handleCopy(generatedSoalPrompt, 'soal')}
