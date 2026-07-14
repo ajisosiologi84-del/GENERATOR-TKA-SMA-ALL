@@ -36,7 +36,7 @@ function getGeminiClient(): GoogleGenAI {
   return aiInstance;
 }
 
-// Robust content generation with retries (exponential backoff) and model fallbacks (e.g. gemini-3.1-flash-lite)
+// Robust content generation with retries and model fallbacks (e.g. gemini-3.1-flash-lite)
 async function generateContentWithFallbackAndRetry(
   ai: GoogleGenAI,
   params: {
@@ -44,52 +44,34 @@ async function generateContentWithFallbackAndRetry(
     config?: any;
   }
 ): Promise<any> {
-  const modelsToTry = ["gemini-3.5-flash", "gemini-3.1-flash-lite"];
+  // Ordered by preferred + high availability (lite is highly available and fast)
+  const modelsToTry = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
   let lastError: any = null;
 
   for (const model of modelsToTry) {
-    const maxRetries = 3;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        console.log(`Calling Gemini API using model ${model} (attempt ${attempt}/${maxRetries})...`);
-        const response = await ai.models.generateContent({
-          model,
-          contents: params.contents,
-          config: params.config,
-        });
-        return response;
-      } catch (error: any) {
-        lastError = error;
-        console.error(`Attempt ${attempt} for model ${model} failed with error:`, error);
-        
-        // If it's a 503/UNAVAILABLE or 429/RESOURCE_EXHAUSTED, wait and retry
-        const errorMsg = error.message || "";
-        const errorStr = typeof error === "object" ? JSON.stringify(error) : String(error);
-        const isRetryable = 
-          error.status === "UNAVAILABLE" || 
-          error.code === 503 ||
-          errorMsg.includes("503") ||
-          errorMsg.includes("UNAVAILABLE") ||
-          errorStr.includes("503") ||
-          errorStr.includes("UNAVAILABLE") ||
-          error.status === "RESOURCE_EXHAUSTED" ||
-          error.code === 429 ||
-          errorMsg.includes("429") ||
-          errorStr.includes("429");
-          
-        if (isRetryable && attempt < maxRetries) {
-          const delay = attempt * 1500; // 1.5s, 3s
-          console.log(`Temporary issue detected. Waiting ${delay}ms before retrying...`);
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        } else {
-          // If not retryable or max retries reached, exit this loop to try next model
-          break;
-        }
-      }
+    console.log(`Calling Gemini API using model ${model}...`);
+    try {
+      // 9-second timeout per model call to ensure we don't trigger the gateway timeout (30s)
+      const apiCall = ai.models.generateContent({
+        model,
+        contents: params.contents,
+        config: params.config,
+      });
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`Timeout waiting for model ${model}`)), 9000)
+      );
+
+      const response = await Promise.race([apiCall, timeoutPromise]);
+      return response;
+    } catch (error: any) {
+      lastError = error;
+      console.error(`Model ${model} failed with error:`, error);
+      // Immediately proceed to the next model in the list
     }
   }
 
-  throw lastError || new Error("Gagal memproses AI setelah mencoba beberapa model dan percobaan ulang.");
+  throw lastError || new Error("Gagal memproses AI setelah mencoba beberapa model.");
 }
 
 // API Routes
@@ -342,6 +324,62 @@ Ingat, hanya hasilkan kode SVG langsung tanpa penanda kode atau pembungkus markd
     console.error("Error generating illustration:", error);
     res.status(500).json({ error: error.message || "Gagal menghasilkan ilustrasi" });
   }
+});
+
+// Endpoint 4: Optimize/Generate Professional AI Prompt for a Kisi-Kisi Row
+app.post("/api/optimize-prompt", async (req, res) => {
+  try {
+    const { kisi, mataPelajaran } = req.body;
+    if (!kisi) {
+      return res.status(400).json({ error: "Data kisi-kisi harus disediakan." });
+    }
+
+    const ai = getGeminiClient();
+    const systemInstruction = `Anda adalah ahli Rekayasa Prompt (Prompt Engineer) profesional dan spesialis Kurikulum & Evaluasi Pendidikan Indonesia.
+Tugas Anda adalah merumuskan Prompt AI yang sangat detail, spesifik, dan efektif (Megaprompt) agar guru atau akademisi dapat menyalin prompt tersebut ke LLM lain (seperti Gemini, ChatGPT, Claude) untuk menghasilkan butir soal HOTS yang luar biasa.
+
+Buat prompt dalam bahasa Indonesia yang berwibawa, rapi, terstruktur menggunakan format markdown (gunakan list, tebal, kode blok untuk visualisasi jika perlu). Prompt tersebut harus menginstruksikan AI eksternal untuk membuat soal berkualitas tinggi sesuai dengan kisi-kisi yang dikirimkan.`;
+
+    const userPrompt = `Buatlah draf PROMPT AI (Megaprompt) yang siap disalin oleh guru. Prompt tersebut harus dioptimalkan untuk menghasilkan soal ujian yang sangat spesifik berdasarkan data matriks berikut:
+- Mata Pelajaran: ${mataPelajaran || "Mata Pelajaran Umum"}
+- No Kisi-Kisi: ${kisi.no}
+- Kompetensi Dasar / Lingkup: ${kisi.kompetensi}
+- Materi Pokok: ${kisi.elemenMateri || kisi.materi || ""}
+- Sub-materi / Indikator: ${kisi.subElemenMateri || kisi.subMateri || "-"}
+- Level Kognitif: ${kisi.levelKognitif}
+- Bentuk Soal: ${kisi.bentukSoal}
+- Jumlah Soal yang Diminta: ${kisi.jumlahSoal} butir soal
+
+Draf Megaprompt yang Anda buat harus memuat:
+1. Peran AI yang diinstruksikan (misal: "Anda adalah dosen/guru senior pembuat soal UTBK...").
+2. Spesifikasi lengkap materi dan tingkat kognitif (C1-C6/HOTS).
+3. Aturan pembuatan stimulus (kontekstual, studi kasus, riil, atau data ilmiah).
+4. Aturan pengecoh pilihan ganda yang homogen dan tidak terlalu mudah tereliminasi.
+5. Format keluaran (soal, opsi A-E, kunci jawaban, dan pembahasan mendalam).
+6. Teknik melahirkan pertanyaan tingkat tinggi (HOTS) yang memicu daya analisis siswa.
+
+Tulis draf prompt tersebut langsung dalam format Markdown yang elegan, berwibawa, rapi, dan langsung bisa dicopy oleh pengguna. Jangan tambahkan penjelasan pembuka dari Anda sendiri seperti "Berikut adalah prompt yang Anda minta", melainkan langsung mulailah isi prompt tersebut dengan judul atau teks instruksi utama yang siap disalin.`;
+
+    const response = await generateContentWithFallbackAndRetry(ai, {
+      contents: userPrompt,
+      config: {
+        systemInstruction,
+        temperature: 0.7,
+      },
+    });
+
+    const optimizedPrompt = response.text || "";
+    res.json({ prompt: optimizedPrompt });
+  } catch (error: any) {
+    console.error("Error optimizing prompt:", error);
+    res.status(500).json({ error: error.message || "Gagal mengoptimasi prompt" });
+  }
+});
+
+// Global Error Handling Middleware to guarantee JSON response format on failure
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error("Global error handler caught unexpected error:", err);
+  res.status(500).json({ error: err.message || "Terjadi kesalahan internal pada server." });
 });
 
 // Serve frontend static assets in production, or let Vite handle it in dev
