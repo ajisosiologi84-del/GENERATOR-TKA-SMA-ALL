@@ -36,6 +36,10 @@ function getGeminiClient(): GoogleGenAI {
   return aiInstance;
 }
 
+// Circuit breaker to avoid spamming rate-limited or quota-exhausted models
+const coolOffModels = new Map<string, number>();
+const COOL_OFF_DURATION = 180 * 1000; // 3 minutes cool-off
+
 // Robust content generation with retries and model fallbacks (e.g. gemini-3.1-flash-lite)
 async function generateContentWithFallbackAndRetry(
   ai: GoogleGenAI,
@@ -44,12 +48,33 @@ async function generateContentWithFallbackAndRetry(
     config?: any;
   }
 ): Promise<any> {
-  // Ordered by preferred + high availability (lite is highly available and fast)
-  const modelsToTry = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+  // Ordered by preferred + high availability (lite and 2.5 are highly available and fast)
+  const modelsToTry = [
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-flash-latest"
+  ];
+
+  const now = Date.now();
+  // Filter active models not in active cool-off
+  const activeModels = modelsToTry.filter(m => {
+    const lastFail = coolOffModels.get(m);
+    return !lastFail || (now - lastFail > COOL_OFF_DURATION);
+  });
+  
+  // Deferred ones kept as low-priority fallback at the end
+  const deferredModels = modelsToTry.filter(m => {
+    const lastFail = coolOffModels.get(m);
+    return lastFail && (now - lastFail <= COOL_OFF_DURATION);
+  });
+
+  const orderedModels = activeModels.length > 0 ? [...activeModels, ...deferredModels] : modelsToTry;
   let lastError: any = null;
 
-  for (const model of modelsToTry) {
-    console.log(`Calling Gemini API using model ${model}...`);
+  for (const model of orderedModels) {
+    const isCoolOff = coolOffModels.has(model) && (now - (coolOffModels.get(model) || 0) <= COOL_OFF_DURATION);
+    console.log(`Calling Gemini API using model ${model}${isCoolOff ? ' (deferred fallback)' : ''}...`);
     try {
       // 9-second timeout per model call to ensure we don't trigger the gateway timeout (30s)
       const apiCall = ai.models.generateContent({
@@ -67,6 +92,18 @@ async function generateContentWithFallbackAndRetry(
     } catch (error: any) {
       lastError = error;
       console.error(`Model ${model} failed with error:`, error);
+
+      // Check if this error is a rate limit / quota exceeded error (429)
+      const isQuotaError = 
+        error?.status === 429 || 
+        error?.statusCode === 429 || 
+        (error?.message && /quota|limit|429|exhausted/i.test(error.message)) ||
+        (typeof error === 'string' && /quota|limit|429|exhausted/i.test(error));
+      
+      if (isQuotaError) {
+        console.warn(`Model ${model} returned a quota limit error. Cool-off applied.`);
+        coolOffModels.set(model, Date.now());
+      }
       // Immediately proceed to the next model in the list
     }
   }

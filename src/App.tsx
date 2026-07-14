@@ -1528,33 +1528,55 @@ export default function App() {
       : '';
 
     // 1. Prompt Kisi-kisi (Matriks Asesmen)
-    const promptKisiText = `Buatkan rancangan matriks asesmen kisi-kisi soal TKA (Tes Kemampuan Akademik) tingkat SMA kelas XII.
+    const promptKisiText = `Anda adalah ahli kurikulum pendidikan menengah SMA di Indonesia dan spesialis penyusunan Tes Kemampuan Akademik (TKA) berstandar tinggi (HOTS).
+Tugas Anda adalah merancang sebuah MATRIKS ASESMEN / KISI-KISI SOAL yang komprehensif, terstruktur, dan valid untuk mata pelajaran di bawah ini.
 
-INFORMASI MATA PELAJARAN & STRUKTUR:
+INFORMASI MATA PELAJARAN & PARAMETER UTAMA:
 - MATA PELAJARAN: ${config.mataPelajaran}
-- DEFINISI/TUJUAN: ${config.definisi}
-- MUATAN/FASE: ${config.muatan}
-- KOMPETENSI UMUM: ${config.kompetensi}
-- ELEMEN UTAMA: ${config.elemenMateri}
-- SUB-ELEMEN/SUBMATERI: ${config.subElemenMateri}
-- BATASAN MATERI: ${config.batasanCatatan || 'Tidak ada'}
-- TINGKAT KOGNITIF: ${getLevelKognitifLabel(config.levelKognitif)}
-- BENTUK SOAL UTAMA: ${getBentukSoalLabel(config.bentukSoal)}${contextList}${stimulusList}${qualityList}
+- DEFINISI/TUJUAN PEMBELAJARAN: ${config.definisi || 'Tidak ditentukan'}
+- MUATAN/FASE KURIKULUM: ${config.muatan || 'Fase F (Kelas XI/XII)'}
+- ELEMEN MATERI UTAMA: ${config.elemenMateri || 'Tidak ditentukan'}
+- SUB-ELEMEN/SUBMATERI: ${config.subElemenMateri || 'Tidak ditentukan'}
+- KOMPETENSI OPERASIONAL: ${config.kompetensi || 'Mengidentifikasi, menganalisis, dan memecahkan masalah'}
+- BATASAN MATERI & CATATAN: ${config.batasanCatatan || 'Tidak ada batasan khusus'}
+- TINGKAT KOGNITIF DEFAULT: ${getLevelKognitifLabel(config.levelKognitif)} (${config.levelKognitif})
+- BENTUK SOAL DEFAULT: ${getBentukSoalLabel(config.bentukSoal)} (${config.bentukSoal})${contextList}${stimulusList}${qualityList}
 
-Format Output berupa JSON Array yang berisi baris kisi-kisi dengan struktur kunci:
+INSTRUKSI PENYUSUNAN MATRIKS:
+1. Buatlah minimal 3 sampai 5 baris variasi kisi-kisi soal yang seimbang, logis, dan mencakup kedalaman materi yang diminta.
+2. Setiap baris kisi-kisi harus memvariasikan aspek:
+   - bentukSoal: wajib memilih salah satu dari:
+     * 'pilihan_ganda_sederhana' (Pilihan Ganda Tunggal / Satu Pilihan Benar)
+     * 'mcma' (Pilihan Ganda Kompleks / Lebih dari Satu Jawaban Benar)
+     * 'kategori' (Pilihan Ganda Kompleks / Klasifikasi Benar-Salah atau Ya-Tidak)
+   - levelKognitif: wajib memilih salah satu dari:
+     * 'level_1' (Pemahaman / Knowing: Mengenali, mengingat, mendefinisikan)
+     * 'level_2' (Penerapan / Applying: Mengaplikasikan konsep pada kasus nyata)
+     * 'level_3' (Penalaran / Reasoning: Menganalisis, mensintesis, berpikir kritis/HOTS)
+3. Deskripsikan Kompetensi spesifik yang akan diukur serta batasan materi khusus untuk tiap baris secara ilmiah, jelas, dan berorientasi HOTS.
+4. Tentukan jumlah soal per baris secara proporsional (rekomendasi total 5-10 soal per baris).
+
+Sajikan output Anda ke dalam DUA format berikut:
+
+1. TABEL RINGKASAN (Untuk Tampilan Visual):
+Sajikan dalam bentuk tabel Markdown yang rapi dengan kolom: No, Elemen, Sub-Elemen, Kompetensi diukur, Level Kognitif, Bentuk Soal, Batasan/Catatan, Jumlah Soal.
+
+2. BLOK KODE JSON ARRAY (Untuk Kebutuhan Impor/Integrasi):
+Tuliskan blok kode JSON valid (di dalam format \`\`\`json) yang berisi array of objects dengan struktur persis seperti contoh berikut (pastikan kunci/key tidak diubah dan nilai bentukSoal & levelKognitif mengikuti enum di atas):
+\`\`\`json
 [
   {
     "no": 1,
     "bentukSoal": "${config.bentukSoal}",
     "levelKognitif": "${config.levelKognitif}",
-    "elemenMateri": "${config.elemenMateri}",
-    "subElemenMateri": "${config.subElemenMateri}",
-    "kompetensi": "[Kompetensi operasional yang diukur]",
+    "elemenMateri": "${config.elemenMateri || '[Elemen]'} ",
+    "subElemenMateri": "${config.subElemenMateri || '[Sub Elemen]'} ",
+    "kompetensi": "[Kompetensi operasional spesifik yang diukur]",
     "batasanCatatan": "${config.batasanCatatan || '[Batasan khusus]'} ",
-    "jumlahSoal": ${config.jumlahSoal}
+    "jumlahSoal": ${config.jumlahSoal || 5}
   }
 ]
-Buatkan minimal 3 baris variasi seimbang!`;
+\`\`\``;
 
     // 2. Prompt Pembuat Soal
     const promptSoalText = `Buatkan butir-butir soal TKA SMA bermutu tinggi berbasis kurikulum pendidikan Indonesia.
