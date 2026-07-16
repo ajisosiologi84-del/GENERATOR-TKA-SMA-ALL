@@ -16,6 +16,11 @@ export interface KisiKisiItem {
   kompetensi: string;
   batasanCatatan: string;
   jumlahSoal: number;
+  konteksNusantara?: string;
+  stimulusTambahan?: string;
+  konteksLokal?: string[];
+  stimulusKonten?: string[];
+  kualitasChecklist?: string[];
 }
 
 export interface Question {

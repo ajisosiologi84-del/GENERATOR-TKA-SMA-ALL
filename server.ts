@@ -48,11 +48,11 @@ async function generateContentWithFallbackAndRetry(
     config?: any;
   }
 ): Promise<any> {
-  // Ordered by preferred + high availability (lite and 2.5 are highly available and fast)
+  // Ordered by preferred + high availability (2.5-flash is extremely fast, followed by 3.5-flash and lite)
   const modelsToTry = [
+    "gemini-2.5-flash",
     "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
-    "gemini-2.5-flash",
     "gemini-flash-latest"
   ];
 
@@ -76,16 +76,20 @@ async function generateContentWithFallbackAndRetry(
     const isCoolOff = coolOffModels.has(model) && (now - (coolOffModels.get(model) || 0) <= COOL_OFF_DURATION);
     console.log(`Calling Gemini API using model ${model}${isCoolOff ? ' (deferred fallback)' : ''}...`);
     try {
-      // 9-second timeout per model call to ensure we don't trigger the gateway timeout (30s)
+      // 15-second timeout per model call to allow fast failover before gateway/client times out
+      let timeoutId: any;
       const apiCall = ai.models.generateContent({
         model,
         contents: params.contents,
         config: params.config,
+      }).then(res => {
+        if (timeoutId) clearTimeout(timeoutId);
+        return res;
       });
 
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`Timeout waiting for model ${model}`)), 9000)
-      );
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(`Timeout waiting for model ${model}`)), 15000);
+      });
 
       const response = await Promise.race([apiCall, timeoutPromise]);
       return response;
@@ -137,7 +141,7 @@ app.post("/api/generate-kisi", async (req, res) => {
 
     const systemInstruction = `Anda adalah ahli kurikulum pendidikan menengah SMA di Indonesia (khususnya untuk penyusunan Tes Kemampuan Akademik / TKA). 
 Tugas Anda adalah membuat rancangan KISI-KISI SOAL dalam bentuk MATRIKS ASESMEN sesuai dengan Kurikulum Merdeka atau K-13 tingkat SMA kelas X, XI, atau XII.
-Rancanglah kisi-kisi soal yang berbobot, valid, dan seimbang berdasarkan input dari pengguna.`;
+Rancanglah kisi-kisi soal yang berbobot, mengandung stimulus yang kuat, valid, dan seimbang berdasarkan input dari pengguna.`;
 
     const prompt = `Buatkan ${count} baris matriks asesmen kisi-kisi soal untuk mata pelajaran berikut:
 Mata Pelajaran: ${mataPelajaran}
@@ -151,7 +155,8 @@ Aturan Penyusunan Matriks:
 1. Setiap baris harus bervariasi jenis bentuk soalnya: 'pilihan_ganda_sederhana' (PG Sederhana), 'mcma' (PG Kompleks Multiple Choice Multiple Answers), atau 'kategori' (PG Kompleks kategori Benar/Salah atau Sesuai/Tidak Sesuai).
 2. Tingkat kognitif harus bervariasi antara: 'level_1' (Pemahaman / Knowing: Mengenali, mengingat, dan memahami konsep dasar), 'level_2' (Penerapan / Applying: Menerapkan konsep pada fenomena nyata), atau 'level_3' (Penalaran / Reasoning: Berpikir kritis dan menalar secara logis).
 3. Buat rincian elemen, sub-elemen, kompetensi yang diukur, serta batasan materi secara logis dan mendalam.
-4. Distribusikan jumlah soal per kisi-kisi (misalnya antara 3-10 soal per baris).`;
+4. Distribusikan jumlah soal per kisi-kisi (misalnya antara 3-10 soal per baris).
+5. Hasilkan juga 'konteksNusantara' (rencana integrasi konteks lokal Nusantara/Indonesia yang spesifik dan relevan dengan materi ini, misal adat daerah, keragaman etnis, geografi kepulauan, sejarah lokal, dsb) serta 'stimulusTambahan' (rencana bentuk stimulus seperti teks bacaan, studi kasus riil, berita, data tabel, atau peristiwa konkret khas Indonesia) untuk meningkatkan kualitas stimulus soal.`;
 
     const response = await generateContentWithFallbackAndRetry(ai, {
       contents: prompt,
@@ -175,7 +180,9 @@ Aturan Penyusunan Matriks:
               subElemenMateri: { type: Type.STRING, description: "Nama sub-elemen atau sub-materi spesifik" },
               kompetensi: { type: Type.STRING, description: "Deskripsi kompetensi spesifik yang akan diukur" },
               batasanCatatan: { type: Type.STRING, description: "Batasan materi, batasan variabel, atau catatan khusus" },
-              jumlahSoal: { type: Type.INTEGER, description: "Jumlah soal yang dialokasikan untuk kisi-kisi ini" }
+              jumlahSoal: { type: Type.INTEGER, description: "Jumlah soal yang dialokasikan untuk kisi-kisi ini" },
+              konteksNusantara: { type: Type.STRING, description: "Konteks lokal Nusantara spesifik (misal kebudayaan daerah, kearifan lokal, suku, adat, isu sosial/geografis Indonesia, dsb) yang relevan" },
+              stimulusTambahan: { type: Type.STRING, description: "Stimulus tambahan berupa skenario studi kasus, kutipan berita, data fiktif terstruktur, atau sketsa peristiwa nyata di Indonesia untuk memperkaya soal" }
             },
             required: [
               "bentukSoal",
@@ -184,7 +191,9 @@ Aturan Penyusunan Matriks:
               "subElemenMateri",
               "kompetensi",
               "batasanCatatan",
-              "jumlahSoal"
+              "jumlahSoal",
+              "konteksNusantara",
+              "stimulusTambahan"
             ]
           }
         }
@@ -226,17 +235,21 @@ app.post("/api/generate-soal", async (req, res) => {
 Anda sangat terampil menyusun soal tingkat tinggi (HOTS - Higher Order Thinking Skills), bervariasi, mendalam, dan bebas dari bias.
 Patuhi instruksi bentuk soal dan parameter kognitif yang ditentukan pengguna secara presisi.`;
 
-    // Build context strings
-    const konteksStr = konteksLokal.length > 0 
-      ? `Integrasikan KONTEKS LOKAL INDONESIA berikut ke dalam stimulus atau soal: ${konteksLokal.join(", ")}.`
+    // Build context strings (prefer Kisi-specific parameters over global fallbacks)
+    const activeKonteksLokal = (kisi.konteksLokal && kisi.konteksLokal.length > 0) ? kisi.konteksLokal : konteksLokal;
+    const activeStimulusKonten = (kisi.stimulusKonten && kisi.stimulusKonten.length > 0) ? kisi.stimulusKonten : stimulusKonten;
+    const activeKualitasChecklist = (kisi.kualitasChecklist && kisi.kualitasChecklist.length > 0) ? kisi.kualitasChecklist : kualitasChecklist;
+
+    const konteksStr = activeKonteksLokal.length > 0 
+      ? `Integrasikan KONTEKS LOKAL INDONESIA berikut ke dalam stimulus atau soal: ${activeKonteksLokal.join(", ")}.`
       : "";
 
-    const stimulusStr = stimulusKonten.length > 0
-      ? `Gunakan tipe STIMULUS DAN PENGEMBANGAN KONTEN berikut: ${stimulusKonten.join(", ")} (misal teks bacaan, data/tabel, berita, kasus nyata).`
+    const stimulusStr = activeStimulusKonten.length > 0
+      ? `Gunakan tipe STIMULUS DAN PENGEMBANGAN KONTEN berikut: ${activeStimulusKonten.join(", ")} (misal teks bacaan, data/tabel, berita, kasus nyata).`
       : "Gunakan stimulus yang relevan jika sesuai dengan kompetensi.";
 
-    const checklistStr = kualitasChecklist.length > 0
-      ? `Pastikan memenuhi KUALITAS SOAL berikut: ${kualitasChecklist.join(", ")}.`
+    const checklistStr = activeKualitasChecklist.length > 0
+      ? `Pastikan memenuhi KUALITAS SOAL berikut: ${activeKualitasChecklist.join(", ")}.`
       : "";
 
     const bentukSoalDesc = 
@@ -261,11 +274,13 @@ INFORMASI MATRIKS ASESMEN KISI-KISI:
 - Sub-Elemen/Submateri: ${kisi.subElemenMateri}
 - Kompetensi yang Diuji: ${kisi.kompetensi}
 - Batasan/Catatan Khusus: ${kisi.batasanCatatan || "Tidak ada"}
+- Konteks Nusantara: ${kisi.konteksNusantara || "Tidak ada khusus"}
+- Stimulus Tambahan: ${kisi.stimulusTambahan || "Tidak ada khusus"}
 - Jenis Soal: ${jenisSoal} (Soal Tunggal atau Soal Grup/Terhubung)
 
 PANDUAN EKSTRA:
-1. ${konteksStr}
-2. ${stimulusStr}
+1. ${konteksStr} ${kisi.konteksNusantara ? `Integrasikan juga secara mendalam target Konteks Nusantara berikut ke dalam stimulus atau pokok soal agar bernuansa ke-Indonesia-an yang otentik: "${kisi.konteksNusantara}".` : ""}
+2. ${stimulusStr} ${kisi.stimulusTambahan ? `Gunakan secara aktif target Stimulus Tambahan berikut untuk merancang stimulus/skenario pendukung yang kaya dan berbobot: "${kisi.stimulusTambahan}".` : ""}
 3. ${checklistStr}
 4. Kunci jawaban harus sangat akurat dan pembahasan harus lengkap, ilmiah, edukatif, dan terstruktur dengan rapi agar mudah dipahami siswa SMA. Tambahkan juga field 'kataKunci' yang berisi kata kunci atau konsep penting/topik utama yang digunakan/diuji dalam soal ini (misal: 'Sistem Persamaan Linear', 'Gaya Gravitasi', 'Asimilasi Sosial').
 5. JIKA soal membutuhkan visual pendukung (seperti grafik fungsi, diagram kartesius, bangun geometri, siklus biologi, diagram sirkuit, kurva ekonomi, dsb.), Anda disarankan untuk membuat kode SVG inline yang valid (dimulai dengan '<svg' dan ditutup '</svg>' lengkap dengan viewBox, stroke, fill, teks label agar indah dan responsive) ATAU mencantumkan URL gambar Unsplash yang relevan pada field 'gambarUrl'. Jika tidak membutuhkan visual, isi 'gambarUrl' dengan string kosong "".
@@ -386,11 +401,13 @@ Buat prompt dalam bahasa Indonesia yang berwibawa, rapi, terstruktur menggunakan
 - Level Kognitif: ${kisi.levelKognitif}
 - Bentuk Soal: ${kisi.bentukSoal}
 - Jumlah Soal yang Diminta: ${kisi.jumlahSoal} butir soal
+${kisi.konteksNusantara ? `- Rencana Konteks Nusantara: ${kisi.konteksNusantara}` : ""}
+${kisi.stimulusTambahan ? `- Rencana Stimulus Tambahan: ${kisi.stimulusTambahan}` : ""}
 
 Draf Megaprompt yang Anda buat harus memuat:
 1. Peran AI yang diinstruksikan (misal: "Anda adalah dosen/guru senior pembuat soal TKA SMA...").
-2. Spesifikasi lengkap materi dan tingkat kognitif (C1-C6/HOTS).
-3. Aturan pembuatan stimulus (kontekstual, studi kasus, riil, atau data ilmiah).
+2. Spesifikasi lengkap materi, tingkat kognitif (C1-C6/HOTS), serta integrasi Konteks Nusantara dan Stimulus Tambahan yang spesifik agar bernuansa ke-Indonesia-an yang otentik dan mendalam.
+3. Aturan pembuatan stimulus (kontekstual, studi kasus, riil, atau data ilmiah khas Nusantara).
 4. Aturan pengecoh pilihan ganda yang homogen dan tidak terlalu mudah tereliminasi.
 5. Format keluaran (soal, opsi A-E, kunci jawaban, dan pembahasan mendalam).
 6. Teknik melahirkan pertanyaan tingkat tinggi (HOTS) yang memicu daya analisis siswa.
@@ -410,6 +427,56 @@ Tulis draf prompt tersebut langsung dalam format Markdown yang elegan, berwibawa
   } catch (error: any) {
     console.error("Error optimizing prompt:", error);
     res.status(500).json({ error: error.message || "Gagal mengoptimasi prompt" });
+  }
+});
+
+// Endpoint 5: Generate Systematic Learning Material from Kisi-Kisi Row
+app.post("/api/generate-materi", async (req, res) => {
+  try {
+    const { kisi, mataPelajaran, guidanceText } = req.body;
+    if (!kisi) {
+      return res.status(400).json({ error: "Data kisi-kisi harus disediakan." });
+    }
+
+    const ai = getGeminiClient();
+    const systemInstruction = `Anda adalah ahli kurikulum nasional Kemendikbudristek dan penyusun modul bahan ajar profesional tingkat SMA.
+Tugas Anda adalah menyusun MODUL AJAR PEMBELAJARAN (LEARNING MODULE) YANG SANGAT DETAIL, MENDALAM, KOMPREHENSIF, DAN SISTEMATIS. Modul ini harus setara dengan satu bab penuh buku teks pelajaran berkualitas tinggi.
+Hindari ringkasan pendek atau penjelasan permukaan. Tuliskan penjelasan teoretis secara panjang lebar, mendalam, akademis, terstruktur, serta kaya akan literasi sosiologis/ilmiah.
+
+Gunakan struktur modul yang baku sebagai berikut:
+1. PENDAHULUAN & DEFINISI UTAMA secara komprehensif (bahas etimologi, definisi menurut minimal 2 tokoh/ahli sosiologi/ilmu terkait, serta signifikansi materi dalam kehidupan sosial). Uraikan secara rinci.
+2. KONSEP KUNCI, DIMENSI, DAN TEORI PENDEKATAN secara mendetail. Berikan sub-bab penjelasan untuk setiap dimensi, jelaskan mekanisme sosialnya, klasifikasinya, serta tabel/pembagian konseptual jika relevan.
+3. STUDI KASUS KONTEKSTUAL INDONESIA secara mendalam. Tuliskan narasi studi kasus riil atau fenomena sosial aktual di Indonesia yang sedang hangat, kemudian berikan pembahasan dan analisis kritis sosiologis yang komprehensif terhadap kasus tersebut.
+4. LEMBAR AKTIVITAS REFLEKTIF & ANALISIS HOTS (Higher Order Thinking Skills). Tuliskan instruksi aktivitas siswa, pertanyaan reflektif tingkat tinggi (analisis, evaluasi, dan kreasi) untuk mengukur pemahaman konsep siswa secara mandiri.
+
+Seluruh materi harus ditulis dalam Bahasa Indonesia yang formal, akademis, mengalir secara teoretis, dan diformat menggunakan Markdown yang sangat rapi dan tertata.`;
+
+    const userPrompt = `Buatlah Modul Ajar Pembelajaran yang sangat lengkap, rinci, dan mendalam untuk unit berikut:
+Mata Pelajaran: ${mataPelajaran || "Sosiologi"}
+Topik / Elemen Materi: ${kisi.elemenMateri}
+Sub-elemen / Sub-materi: ${kisi.subElemenMateri}
+Target Kompetensi Siswa: ${kisi.kompetensi}
+Level Kognitif: ${kisi.levelKognitif === 'level_1' ? 'Pemahaman & Pengetahuan (Knowing - C1/C2)' : kisi.levelKognitif === 'level_2' ? 'Penerapan/Aplikasi (Applying - C3)' : 'Penalaran/Analisis Tinggi (Reasoning/HOTS - C4/C5/C6)'}
+Batasan & Catatan Kurikulum: ${kisi.batasanCatatan || "Tidak ada batasan khusus"}
+
+${guidanceText ? `INTEGRASIKAN SECARA SEAMLESS PANDUAN RESMI KURIKULUM BERIKUT:
+"${guidanceText}"` : ""}
+
+Ingat, buat modul ini SANGAT DETAIL dan kaya teks penjelasan ilmiah agar layak dijadikan pegangan belajar utama siswa maupun panduan mengajar guru. Sajikan langsung dalam format Markdown lengkap tanpa teks pengantar lainnya.`;
+
+    const response = await generateContentWithFallbackAndRetry(ai, {
+      contents: userPrompt,
+      config: {
+        systemInstruction,
+        temperature: 0.7,
+      },
+    });
+
+    const materi = response.text || "";
+    res.json({ materi });
+  } catch (error: any) {
+    console.error("Error generating materi:", error);
+    res.status(500).json({ error: error.message || "Gagal membuat materi pembelajaran" });
   }
 });
 

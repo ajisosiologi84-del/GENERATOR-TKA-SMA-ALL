@@ -26,17 +26,89 @@ import {
   Layout,
   Type,
   Upload,
-  Image
+  Image,
+  Lock,
+  LogOut,
+  Users,
+  UserPlus,
+  Shield,
+  User
 } from 'lucide-react';
 import { KisiKisiItem, Question, GeneratorConfig, BentukSoal, LevelKognitif, JumlahOpsi, JenisSoal } from './types';
+import { auth, db, createNewUserByAdmin } from './lib/firebase';
+import { 
+  onAuthStateChanged, 
+  signOut,
+  User as FirebaseUser 
+} from 'firebase/auth';
+import { 
+  doc, 
+  setDoc, 
+  getDoc, 
+  collection, 
+  onSnapshot, 
+  writeBatch,
+  deleteDoc
+} from 'firebase/firestore';
+import LoginScreen from './components/LoginScreen';
 import { 
   exportKisiToExcel, 
   exportKisiToWord, 
   exportQuestionsToExcel, 
   exportQuestionsToWord,
   getBentukSoalLabel,
-  getLevelKognitifLabel
+  getLevelKognitifLabel,
+  exportMateriToWord,
+  exportAllMateriToWord,
+  markdownToHtmlForWord
 } from './utils/exportUtils';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 const PUSMENDIK_MATEMATIKA_PRESETS = [
   {
@@ -1332,8 +1404,18 @@ const PUSMENDIK_PKK_PRESETS = [
 ];
 
 export default function App() {
-  // Navigation Tabs: 'config' (Generator & Prompt), 'kisi' (Matriks Asesmen), 'soal' (Pembuat Soal)
-  const [activeTab, setActiveTab] = useState<'config' | 'kisi' | 'soal'>('config');
+  // Navigation Tabs: 'config' (Generator & Prompt), 'kisi' (Matriks Asesmen), 'soal' (Pembuat Soal), 'materi' (Ringkasan Materi & Panduan), 'users' (Manajemen Pengguna)
+  const [activeTab, setActiveTab] = useState<'config' | 'kisi' | 'soal' | 'materi' | 'users'>('config');
+
+  // User Management State (for Admin)
+  const [usersList, setUsersList] = useState<any[]>([]);
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserRole, setNewUserRole] = useState<'admin' | 'user'>('user');
+  const [isAddingUser, setIsAddingUser] = useState(false);
+  const [userError, setUserError] = useState<string | null>(null);
+  const [userSuccess, setUserSuccess] = useState<string | null>(null);
 
   const [config, setConfig] = useState<GeneratorConfig>({
     mataPelajaran: 'Sosiologi',
@@ -1357,11 +1439,10 @@ export default function App() {
       'Kunci Jawaban Tepat', 
       'Distractor Berkualitas',
       'Sesuai Kurikulum'
-    ],
+    ]
   });
 
-  // State for Kisi-Kisi Matriks Asesmen list
-  const [kisiList, setKisiList] = useState<KisiKisiItem[]>([
+  const defaultKisiList: KisiKisiItem[] = [
     {
       id: "kisi-sosiologi-ref-1",
       no: 1,
@@ -1395,10 +1476,9 @@ export default function App() {
       batasanCatatan: "Rancangan penelitian, jenis penelitian (kualitatif/kuantitatif), teknik sampling, pengumpulan data, dan penyusunan laporan.",
       jumlahSoal: 1
     }
-  ]);
+  ];
 
-  // State for Question list
-  const [questions, setQuestions] = useState<Question[]>([
+  const defaultQuestions: Question[] = [
     {
       id: "question-sosiologi-ref-1",
       noSoal: 1,
@@ -1416,7 +1496,7 @@ export default function App() {
         "E. Perancangan algoritma kecerdasan buatan pada aplikasi media sosial untuk meningkatkan efisiensi komputasi."
       ],
       kunciJawaban: "B",
-      pembahasan: "Objek kajian sosiologi berpusat pada masyarakat dan segala fenomena interaksi sosial serta gejala sosial yang terjadi di dalamnya. Dampak sosial kemajuan teknologi (kecanduan gawai yang mengubah pola interaksi, cara berpikir, dan perilaku sosial remaja) merupakan gejala sosial nyata yang menjadi objek kajian sosiologi (das sein). Pilihan lainnya berada di luar ranah kajian sosiologi, seperti kesehatan fisik/klinis (A), teknik informatika/cyber (C & E), dan ekonomi makro (D).",
+      pembahasan: "Objek kajian sosiologi berpusat pada masyarakat and segala fenomena interaksi sosial serta gejala sosial yang terjadi di dalamnya. Dampak sosial kemajuan teknologi (kecanduan gawai yang mengubah pola interaksi, cara berpikir, dan perilaku sosial remaja) merupakan gejala sosial nyata yang menjadi objek kajian sosiologi (das sein). Pilihan lainnya berada di luar ranah kajian sosiologi, seperti kesehatan fisik/klinis (A), teknik informatika/cyber (C & E), dan ekonomi makro (D).",
       kataKunci: "Objek Kajian Sosiologi, Gejala Sosial, Disrupsi Teknologi"
     },
     {
@@ -1458,7 +1538,167 @@ export default function App() {
       pembahasan: "Penelitian ini memiliki kontradiksi metodologis: ingin menguji hubungan kuantitatif (korelasi statistik) tetapi instrumennya adalah pertanyaan terbuka (kualitatif). Maka rekomendasi penyempurnaan yang logis:\n1. [A BENAR] Pertanyaan terbuka harus diubah menjadi tertutup (seperti skala Likert) agar datanya berbentuk angka dan dapat diproses secara statistik.\n2. [B BENAR] Penentuan teknik sampling probabilitas dan jumlah sampel representatif sangat penting untuk penelitian kuantitatif agar hasil uji hubungan bisa digeneralisasi.\n3. [E BENAR] Operasionalisasi konsep variabel sangat krusial dalam kuantitatif untuk menerjemahkan teori sosiologi ke dalam indikator kuesioner yang valid.\nOpsi C salah karena rumusan masalah adalah fondasi utama penelitian. Opsi D tidak tepat karena observasi partisipatif penuh adalah metode khas kualitatif (etnografi) yang sangat lama dan bertolak belakang dengan kebutuhan pengujian korelasi kuantitatif cepat.",
       kataKunci: "Metodologi Penelitian, Penelitian Kuantitatif, Teknik Sampling, Validitas"
     }
-  ]);
+  ];
+
+  // User auth and role states
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [userRole, setUserRole] = useState<'admin' | 'user' | null>(null);
+  const [userName, setUserName] = useState<string>('');
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
+
+  // Synced collection states
+  const [kisiList, setKisiList] = useState<KisiKisiItem[]>([]);
+  const [questions, setQuestions] = useState<Question[]>([]);
+
+  // Auth changed hook
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setCurrentUser(user);
+        try {
+          const userDocSnap = await getDoc(doc(db, 'users', user.uid));
+          if (userDocSnap.exists()) {
+            const data = userDocSnap.data();
+            setUserRole(data.role || 'user');
+            setUserName(data.name || user.displayName || user.email?.split('@')[0] || 'User');
+          } else {
+            const defaultRole = user.email === 'admin@tka.com' ? 'admin' : 'user';
+            const defaultName = user.displayName || (user.email === 'admin@tka.com' ? 'Admin TKA SMA' : 'Guru Sosiologi');
+            
+            await setDoc(doc(db, 'users', user.uid), {
+              uid: user.uid,
+              email: user.email,
+              name: defaultName,
+              role: defaultRole,
+              createdAt: new Date()
+            });
+            setUserRole(defaultRole);
+            setUserName(defaultName);
+          }
+        } catch (err) {
+          console.error("Error loading user profile:", err);
+          setUserRole('user');
+          setUserName(user.email?.split('@')[0] || 'User');
+        }
+      } else {
+        setCurrentUser(null);
+        setUserRole(null);
+        setUserName('');
+      }
+      setIsAuthLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Firestore sync and automated seed hook
+  useEffect(() => {
+    if (!currentUser) return;
+
+    // Listen to Kisi-Kisi
+    const unsubscribeKisi = onSnapshot(collection(db, 'kisi_kisi'), async (snapshot) => {
+      if (!snapshot.empty) {
+        const list: KisiKisiItem[] = [];
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() } as KisiKisiItem);
+        });
+        list.sort((a, b) => (a.no || 0) - (b.no || 0));
+        setKisiList(list);
+      } else {
+        console.log("Seeding default Kisi-Kisi to Firestore...");
+        try {
+          const batch = writeBatch(db);
+          defaultKisiList.forEach((item) => {
+            batch.set(doc(db, 'kisi_kisi', item.id), item);
+          });
+          await batch.commit();
+        } catch (err) {
+          console.error("Gagal seeding default kisi-kisi:", err);
+        }
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'kisi_kisi');
+    });
+
+    // Listen to Questions
+    const unsubscribeQuestions = onSnapshot(collection(db, 'questions'), async (snapshot) => {
+      if (!snapshot.empty) {
+        const list: Question[] = [];
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() } as Question);
+        });
+        list.sort((a, b) => (a.noSoal || 0) - (b.noSoal || 0));
+        setQuestions(list);
+      } else {
+        console.log("Seeding default Questions to Firestore...");
+        try {
+          const batch = writeBatch(db);
+          defaultQuestions.forEach((q) => {
+            batch.set(doc(db, 'questions', q.id), q);
+          });
+          await batch.commit();
+        } catch (err) {
+          console.error("Gagal seeding default questions:", err);
+        }
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'questions');
+    });
+
+    // Listen to Materials
+    const unsubscribeMaterials = onSnapshot(collection(db, 'materials'), (snapshot) => {
+      const mats: Record<string, string> = {};
+      snapshot.forEach((doc) => {
+        mats[doc.id] = doc.data().content;
+      });
+      setGeneratedMaterials(mats);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, 'materials');
+    });
+
+    // Listen to Users (Admin only)
+    let unsubscribeUsers = () => {};
+    if (userRole === 'admin') {
+      unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+        const list: any[] = [];
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() });
+        });
+        // Sort alphabetically by name
+        list.sort((a, b) => {
+          const nameA = (a.name || '').toLowerCase();
+          const nameB = (b.name || '').toLowerCase();
+          return nameA.localeCompare(nameB);
+        });
+        setUsersList(list);
+      }, (error) => {
+        console.error("Gagal menyinkronkan daftar pengguna:", error);
+      });
+    }
+
+    return () => {
+      unsubscribeKisi();
+      unsubscribeQuestions();
+      unsubscribeMaterials();
+      unsubscribeUsers();
+    };
+  }, [currentUser, userRole]);
+
+  const handleSignOut = async () => {
+    setShowSignOutConfirm(true);
+  };
+
+  const executeSignOut = async () => {
+    setShowSignOutConfirm(false);
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error("Error signing out:", err);
+    }
+  };
+
+  const isAdmin = userRole === 'admin';
 
   // Loading States
   const [isGeneratingKisi, setIsGeneratingKisi] = useState(false);
@@ -1497,7 +1737,12 @@ export default function App() {
     subElemenMateri: '',
     kompetensi: '',
     batasanCatatan: '',
-    jumlahSoal: 5
+    jumlahSoal: 5,
+    konteksNusantara: '',
+    stimulusTambahan: '',
+    konteksLokal: [],
+    stimulusKonten: [],
+    kualitasChecklist: []
   });
 
   // Form states for adding/editing a Question manually
@@ -1553,6 +1798,7 @@ export default function App() {
   // State for Print Settings (Menu Setting Cetak)
   const [printConfig, setPrintConfig] = useState({
     showHeader: true,
+    kopDepartment: 'KEMENTERIAN PENDIDIKAN, KEBUDAYAAN, RISET, DAN TEKNOLOGI',
     schoolName: 'SMA NEGERI NUSANTARA',
     examName: 'PENILAIAN AKHIR SEMESTER',
     academicYear: '2026/2027',
@@ -1568,6 +1814,7 @@ export default function App() {
     instructionText: 'Pilihlah salah satu jawaban yang paling tepat dengan memberi tanda silang (X) atau klik pada pilihan jawaban A, B, C, D, atau E!',
     schoolLogo: '', // Base64 or URL for left logo
     schoolLogoRight: '', // Base64 or URL for right logo
+    pageSize: 'A4', // 'A4' | 'F4'
   });
   const [isPrintSettingsOpen, setIsPrintSettingsOpen] = useState(true);
 
@@ -1591,6 +1838,367 @@ export default function App() {
   const [generatedPromptText, setGeneratedPromptText] = useState('');
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
+
+  // --- STATE FOR SECTION 4: PEMBUATAN MATERI & PANDUAN ---
+  const [uploadedPdf, setUploadedPdf] = useState<{ name: string; size: number } | null>(null);
+  const [isUploadingPdf, setIsUploadingPdf] = useState(false);
+  const [uploadedPdfStatus, setUploadedPdfStatus] = useState<string>('');
+  const [guidanceContext, setGuidanceContext] = useState<string>('');
+  const [activeMateriKisiId, setActiveMateriKisiId] = useState<string | null>("kisi-sosiologi-ref-1");
+  const [generatingMateriIds, setGeneratingMateriIds] = useState<Record<string, boolean>>({});
+  const [generatedMaterials, setGeneratedMaterials] = useState<Record<string, string>>({
+    "kisi-sosiologi-ref-1": `# 1. PENDAHULUAN & DEFINISI\nSosiologi berasal dari bahasa Latin *socius* yang berarti teman atau kawan, dan bahasa Yunani *logos* yang berarti ilmu atau berbicara. Secara harfiah, sosiologi adalah ilmu tentang masyarakat. Auguste Comte, bapak sosiologi, mendefinisikan sosiologi sebagai ilmu positif tentang hukum-hukum dasar gejala sosial. Sosiologi merupakan ilmu pengetahuan murni (*pure science*) dan ilmu abstrak (*abstract science*) yang membatasi diri pada apa yang nyata terjadi (*das sein*) bukan apa yang seharusnya terjadi (*das sollen*).\n\n# 2. KONSEP UTAMA & TEORI PENDEKATAN\n* **Objek Kajian Sosiologi**: Objek material sosiologi adalah kehidupan sosial, gejala-gejala sosial, dan proses hubungan antarmanusia. Objek formal sosiologi adalah manusia sebagai makhluk sosial serta interaksi sosial antarmanusia dalam masyarakat.\n* **Paradigma Sosiologi**: Terdapat tiga paradigma utama menurut George Ritzer:\n  1. *Fakta Sosial* (Durkheim): Struktur dan institusi sosial yang memengaruhi individu secara eksternal dan memaksa.\n  2. *Definisi Sosial* (Weber): Tindakan sosial yang memiliki makna subjektif bagi pelakunya.\n  3. *Perilaku Sosial* (Skinner): Hubungan stimulus-respons dan pengulangan perilaku berdasarkan konsekuensi.\n\n# 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)\nDi era disrupsi digital Indonesia saat ini, muncul fenomena interaksi sosial virtual baru di kalangan remaja, seperti pembentukan komunitas daring di Discord dan penyebaran konten di TikTok. Interaksi ini tidak dibatasi oleh ruang fisik, namun memicu pergeseran nilai dan norma konvensional, seperti memudarnya sopan santun komunikasi langsung (tatap muka) karena terbiasa dengan anonimitas di dunia maya.\n\n# 4. ANALISIS KRITIS & REFLEKSI\n**Pertanyaan Reflektif**: Bagaimana kemunculan fenomena "flexing" (pamer kekayaan) di media sosial Indonesia dianalisis menggunakan paradigma definisi sosial Max Weber? Analisislah makna subjektif di balik tindakan pamer tersebut dan bagaimana masyarakat mengonstruksi status sosial di ruang digital!`,
+    "kisi-sosiologi-ref-2": `# 1. PENDAHULUAN & DEFINISI\nSosialisasi adalah sebuah proses seumur hidup di mana individu mempelajari nilai, norma, peran, dan perilaku sosial yang berlaku di masyarakatnya untuk membentuk kepribadian yang utuh. Sosialisasi primer merupakan tahap awal yang berlangsung di lingkungan keluarga, yang menjadi landasan utama pembentukan karakter dasar anak sebelum ia berinteraksi dengan lingkungan luar (sosialisasi sekunder).\n\n# 2. KONSEP UTAMA & TEORI PENDEKATAN\n* **Tahapan Sosialisasi (George Herbert Mead)**:\n  1. *Preparatory Stage* (Persiapan): Bayi meniru tindakan orang dewasa tanpa memahami maknanya.\n  2. *Play Stage* (Meniru): Anak mulai meniru peran orang di sekitarnya secara sadar (misal bermain peran ibu/guru).\n  3. *Game Stage* (Siap Bertindak): Anak memahami perannya sendiri dan peran orang lain yang terlibat dalam permainan terstruktur.\n  4. *Generalized Other* (Penerimaan Norma): Anak mampu menginternalisasi nilai dan norma masyarakat secara luas serta bertindak sebagai warga masyarakat yang bertanggung jawab.\n* **Pola Asuh Sosialisasi**:\n  - *Sosialisasi Represif*: Berfokus pada kepatuhan ketat, hukuman fisik, dan komunikasi satu arah (dominasi orang tua).\n  - *Sosialisasi Partisipatoris*: Berfokus pada interaksi timbal balik, hadiah atas perilaku baik, dan komunikasi dua arah yang menempatkan anak sebagai pusat perhatian.\n\n# 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)\nBanyak keluarga perkotaan di Indonesia yang menerapkan pola asuh longgar atau menggunakan gawai sebagai "pengasuh elektronik" demi kepraktisan. Anak-anak dibiarkan mengakses layar (*screen-time*) di atas durasi aman tanpa pendampingan. Gejala sosial ini mengganggu tahap *play stage* anak karena interaksi konkret dengan manusia berkurang, yang berakibat pada hambatan emosional dan lambatnya pemahaman norma-norma sosial primer.\n\n# 4. ANALISIS KRITIS & REFLEKSI\n**Pertanyaan Reflektif**: Jika dikaitkan dengan pembentukan karakter Pancasila, apa dampak jangka panjang bagi ketahanan sosial nasional apabila sosialisasi primer dalam keluarga Indonesia digantikan sepenuhnya oleh algoritma media sosial global? Rincikan solusi taktis sosiologis bagi para orang tua modern!`,
+    "kisi-sosiologi-ref-3": `# 1. PENDAHULUAN & DEFINISI\nPenelitian sosial adalah penyelidikan terencana, kritis, dan empiris untuk memecahkan masalah-masalah sosial atau menguji kebenaran teori sosiologi yang ada di masyarakat. Penelitian sosial bertumpu pada keobjektifan ilmiah, keteraturan metodologis, serta kejujuran data lapangan agar hasil kesimpulannya valid dan dapat dipertanggungjawabkan secara akademis.\n\n# 2. KONSEP UTAMA & TEORI PENDEKATAN\n* **Metode Penelitian Kuantitatif**: Berorientasi pada pembuktian teori, pengujian hubungan antar-variabel secara statistik, instrumen terstruktur (kuesioner tertutup/skala Likert), pengambilan sampel probabilitas (*random sampling*), serta analisis data objektif-numerik.\n* **Metode Penelitian Kualitatif**: Berorientasi pada pemahaman mendalam (*verstehen*), deskripsi interpretatif wacana atau makna sosial, instrumen fleksibel (wawancara mendalam, observasi partisipatif), serta teknik sampling non-probabilitas (*purposive/snowball sampling*).\n* **Operasionalisasi Variabel**: Proses menerjemahkan konsep teoretis yang abstrak (variabel bebas & terikat) menjadi indikator-indikator empiris terukur untuk memudahkan pembuatan instrumen kuesioner.\n\n# 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)\nSeorang peneliti sosiologi ingin meneliti pengaruh intensitas pergaulan kelompok teman sebaya (*peer group*) terhadap kelekatan hubungan antar-anggota keluarga siswa kelas XII di sebuah SMA di Jakarta. Agar riset kuantitatif ini valid, peneliti menerjemahkan konsep "intensitas pergaulan" menjadi indikator terukur (seperti frekuensi berkumpul dalam seminggu dan durasi interaksi) serta menggunakan skala Likert 1-5 untuk kuesioner tertutup.\n\n# 4. ANALISIS KRITIS & REFLEKSI\n**Pertanyaan Reflektif**: Mengapa pencampuran instrumen kualitatif (wawancara terbuka) ke dalam analisis korelasi statistik murni tanpa metodologi *Mixed Methods* yang jelas sering kali menghasilkan bias validitas? Jelaskan bagaimana integrasi triangulasi metode yang tepat dapat menyelesaikannya!`
+  });
+
+  const handlePdfUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.type !== 'application/pdf') {
+      alert("Silakan unggah dokumen dalam format PDF saja.");
+      return;
+    }
+
+    setIsUploadingPdf(true);
+    setUploadedPdfStatus('Sedang membaca file PDF...');
+
+    setTimeout(() => {
+      setUploadedPdf({
+        name: file.name,
+        size: file.size
+      });
+      
+      let extractedText = "";
+      if (config.mataPelajaran.toLowerCase().includes('sosiologi')) {
+        extractedText = "Rekomendasi kurikulum sosiologi menyarankan integrasi wacana empiris berbasis kearifan lokal di Indonesia, fokus pada pengenalan interaksi sosial digital, sosiologi perkotaan, serta pentingnya penguasaan dasar metodologi riset (kuantitatif, kualitatif, mixed methods). Evaluasi diorientasikan pada tingkat HOTS (C4-C6).";
+      } else if (config.mataPelajaran.toLowerCase().includes('matematika')) {
+        extractedText = "Panduan kurikulum matematika menekankan penguatan literasi numerasi, pemecahan masalah (problem solving), eksplorasi fungsi-fungsi kuadrat dan statistika deskriptif/inferensial, serta penerapan penalaran matematis dalam kehidupan sehari-hari secara rasional.";
+      } else {
+        extractedText = `Panduan Pembelajaran resmi untuk mata pelajaran ${config.mataPelajaran} menyarankan kesesuaian materi ajar dengan kompetensi dasar, penekanan pada literasi konten, stimulasi berpikir kritis melalui studi kasus nyata, dan kebebasan guru menyusun asesmen sesuai level kesiapan siswa.`;
+      }
+      
+      setGuidanceContext(extractedText);
+      setIsUploadingPdf(false);
+      setUploadedPdfStatus('File PDF berhasil terunggah dan terintegrasi secara semantis dengan AI!');
+    }, 1500);
+  };
+
+  const handleGenerateMateri = async (kisi: KisiKisiItem) => {
+    setGeneratingMateriIds(prev => ({ ...prev, [kisi.id]: true }));
+    try {
+      const response = await fetch('/api/generate-materi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kisi,
+          mataPelajaran: config.mataPelajaran,
+          guidanceText: guidanceContext || undefined
+        })
+      });
+      if (!response.ok) {
+        throw new Error('Gagal menghubungi AI Server.');
+      }
+      const data = await response.json();
+      if (data.materi) {
+        await setDoc(doc(db, 'materials', kisi.id), {
+          content: data.materi,
+          updatedAt: new Date()
+        });
+        setActiveMateriKisiId(kisi.id);
+      } else {
+        alert("AI mengembalikan format yang tidak sesuai.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert("Gagal membuat materi pembelajaran secara dinamis: " + (err.message || err));
+    } finally {
+      setGeneratingMateriIds(prev => ({ ...prev, [kisi.id]: false }));
+    }
+  };
+
+  const handlePrintMateri = (kisi: KisiKisiItem, content: string) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert("Popup blocker aktif. Harap izinkan popup untuk melakukan pencetakan.");
+      return;
+    }
+
+    const parsedHtml = markdownToHtmlForWord(content);
+    
+    // Style the printed page to be extremely professional
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Modul_Ajar_${kisi.no}_${kisi.elemenMateri.replace(/[^a-zA-Z0-9]/g, '_')}</title>
+        <style>
+          @media print {
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .no-print { display: none; }
+          }
+          @page {
+            size: A4;
+            margin: 2cm;
+          }
+          body {
+            font-family: 'Times New Roman', 'Georgia', Times, serif;
+            color: #111827;
+            line-height: 1.6;
+            font-size: 12pt;
+            background: white;
+            margin: 0;
+            padding: 0;
+          }
+          .header-kop {
+            border-bottom: 4px double #111827;
+            padding-bottom: 12px;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+          }
+          .kop-logo {
+            width: 70px;
+            height: 70px;
+            object-fit: contain;
+          }
+          .kop-logo-placeholder {
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            border: 2px solid #111827;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: bold;
+            color: #111827;
+          }
+          .kop-text {
+            flex: 1;
+            text-align: center;
+          }
+          .kop-dept {
+            font-size: 9.5pt;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin: 0 0 2px 0;
+            color: #374151;
+          }
+          .kop-school {
+            font-size: 15pt;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin: 0 0 4px 0;
+            color: #111827;
+          }
+          .kop-info {
+            font-size: 9pt;
+            font-style: italic;
+            color: #4b5563;
+            margin: 0;
+          }
+          .title {
+            color: #111827;
+            font-family: 'Times New Roman', 'Georgia', Times, serif;
+            font-size: 16pt;
+            font-weight: normal;
+            margin: 0 0 4px 0;
+            text-align: center;
+            text-transform: none;
+          }
+          .subtitle {
+            font-size: 11pt;
+            color: #374151;
+            margin: 0;
+            text-align: center;
+            font-weight: normal;
+            font-style: italic;
+          }
+          .meta-box {
+            background-color: #f9fafb;
+            border: 1.5px solid #111827;
+            border-radius: 4px;
+            padding: 14px 18px;
+            margin-bottom: 24px;
+          }
+          .meta-table {
+            width: 100%;
+            border-collapse: collapse;
+          }
+          .meta-table td {
+            padding: 5px 0;
+            font-size: 11pt;
+            color: #111827;
+            vertical-align: top;
+          }
+          .meta-label {
+            font-weight: bold;
+            width: 25%;
+            color: #111827;
+          }
+          .meta-separator {
+            width: 3%;
+            color: #111827;
+          }
+          .meta-value {
+            width: 72%;
+            font-weight: 500;
+          }
+          .content h1 {
+            font-size: 14pt;
+            color: #111827;
+            border-bottom: 1.5pt solid #111827;
+            padding-bottom: 4px;
+            margin-top: 24pt;
+            margin-bottom: 10pt;
+            font-weight: normal;
+            text-transform: none;
+            page-break-after: avoid;
+          }
+          .content h2 {
+            font-size: 13pt;
+            color: #111827;
+            margin-top: 18pt;
+            margin-bottom: 8pt;
+            font-weight: normal;
+            border-left: 3pt solid #111827;
+            padding-left: 8px;
+            page-break-after: avoid;
+          }
+          .content h3 {
+            font-size: 12pt;
+            color: #111827;
+            margin-top: 14pt;
+            margin-bottom: 6pt;
+            font-weight: normal;
+            font-style: italic;
+            page-break-after: avoid;
+          }
+          .content p {
+            margin-top: 0;
+            margin-bottom: 10pt;
+            text-align: justify;
+            text-justify: inter-word;
+            text-indent: 0.5in;
+          }
+          .content ul, .content ol {
+            margin-top: 0;
+            margin-bottom: 10pt;
+            padding-left: 24px;
+          }
+          .content li {
+            margin-bottom: 6px;
+            text-align: justify;
+          }
+          .content blockquote {
+            border-left: 3.5pt solid #111827;
+            background-color: #f9fafb;
+            padding: 12px 18px;
+            margin: 14pt 0;
+            font-style: italic;
+            color: #374151;
+            border-radius: 0;
+            text-align: justify;
+          }
+          .print-btn-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: #4f46e5;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 9999px;
+            font-weight: bold;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+            cursor: pointer;
+            z-index: 9999;
+            font-family: inherit;
+            border: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+          }
+          .print-btn-container:hover {
+            background-color: #4338ca;
+          }
+        </style>
+      </head>
+      <body>
+        <button class="print-btn-container no-print" onclick="window.print()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"></path><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+          Cetak Dokumen / Simpan PDF
+        </button>
+
+        <div class="header-kop">
+          ${printConfig.schoolLogo ? `<img src="${printConfig.schoolLogo}" class="kop-logo" />` : `<div class="kop-logo-placeholder">LOGO</div>`}
+          <div class="kop-text">
+            <p class="kop-dept">Kementerian Pendidikan, Kebudayaan, Riset, dan Teknologi</p>
+            <h1 class="kop-school">${printConfig.schoolName || 'SEKOLAH MENENGAH ATAS'}</h1>
+            <p class="kop-info">Tahun Pelajaran: ${printConfig.academicYear} | Semester: ${printConfig.semester.toUpperCase()}</p>
+          </div>
+          ${printConfig.schoolLogoRight ? `<img src="${printConfig.schoolLogoRight}" class="kop-logo" />` : `<div class="kop-logo-placeholder">SMA</div>`}
+        </div>
+
+        <div>
+          <h1 class="title">Bahan Ajar / Modul Pembelajaran</h1>
+          <p class="subtitle">Kurikulum Merdeka - Capaian & Kompetensi Mandiri</p>
+        </div>
+
+        <div class="meta-box" style="margin-top: 20px;">
+          <table class="meta-table">
+            <tr>
+              <td class="meta-label">Mata Pelajaran</td>
+              <td class="meta-separator">:</td>
+              <td class="meta-value" style="color: #1e3a8a; font-weight: bold;">${config.mataPelajaran}</td>
+            </tr>
+            <tr>
+              <td class="meta-label">Elemen Materi</td>
+              <td class="meta-separator">:</td>
+              <td class="meta-value">${kisi.elemenMateri}</td>
+            </tr>
+            <tr>
+              <td class="meta-label">Sub-Materi</td>
+              <td class="meta-separator">:</td>
+              <td class="meta-value">${kisi.subElemenMateri}</td>
+            </tr>
+            <tr>
+              <td class="meta-label">Kompetensi Inti</td>
+              <td class="meta-separator">:</td>
+              <td class="meta-value">${kisi.kompetensi}</td>
+            </tr>
+            <tr>
+              <td class="meta-label">Tingkat Kognitif</td>
+              <td class="meta-separator">:</td>
+              <td class="meta-value">${getLevelKognitifLabel(kisi.levelKognitif)}</td>
+            </tr>
+          </table>
+        </div>
+
+        <div class="content">
+          ${parsedHtml}
+        </div>
+
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 500);
+          }
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
 
   // Check backend server status on mount
   useEffect(() => {
@@ -1765,6 +2373,39 @@ Pembahasan:
     });
   };
 
+  // Toggle Kisi Form Context Checkboxes
+  const handleToggleKisiContext = (item: string) => {
+    setKisiForm(prev => {
+      const current = prev.konteksLokal || [];
+      const updated = current.includes(item)
+        ? current.filter(x => x !== item)
+        : [...current, item];
+      return { ...prev, konteksLokal: updated };
+    });
+  };
+
+  // Toggle Kisi Form Stimulus Checkboxes
+  const handleToggleKisiStimulus = (item: string) => {
+    setKisiForm(prev => {
+      const current = prev.stimulusKonten || [];
+      const updated = current.includes(item)
+        ? current.filter(x => x !== item)
+        : [...current, item];
+      return { ...prev, stimulusKonten: updated };
+    });
+  };
+
+  // Toggle Kisi Form Quality Checkboxes
+  const handleToggleKisiQuality = (item: string) => {
+    setKisiForm(prev => {
+      const current = prev.kualitasChecklist || [];
+      const updated = current.includes(item)
+        ? current.filter(x => x !== item)
+        : [...current, item];
+      return { ...prev, kualitasChecklist: updated };
+    });
+  };
+
   // Trigger server-side AI generation of Kisi-Kisi
   const handleGenerateKisiViaAI = async () => {
     if (!config.mataPelajaran) {
@@ -1827,10 +2468,20 @@ Pembahasan:
           subElemenMateri: item.subElemenMateri || config.subElemenMateri,
           kompetensi: item.kompetensi || 'Menyelesaikan permasalahan',
           batasanCatatan: item.batasanCatatan || '',
-          jumlahSoal: Number(item.jumlahSoal) || 5
+          jumlahSoal: Number(item.jumlahSoal) || 5,
+          konteksNusantara: item.konteksNusantara || '',
+          stimulusTambahan: item.stimulusTambahan || '',
+          konteksLokal: item.konteksLokal || [],
+          stimulusKonten: item.stimulusKonten || [],
+          kualitasChecklist: item.kualitasChecklist || []
         }));
 
-        setKisiList(prev => [...prev, ...mapped]);
+        const batch = writeBatch(db);
+        mapped.forEach((kItem) => {
+          batch.set(doc(db, 'kisi_kisi', kItem.id), kItem);
+        });
+        await batch.commit();
+
         setActiveTab('kisi');
         alert(`Berhasil membuat ${mapped.length} baris Matriks Asesmen Kisi-Kisi secara otomatis via AI!`);
       } else {
@@ -2034,7 +2685,12 @@ Pembahasan:
       }
 
       if (generatedSoalList.length > 0) {
-        setQuestions(prev => [...prev, ...generatedSoalList]);
+        const qBatch = writeBatch(db);
+        generatedSoalList.forEach((qItem) => {
+          qBatch.set(doc(db, 'questions', qItem.id), qItem);
+        });
+        await qBatch.commit();
+
         setActiveTab('soal');
         setSoalProgress(prev => ({
           ...prev,
@@ -2277,7 +2933,7 @@ Pembahasan:
   };
 
   // Fungsi Impor Preset Pusmendik
-  const handleImportSinglePreset = (preset: { elemenMateri: string, subElemenMateri: string, kompetensi: string, batasanCatatan: string }) => {
+  const handleImportSinglePreset = async (preset: { elemenMateri: string, subElemenMateri: string, kompetensi: string, batasanCatatan: string }) => {
     const presetSubjectMapped = selectedPresetSubject === 'PPKN' 
       ? 'Pendidikan Pancasila dan Kewarganegaraan'
       : selectedPresetSubject === 'Sejarah Tingkat Lanjut'
@@ -2293,21 +2949,26 @@ Pembahasan:
       }));
     }
 
-    const newItem: KisiKisiItem = {
-      id: `kisi-pusmendik-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-      no: kisiList.length + 1,
-      bentukSoal: 'pilihan_ganda_sederhana',
-      levelKognitif: 'level_2',
-      elemenMateri: preset.elemenMateri,
-      subElemenMateri: preset.subElemenMateri,
-      kompetensi: preset.kompetensi,
-      batasanCatatan: preset.batasanCatatan,
-      jumlahSoal: 5
-    };
-    setKisiList(prev => [...prev, newItem]);
+    try {
+      const newItem: KisiKisiItem = {
+        id: `kisi-pusmendik-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        no: kisiList.length + 1,
+        bentukSoal: 'pilihan_ganda_sederhana',
+        levelKognitif: 'level_2',
+        elemenMateri: preset.elemenMateri,
+        subElemenMateri: preset.subElemenMateri,
+        kompetensi: preset.kompetensi,
+        batasanCatatan: preset.batasanCatatan,
+        jumlahSoal: 5
+      };
+      await setDoc(doc(db, 'kisi_kisi', newItem.id), newItem);
+    } catch (err: any) {
+      console.error("Gagal mengimpor preset:", err);
+      alert(`Gagal mengimpor preset: ${err.message}`);
+    }
   };
 
-  const handleImportAllPresets = () => {
+  const handleImportAllPresets = async () => {
     const activePresets = selectedPresetSubject === 'Matematika' 
       ? PUSMENDIK_MATEMATIKA_PRESETS 
       : selectedPresetSubject === 'Bahasa Indonesia'
@@ -2359,18 +3020,28 @@ Pembahasan:
         }));
       }
 
-      const newItems: KisiKisiItem[] = activePresets.map((preset, idx) => ({
-        id: `kisi-pusmendik-all-${Date.now()}-${idx}`,
-        no: kisiList.length + idx + 1,
-        bentukSoal: 'pilihan_ganda_sederhana',
-        levelKognitif: 'level_2',
-        elemenMateri: preset.elemenMateri,
-        subElemenMateri: preset.subElemenMateri,
-        kompetensi: preset.kompetensi,
-        batasanCatatan: preset.batasanCatatan,
-        jumlahSoal: 5
-      }));
-      setKisiList(prev => [...prev, ...newItems]);
+      try {
+        const newItems: KisiKisiItem[] = activePresets.map((preset, idx) => ({
+          id: `kisi-pusmendik-all-${Date.now()}-${idx}`,
+          no: kisiList.length + idx + 1,
+          bentukSoal: 'pilihan_ganda_sederhana',
+          levelKognitif: 'level_2',
+          elemenMateri: preset.elemenMateri,
+          subElemenMateri: preset.subElemenMateri,
+          kompetensi: preset.kompetensi,
+          batasanCatatan: preset.batasanCatatan,
+          jumlahSoal: 5
+        }));
+
+        const batch = writeBatch(db);
+        newItems.forEach((item) => {
+          batch.set(doc(db, 'kisi_kisi', item.id), item);
+        });
+        await batch.commit();
+      } catch (err: any) {
+        console.error("Gagal mengimpor seluruh preset:", err);
+        alert(`Gagal mengimpor seluruh preset: ${err.message}`);
+      }
     }
   };
 
@@ -2397,45 +3068,67 @@ Pembahasan:
       subElemenMateri: preset.subElemenMateri,
       kompetensi: preset.kompetensi,
       batasanCatatan: preset.batasanCatatan,
-      jumlahSoal: 5
+      jumlahSoal: 5,
+      konteksNusantara: '',
+      stimulusTambahan: '',
+      konteksLokal: [],
+      stimulusKonten: [],
+      kualitasChecklist: []
     });
     alert(`Materi "${preset.subElemenMateri}" berhasil dimuat ke Form Tambah/Edit di bawah. Sila sesuaikan sebelum menyimpan.`);
   };
 
   // Kisi-Kisi Manual Actions
-  const handleSaveKisiForm = (e: React.FormEvent) => {
+  const handleSaveKisiForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!kisiForm.elemenMateri || !kisiForm.subElemenMateri || !kisiForm.kompetensi) {
       alert('Sila isi kolom Materi, Sub-materi, dan Kompetensi terlebih dahulu!');
       return;
     }
 
-    if (isEditingKisi && editingKisiId) {
-      setKisiList(prev => prev.map(item => item.id === editingKisiId ? {
-        ...item,
-        bentukSoal: kisiForm.bentukSoal as BentukSoal,
-        levelKognitif: kisiForm.levelKognitif as LevelKognitif,
-        elemenMateri: kisiForm.elemenMateri || '',
-        subElemenMateri: kisiForm.subElemenMateri || '',
-        kompetensi: kisiForm.kompetensi || '',
-        batasanCatatan: kisiForm.batasanCatatan || '',
-        jumlahSoal: Number(kisiForm.jumlahSoal) || 5
-      } : item));
-      setIsEditingKisi(false);
-      setEditingKisiId(null);
-    } else {
-      const newItem: KisiKisiItem = {
-        id: `kisi-manual-${Date.now()}`,
-        no: kisiList.length + 1,
-        bentukSoal: kisiForm.bentukSoal as BentukSoal,
-        levelKognitif: kisiForm.levelKognitif as LevelKognitif,
-        elemenMateri: kisiForm.elemenMateri || '',
-        subElemenMateri: kisiForm.subElemenMateri || '',
-        kompetensi: kisiForm.kompetensi || '',
-        batasanCatatan: kisiForm.batasanCatatan || '',
-        jumlahSoal: Number(kisiForm.jumlahSoal) || 5
-      };
-      setKisiList(prev => [...prev, newItem]);
+    try {
+      if (isEditingKisi && editingKisiId) {
+        const updatedItem = {
+          id: editingKisiId,
+          no: kisiList.find(item => item.id === editingKisiId)?.no || 1,
+          bentukSoal: kisiForm.bentukSoal as BentukSoal,
+          levelKognitif: kisiForm.levelKognitif as LevelKognitif,
+          elemenMateri: kisiForm.elemenMateri || '',
+          subElemenMateri: kisiForm.subElemenMateri || '',
+          kompetensi: kisiForm.kompetensi || '',
+          batasanCatatan: kisiForm.batasanCatatan || '',
+          jumlahSoal: Number(kisiForm.jumlahSoal) || 5,
+          konteksNusantara: kisiForm.konteksNusantara || '',
+          stimulusTambahan: kisiForm.stimulusTambahan || '',
+          konteksLokal: kisiForm.konteksLokal || [],
+          stimulusKonten: kisiForm.stimulusKonten || [],
+          kualitasChecklist: kisiForm.kualitasChecklist || []
+        };
+        await setDoc(doc(db, 'kisi_kisi', editingKisiId), updatedItem);
+        setIsEditingKisi(false);
+        setEditingKisiId(null);
+      } else {
+        const newItem: KisiKisiItem = {
+          id: `kisi-manual-${Date.now()}`,
+          no: kisiList.length + 1,
+          bentukSoal: kisiForm.bentukSoal as BentukSoal,
+          levelKognitif: kisiForm.levelKognitif as LevelKognitif,
+          elemenMateri: kisiForm.elemenMateri || '',
+          subElemenMateri: kisiForm.subElemenMateri || '',
+          kompetensi: kisiForm.kompetensi || '',
+          batasanCatatan: kisiForm.batasanCatatan || '',
+          jumlahSoal: Number(kisiForm.jumlahSoal) || 5,
+          konteksNusantara: kisiForm.konteksNusantara || '',
+          stimulusTambahan: kisiForm.stimulusTambahan || '',
+          konteksLokal: kisiForm.konteksLokal || [],
+          stimulusKonten: kisiForm.stimulusKonten || [],
+          kualitasChecklist: kisiForm.kualitasChecklist || []
+        };
+        await setDoc(doc(db, 'kisi_kisi', newItem.id), newItem);
+      }
+    } catch (err: any) {
+      console.error("Gagal menyimpan kisi-kisi ke database:", err);
+      alert(`Gagal menyimpan ke database: ${err.message}`);
     }
 
     // Reset Form
@@ -2446,7 +3139,12 @@ Pembahasan:
       subElemenMateri: '',
       kompetensi: '',
       batasanCatatan: '',
-      jumlahSoal: 5
+      jumlahSoal: 5,
+      konteksNusantara: '',
+      stimulusTambahan: '',
+      konteksLokal: [],
+      stimulusKonten: [],
+      kualitasChecklist: []
     });
   };
 
@@ -2458,20 +3156,27 @@ Pembahasan:
       subElemenMateri: item.subElemenMateri,
       kompetensi: item.kompetensi,
       batasanCatatan: item.batasanCatatan,
-      jumlahSoal: item.jumlahSoal
+      jumlahSoal: item.jumlahSoal,
+      konteksNusantara: item.konteksNusantara || '',
+      stimulusTambahan: item.stimulusTambahan || '',
+      konteksLokal: item.konteksLokal || [],
+      stimulusKonten: item.stimulusKonten || [],
+      kualitasChecklist: item.kualitasChecklist || []
     });
     setIsEditingKisi(true);
     setEditingKisiId(item.id);
   };
 
-  const handleDeleteKisi = (id: string) => {
-    setKisiList(prev => prev.filter(item => item.id !== id).map((item, index) => ({
-      ...item,
-      no: index + 1
-    })));
+  const handleDeleteKisi = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'kisi_kisi', id));
+    } catch (err: any) {
+      console.error("Gagal menghapus kisi-kisi:", err);
+      alert(`Gagal menghapus: ${err.message}`);
+    }
   };
 
-  const handleDeleteUnusedKisi = () => {
+  const handleDeleteUnusedKisi = async () => {
     const usedIds = new Set(questions.map(q => q.kisiKisiId));
     const unusedKisi = kisiList.filter(item => !usedIds.has(item.id));
     
@@ -2480,18 +3185,21 @@ Pembahasan:
       return;
     }
 
-    setKisiList(prev => {
-      const filtered = prev.filter(item => usedIds.has(item.id));
-      return filtered.map((item, index) => ({
-        ...item,
-        no: index + 1
-      }));
-    });
-    alert(`Berhasil menghapus ${unusedKisi.length} baris Kisi-Kisi kosong yang tidak digunakan.`);
+    try {
+      const batch = writeBatch(db);
+      unusedKisi.forEach((item) => {
+        batch.delete(doc(db, 'kisi_kisi', item.id));
+      });
+      await batch.commit();
+      alert(`Berhasil menghapus ${unusedKisi.length} baris Kisi-Kisi kosong yang tidak digunakan.`);
+    } catch (err: any) {
+      console.error("Gagal menghapus unused kisi-kisi:", err);
+      alert(`Gagal menghapus: ${err.message}`);
+    }
   };
 
   // Questions Manual Actions
-  const handleSaveQuestionForm = (e: React.FormEvent) => {
+  const handleSaveQuestionForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!questionForm.soal || !questionForm.kunciJawaban) {
       alert('Teks Soal dan Kunci Jawaban wajib diisi!');
@@ -2501,40 +3209,47 @@ Pembahasan:
     // Clean options (remove empty strings)
     const activeOptions = (questionForm.opsi || []).filter(o => o.trim() !== '');
 
-    if (isEditingQuestion && editingQuestionId) {
-      setQuestions(prev => prev.map(q => q.id === editingQuestionId ? {
-        ...q,
-        kisiKisiId: questionForm.kisiKisiId || '',
-        kompetensi: questionForm.kompetensi || '',
-        subKompetensi: questionForm.subKompetensi || '',
-        bentukSoal: questionForm.bentukSoal as BentukSoal,
-        soal: questionForm.soal || '',
-        stimulus: questionForm.stimulus || '',
-        opsi: activeOptions,
-        kunciJawaban: questionForm.kunciJawaban || '',
-        pembahasan: questionForm.pembahasan || '',
-        kataKunci: questionForm.kataKunci || '',
-        gambarUrl: questionForm.gambarUrl || ''
-      } : q));
-      setIsEditingQuestion(false);
-      setEditingQuestionId(null);
-    } else {
-      const newQ: Question = {
-        id: `q-manual-${Date.now()}`,
-        noSoal: questions.length + 1,
-        kisiKisiId: questionForm.kisiKisiId || '',
-        kompetensi: questionForm.kompetensi || 'Kompetensi Umum',
-        subKompetensi: questionForm.subKompetensi || 'Sub-Materi',
-        bentukSoal: questionForm.bentukSoal as BentukSoal,
-        soal: questionForm.soal || '',
-        stimulus: questionForm.stimulus || '',
-        opsi: activeOptions,
-        kunciJawaban: questionForm.kunciJawaban || '',
-        pembahasan: questionForm.pembahasan || 'Pembahasan terstruktur.',
-        kataKunci: questionForm.kataKunci || '',
-        gambarUrl: questionForm.gambarUrl || ''
-      };
-      setQuestions(prev => [...prev, newQ]);
+    try {
+      if (isEditingQuestion && editingQuestionId) {
+        const updatedQ = {
+          id: editingQuestionId,
+          noSoal: questions.find(q => q.id === editingQuestionId)?.noSoal || 1,
+          kisiKisiId: questionForm.kisiKisiId || '',
+          kompetensi: questionForm.kompetensi || '',
+          subKompetensi: questionForm.subKompetensi || '',
+          bentukSoal: questionForm.bentukSoal as BentukSoal,
+          soal: questionForm.soal || '',
+          stimulus: questionForm.stimulus || '',
+          opsi: activeOptions,
+          kunciJawaban: questionForm.kunciJawaban || '',
+          pembahasan: questionForm.pembahasan || '',
+          kataKunci: questionForm.kataKunci || '',
+          gambarUrl: questionForm.gambarUrl || ''
+        };
+        await setDoc(doc(db, 'questions', editingQuestionId), updatedQ);
+        setIsEditingQuestion(false);
+        setEditingQuestionId(null);
+      } else {
+        const newQ: Question = {
+          id: `q-manual-${Date.now()}`,
+          noSoal: questions.length + 1,
+          kisiKisiId: questionForm.kisiKisiId || '',
+          kompetensi: questionForm.kompetensi || 'Kompetensi Umum',
+          subKompetensi: questionForm.subKompetensi || 'Sub-Materi',
+          bentukSoal: questionForm.bentukSoal as BentukSoal,
+          soal: questionForm.soal || '',
+          stimulus: questionForm.stimulus || '',
+          opsi: activeOptions,
+          kunciJawaban: questionForm.kunciJawaban || '',
+          pembahasan: questionForm.pembahasan || 'Pembahasan terstruktur.',
+          kataKunci: questionForm.kataKunci || '',
+          gambarUrl: questionForm.gambarUrl || ''
+        };
+        await setDoc(doc(db, 'questions', newQ.id), newQ);
+      }
+    } catch (err: any) {
+      console.error("Gagal menyimpan soal ke database:", err);
+      alert(`Gagal menyimpan ke database: ${err.message}`);
     }
 
     // Reset Form
@@ -2572,11 +3287,13 @@ Pembahasan:
     setEditingQuestionId(q.id);
   };
 
-  const handleDeleteQuestion = (id: string) => {
-    setQuestions(prev => prev.filter(q => q.id !== id).map((q, idx) => ({
-      ...q,
-      noSoal: idx + 1
-    })));
+  const handleDeleteQuestion = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'questions', id));
+    } catch (err: any) {
+      console.error("Gagal menghapus soal:", err);
+      alert(`Gagal menghapus: ${err.message}`);
+    }
   };
 
   const handleOpsiChange = (index: number, val: string) => {
@@ -2592,8 +3309,540 @@ Pembahasan:
       alert("Belum ada butir soal yang tersusun! Silakan buat Kisi-Kisi terlebih dahulu, lalu susun/buat butir soal sebelum mencetak.");
       return;
     }
-    window.print();
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert("Popup blocker aktif. Harap izinkan popup untuk melakukan pencetakan.");
+      return;
+    }
+
+    // Determine font size
+    let fontSizeVal = '11pt';
+    if (printConfig.fontSize === 'text-xs') fontSizeVal = '10pt';
+    if (printConfig.fontSize === 'text-base') fontSizeVal = '12pt';
+
+    // Generate questions html
+    const questionsHtml = questions.map((q) => {
+      // Parse options
+      const optionsHtml = (q.opsi || []).map((opt, i) => {
+        let optLetter = '';
+        let optText = opt;
+        if (opt.trim().match(/^[A-E]\s*[\.\)]/i)) {
+          optLetter = opt.trim().substring(0, 1).toUpperCase();
+          const sepIdx = opt.indexOf('.') !== -1 ? opt.indexOf('.') : opt.indexOf(')');
+          optText = opt.substring(sepIdx + 1).trim();
+        } else {
+          optLetter = String.fromCharCode(65 + i);
+        }
+
+        const isCorrectOption = q.kunciJawaban.trim().toUpperCase().includes(optLetter) && printConfig.showAnswerKey;
+
+        return `
+          <div class="option-item ${isCorrectOption ? 'correct-option' : ''}">
+            <span class="option-letter">${optLetter}</span>
+            <span class="option-text">${optText}</span>
+          </div>
+        `;
+      }).join('');
+
+      // Parse illustration
+      let illustrationHtml = '';
+      if (q.gambarUrl && q.gambarUrl.trim() !== '' && printConfig.showIllustration) {
+        if (q.gambarUrl.trim().toLowerCase().startsWith('<svg')) {
+          illustrationHtml = `
+            <div class="illustration-container">
+              ${q.gambarUrl}
+            </div>
+          `;
+        } else {
+          illustrationHtml = `
+            <div class="illustration-container">
+              <img src="${q.gambarUrl}" alt="Ilustrasi" />
+            </div>
+          `;
+        }
+      }
+
+      // Parse stimulus
+      let stimulusHtml = '';
+      if (q.stimulus && printConfig.showStimulus) {
+        stimulusHtml = `
+          <div class="stimulus-box">
+            <strong>Wacana / Stimulus:</strong><br/>
+            ${q.stimulus}
+          </div>
+        `;
+      }
+
+      // Parse competency tag
+      let competencyTagHtml = '';
+      if (printConfig.showCompetencyTag) {
+        competencyTagHtml = `
+          <div class="competency-tag">
+            <strong>No Soal:</strong> ${q.noSoal} | 
+            <strong>Bentuk:</strong> ${getBentukSoalLabel(q.bentukSoal)} | 
+            <strong>Kompetensi:</strong> ${q.kompetensi} | 
+            <strong>Sub Kompetensi:</strong> ${q.subKompetensi}
+          </div>
+        `;
+      }
+
+      // Parse answer key & pembahasan
+      let answerKeyHtml = '';
+      if (printConfig.showAnswerKey) {
+        answerKeyHtml = `
+          <div class="answer-key-box">
+            <div><strong>Kunci Jawaban:</strong> <span class="key-badge">${q.kunciJawaban}</span></div>
+            ${q.kataKunci ? `<div><strong>Materi / Konsep:</strong> ${q.kataKunci}</div>` : ''}
+            <div style="margin-top: 4px;"><strong>Pembahasan:</strong> ${q.pembahasan || '-'}</div>
+          </div>
+        `;
+      }
+
+      return `
+        <div class="question-item">
+          ${competencyTagHtml}
+          <div class="question-body">
+            ${!printConfig.showCompetencyTag ? `<span class="question-number">${q.noSoal}.</span>` : ''}
+            <div class="question-content">
+              ${stimulusHtml}
+              ${illustrationHtml}
+              <div class="question-text">${q.soal}</div>
+              <div class="options-container ${printConfig.layoutColumns === '2' ? 'single-col' : 'grid-cols-2'}">
+                ${optionsHtml}
+              </div>
+              ${answerKeyHtml}
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Generate school logos
+    const leftLogoHtml = printConfig.schoolLogo 
+      ? `<img src="${printConfig.schoolLogo}" class="kop-logo" />` 
+      : `<div class="kop-logo-placeholder">LOGO</div>`;
+    const rightLogoHtml = printConfig.schoolLogoRight 
+      ? `<img src="${printConfig.schoolLogoRight}" class="kop-logo" />` 
+      : `<div class="kop-logo-placeholder">SMA</div>`;
+
+    // Complete HTML structure
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>Ujian_${config.mataPelajaran.replace(/\s+/g, '_')}</title>
+        <style>
+          @media print {
+            body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .no-print { display: none !important; }
+          }
+          @page {
+            size: ${printConfig.pageSize === 'F4' ? '215mm 330mm' : 'A4'};
+            margin: 1.5cm 1.5cm 1.5cm 1.5cm;
+          }
+          body {
+            font-family: 'Times New Roman', Times, serif;
+            color: #000000;
+            line-height: 1.4;
+            font-size: ${fontSizeVal};
+            background: white;
+            margin: 0;
+            padding: 0;
+          }
+          .print-btn-container {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background-color: #2563eb;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 9999px;
+            font-weight: bold;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            cursor: pointer;
+            z-index: 9999;
+            font-family: 'Times New Roman', Times, serif;
+            border: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            transition: background-color 0.2s;
+          }
+          .print-btn-container:hover {
+            background-color: #1d4ed8;
+          }
+          
+          /* Kop Surat */
+          .header-kop {
+            border-bottom: 3px double #000000;
+            padding-bottom: 8px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+          }
+          .kop-logo {
+            width: 60px;
+            height: 60px;
+            object-fit: contain;
+          }
+          .kop-logo-placeholder {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            border: 1px solid #000000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: bold;
+          }
+          .kop-text {
+            flex: 1;
+            text-align: center;
+          }
+          .kop-dept {
+            font-size: 9pt;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin: 0 0 2px 0;
+          }
+          .kop-school {
+            font-size: 13pt;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin: 0 0 2px 0;
+          }
+          .kop-address {
+            font-size: 8pt;
+            font-style: italic;
+            margin: 0 0 4px 0;
+          }
+          .kop-info {
+            font-size: 8.5pt;
+            font-weight: bold;
+            margin: 0;
+            border-top: 1px solid #000000;
+            padding-top: 2px;
+            display: inline-block;
+            word-spacing: 2px;
+          }
+
+          /* Simple Title if No Kop */
+          .simple-title {
+            border-bottom: 2px solid #000000;
+            padding-bottom: 8px;
+            text-align: center;
+            margin-bottom: 16px;
+          }
+          .simple-title h2 {
+            font-size: 14pt;
+            margin: 0;
+            font-weight: bold;
+          }
+          .simple-title p {
+            font-size: 11pt;
+            margin: 4px 0 0 0;
+          }
+
+          /* Exam Metadata */
+          .exam-meta-title {
+            text-align: center;
+            margin-bottom: 16px;
+          }
+          .exam-meta-title h2 {
+            font-size: 11pt;
+            font-weight: bold;
+            margin: 0 0 2px 0;
+          }
+          .exam-meta-title h1 {
+            font-size: 12pt;
+            font-weight: bold;
+            margin: 0;
+          }
+
+          /* Student Fields Table */
+          .student-fields {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 16px;
+            font-size: 9.5pt;
+          }
+          .student-fields td {
+            padding: 6px 10px;
+            border: 1px solid #000000;
+            font-weight: bold;
+          }
+          .dotted-line {
+            display: inline-block;
+            width: 80%;
+            border-bottom: 1px dotted #000000;
+            height: 12px;
+          }
+
+          /* Instructions */
+          .instructions-box {
+            border-left: 3px solid #000000;
+            padding-left: 10px;
+            margin-bottom: 20px;
+            font-size: 9.5pt;
+            font-style: italic;
+          }
+
+          /* Layout Columns */
+          .questions-container {
+            width: 100%;
+          }
+          .layout-columns-2 {
+            -webkit-column-count: 2;
+            -moz-column-count: 2;
+            column-count: 2;
+            -webkit-column-gap: 24px;
+            -moz-column-gap: 24px;
+            column-gap: 24px;
+          }
+          
+          /* Question items styling */
+          .question-item {
+            display: inline-block;
+            width: 100%;
+            -webkit-column-break-inside: avoid;
+            page-break-inside: avoid;
+            break-inside: avoid-column;
+            break-inside: avoid;
+            margin-bottom: 16px;
+            border-bottom: 1px solid #f3f4f6;
+            padding-bottom: 12px;
+          }
+          .question-item:last-child {
+            border-bottom: none;
+          }
+          .competency-tag {
+            background-color: #f3f4f6;
+            border: 1px solid #e5e7eb;
+            padding: 4px 8px;
+            font-size: 8pt;
+            border-radius: 4px;
+            margin-bottom: 8px;
+          }
+          .question-body {
+            display: flex;
+            align-items: start;
+            gap: 8px;
+          }
+          .question-number {
+            font-weight: bold;
+            min-width: 20px;
+          }
+          .question-content {
+            flex: 1;
+          }
+          .question-text {
+            font-weight: bold;
+            margin-bottom: 10px;
+            text-align: justify;
+          }
+          
+           /* Stimulus */
+          .stimulus-box {
+            background-color: #f9fafb;
+            border-left: 3px solid #4f46e5;
+            padding: 8px 12px;
+            margin-bottom: 10px;
+            font-size: 9pt;
+            font-style: italic;
+            border-radius: 0 4px 4px 0;
+            text-align: justify;
+            -webkit-column-break-inside: avoid;
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
+          
+          /* Illustration */
+          .illustration-container {
+            margin: 10px 0;
+            text-align: center;
+            -webkit-column-break-inside: avoid;
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
+          .illustration-container img {
+            max-height: 150px;
+            max-width: 100%;
+            object-fit: contain;
+          }
+          .illustration-container svg {
+            max-width: 100%;
+            height: auto;
+          }
+
+          /* Options */
+          .options-container {
+            display: grid;
+            gap: 6px;
+            margin-bottom: 8px;
+            -webkit-column-break-inside: avoid;
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
+          .options-container.grid-cols-2 {
+            grid-template-columns: 1fr 1fr;
+          }
+          @media (max-width: 600px) {
+            .options-container.grid-cols-2 {
+              grid-template-columns: 1fr;
+            }
+          }
+          .options-container.single-col {
+            grid-template-columns: 1fr;
+          }
+          .option-item {
+            display: flex;
+            align-items: start;
+            gap: 8px;
+            padding: 4px 6px;
+            border-radius: 4px;
+            border: 1px solid transparent;
+            font-size: 9.5pt;
+          }
+          .option-letter {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            border: 1px solid #000000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 8pt;
+            flex-shrink: 0;
+            margin-top: 1px;
+          }
+          .option-text {
+            flex: 1;
+          }
+          .correct-option {
+            background-color: #f0fdf4;
+            border-color: #bbf7d0;
+            font-weight: bold;
+          }
+          .correct-option .option-letter {
+            background-color: #22c55e;
+            color: white;
+            border-color: #22c55e;
+          }
+
+          /* Answer Key Box */
+          .answer-key-box {
+            background-color: #f0fdf4;
+            border: 1px dashed #86efac;
+            padding: 8px 12px;
+            margin-top: 10px;
+            font-size: 8.5pt;
+            border-radius: 6px;
+          }
+          .key-badge {
+            background-color: #22c55e;
+            color: white;
+            font-weight: bold;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+          }
+        </style>
+      </head>
+      <body>
+        <button class="print-btn-container no-print" onclick="window.print()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"></path><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+          Cetak Dokumen / Simpan PDF
+        </button>
+
+        ${printConfig.showHeader ? `
+          <div class="header-kop">
+            ${leftLogoHtml}
+            <div class="kop-text">
+              ${(printConfig.kopDepartment || 'KEMENTERIAN PENDIDIKAN, KEBUDAYAAN, RISET, DAN TEKNOLOGI')
+                .split('\n')
+                .map(line => `<p class="kop-dept">${line.trim()}</p>`)
+                .join('')
+              }
+              <h1 class="kop-school">${printConfig.schoolName}</h1>
+              <p class="kop-address">Jalan Pendidikan Raya No. 45 Nusantara - Telp/Fax: (021) 777-1234</p>
+              <p class="kop-info">TAHUN PELAJARAN: ${printConfig.academicYear} | SEMESTER: ${printConfig.semester.toUpperCase()}</p>
+            </div>
+            ${rightLogoHtml}
+          </div>
+        ` : `
+          <div class="simple-title">
+            <h2>LEMBAR SOAL UJIAN TKA SMA</h2>
+            <p><strong>Mata Pelajaran:</strong> ${config.mataPelajaran || 'TES KEMAMPUAN AKADEMIK'} | <strong>Muatan:</strong> ${config.muatan || 'SMA'}</p>
+          </div>
+        `}
+
+        ${printConfig.showHeader ? `
+          <div class="exam-meta-title">
+            <h2>${printConfig.examName}</h2>
+            <h1>MATA PELAJARAN: ${config.mataPelajaran || 'TES KEMAMPUAN AKADEMIK'}</h1>
+            <div style="font-size: 8.5pt; margin-top: 4px; font-weight: bold;">
+              <span>Fase/Muatan: ${config.muatan || 'SMA'}</span> &nbsp;|&nbsp; 
+              <span>Alokasi Waktu: ${printConfig.timeAllocation}</span>
+            </div>
+          </div>
+        ` : ''}
+
+        ${printConfig.showStudentFields ? `
+          <table class="student-fields">
+            <tr>
+              <td style="width: 50%;">NAMA LENGKAP: <span class="dotted-line"></span></td>
+              <td style="width: 50%;">KELAS / JURUSAN: <span class="dotted-line"></span></td>
+            </tr>
+            <tr>
+              <td style="width: 50%;">NOMOR PESERTA: <span class="dotted-line"></span></td>
+              <td style="width: 50%;">HARI / TANGGAL: ${new Date().toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</td>
+            </tr>
+          </table>
+        ` : ''}
+
+        ${printConfig.instructionText ? `
+          <div class="instructions-box">
+            <strong>PETUNJUK PENGERJAAN:</strong> ${printConfig.instructionText}
+          </div>
+        ` : ''}
+
+        <div class="questions-container ${printConfig.layoutColumns === '2' ? 'layout-columns-2' : ''}">
+          ${questionsHtml}
+        </div>
+
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 500);
+          }
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
   };
+
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500 mb-4"></div>
+        <p className="text-slate-400 font-medium animate-pulse">Memuat sistem autentikasi TKA SMA...</p>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <LoginScreen onLoginSuccess={(role, name) => { setUserRole(role); setUserName(name); }} />;
+  }
 
   return (
     <div id="app-root" className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col antialiased">
@@ -2619,6 +3868,21 @@ Pembahasan:
               <span className={`h-2 w-2 rounded-full ${apiStatus === 'connected' ? 'bg-emerald-500 animate-ping' : 'bg-amber-500'}`} />
               <span>AI Engine: <b>{apiStatus === 'connected' ? 'Aktif & Siap' : 'Offline / Tanpa Kunci'}</b></span>
             </div>
+
+            {/* User Profile Indicator */}
+            <div className="flex items-center gap-2 bg-slate-850/80 backdrop-blur border border-slate-700 rounded-lg px-3 py-1.5">
+              <div className="h-2 w-2 rounded-full bg-indigo-400" />
+              <span className="text-xs text-slate-200 font-medium">
+                {userName} ({userRole === 'admin' ? '🔑 Admin' : '👤 Guru'})
+              </span>
+              <button 
+                onClick={handleSignOut}
+                className="ml-2 text-xs bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-300 font-semibold px-2 py-0.5 rounded-md transition"
+              >
+                Keluar
+              </button>
+            </div>
+
             <button
               onClick={handlePrint}
               className="bg-white/10 hover:bg-white/20 border border-white/20 text-white px-4 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-2 transition"
@@ -2680,6 +3944,37 @@ Pembahasan:
                 </span>
               )}
             </button>
+            <button
+              id="tab-btn-materi"
+              onClick={() => setActiveTab('materi')}
+              className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-bold transition-all relative whitespace-nowrap ${
+                activeTab === 'materi'
+                  ? 'bg-purple-50 text-purple-800 shadow-sm border border-purple-100'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <FileText className="h-4.5 w-4.5 text-purple-600" />
+              <span>4. Ringkasan Materi & Panduan</span>
+            </button>
+            {userRole === 'admin' && (
+              <button
+                id="tab-btn-users"
+                onClick={() => setActiveTab('users')}
+                className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-bold transition-all relative whitespace-nowrap ${
+                  activeTab === 'users'
+                    ? 'bg-amber-50 text-amber-800 shadow-sm border border-amber-100'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+              >
+                <Users className="h-4.5 w-4.5 text-amber-600" />
+                <span>5. Manajemen Pengguna (Admin)</span>
+                {usersList.length > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 bg-amber-600 text-white text-[10px] h-5 px-1.5 rounded-full flex items-center justify-center font-bold">
+                    {usersList.length}
+                  </span>
+                )}
+              </button>
+            )}
           </nav>
         </div>
       </div>
@@ -3071,10 +4366,15 @@ Pembahasan:
                   <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row gap-3">
                     <button
                       onClick={handleGenerateKisiViaAI}
-                      disabled={isGeneratingKisi}
+                      disabled={isGeneratingKisi || !isAdmin}
                       className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-slate-700 disabled:to-slate-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition flex items-center justify-center gap-2 text-sm"
                     >
-                      {isGeneratingKisi ? (
+                      {!isAdmin ? (
+                        <>
+                          <Lock className="h-4.5 w-4.5 text-slate-300" />
+                          <span>Generate Kisi-Kisi (Hanya Admin)</span>
+                        </>
+                      ) : isGeneratingKisi ? (
                         <>
                           <RefreshCw className="h-4.5 w-4.5 animate-spin text-white" />
                           <span>Menganalisis Kurikulum...</span>
@@ -3088,10 +4388,15 @@ Pembahasan:
                     </button>
                     <button
                       onClick={handleGenerateAllQuestions}
-                      disabled={isGeneratingSoal || kisiList.length === 0}
+                      disabled={isGeneratingSoal || kisiList.length === 0 || !isAdmin}
                       className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:from-slate-700 disabled:to-slate-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition flex items-center justify-center gap-2 text-sm"
                     >
-                      {isGeneratingSoal ? (
+                      {!isAdmin ? (
+                        <>
+                          <Lock className="h-4.5 w-4.5 text-slate-300" />
+                          <span>Penyusunan Massal (Hanya Admin)</span>
+                        </>
+                      ) : isGeneratingSoal ? (
                         <>
                           <RefreshCw className="h-4.5 w-4.5 animate-spin text-white" />
                           <span>Merancang Soal & Kunci...</span>
@@ -3159,7 +4464,7 @@ Pembahasan:
                   <span>Download Excel (.xls)</span>
                 </button>
                 <button
-                  onClick={() => exportKisiToWord(kisiList, config.mataPelajaran)}
+                  onClick={() => exportKisiToWord(kisiList, config.mataPelajaran, printConfig.pageSize)}
                   className="bg-blue-50 text-blue-800 border border-blue-200 hover:bg-blue-100 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition"
                 >
                   <FileText className="h-4.5 w-4.5 text-blue-600" />
@@ -3482,42 +4787,149 @@ Pembahasan:
                 </div>
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 mb-1">Jumlah Soal</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="number"
-                      min={1}
-                      value={kisiForm.jumlahSoal}
-                      onChange={(e) => setKisiForm({ ...kisiForm, jumlahSoal: Number(e.target.value) })}
-                      className="w-20 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-center"
-                    />
-                    <button
-                      type="submit"
-                      className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg text-xs px-3 py-1.5 transition"
-                    >
-                      {isEditingKisi ? 'Update' : 'Simpan'}
-                    </button>
-                    {isEditingKisi && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsEditingKisi(false);
-                          setEditingKisiId(null);
-                          setKisiForm({
-                            bentukSoal: 'pilihan_ganda_sederhana',
-                            levelKognitif: 'level_2',
-                            elemenMateri: '',
-                            subElemenMateri: '',
-                            kompetensi: '',
-                            batasanCatatan: '',
-                            jumlahSoal: 5
-                          });
-                        }}
-                        className="bg-slate-300 text-slate-700 font-semibold rounded-lg text-xs px-2.5 py-1.5 transition"
-                      >
-                        Batal
-                      </button>
-                    )}
+                  <input
+                    type="number"
+                    min={1}
+                    value={kisiForm.jumlahSoal}
+                    onChange={(e) => setKisiForm({ ...kisiForm, jumlahSoal: Number(e.target.value) })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-center focus:border-indigo-500"
+                  />
+                </div>
+
+                {/* Konteks Nusantara & Stimulus Tambahan Inputs */}
+                <div className="md:col-span-2">
+                  <label className="block text-[11px] font-bold text-indigo-600 mb-1">🇮🇩 Deskripsi Konteks Nusantara Khusus (Opsional)</label>
+                  <input
+                    type="text"
+                    value={kisiForm.konteksNusantara || ''}
+                    onChange={(e) => setKisiForm({ ...kisiForm, konteksNusantara: e.target.value })}
+                    placeholder="Contoh: Tradisi Lompat Batu Nias, Suku Baduy, Isu Maritim Indonesia"
+                    className="w-full bg-slate-50 border border-indigo-100 rounded-lg px-3 py-1.5 text-xs focus:border-indigo-500"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-[11px] font-bold text-indigo-600 mb-1">📖 Deskripsi Stimulus Tambahan Khusus (Opsional)</label>
+                  <input
+                    type="text"
+                    value={kisiForm.stimulusTambahan || ''}
+                    onChange={(e) => setKisiForm({ ...kisiForm, stimulusTambahan: e.target.value })}
+                    placeholder="Contoh: Kutipan studi kasus, data tabel demografi, narasi berita"
+                    className="w-full bg-slate-50 border border-indigo-100 rounded-lg px-3 py-1.5 text-xs focus:border-indigo-500"
+                  />
+                </div>
+
+                {/* Konteks Nusantara, Stimulus & Checklist Checkboxes */}
+                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-slate-100 pt-3 mt-2">
+                  {/* KONTEKS LOKAL INDONESIA */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1.5">🎭 KONTEKS LOKAL INDONESIA</label>
+                    <div className="space-y-1 max-h-36 overflow-y-auto pr-1 border border-slate-200/60 p-2 rounded-lg bg-slate-50/50">
+                      {[
+                        { key: 'Budaya Nusantara', label: '🎭 Budaya Nusantara' },
+                        { key: 'Geografis Indonesia', label: '🗺️ Geografis Indonesia' },
+                        { key: 'Kehidupan Sosial', label: '👥 Kehidupan Sosial' },
+                        { key: 'Ekonomi Rakyat', label: '💰 Ekonomi Rakyat' },
+                        { key: 'Teknologi Tradisional', label: '⚙️ Teknologi Tradisional' },
+                        { key: 'Kearifan Lokal', label: '🏛️ Kearifan Lokal' },
+                        { key: 'Keragaman Etnis', label: '🌈 Keragaman Etnis' }
+                      ].map((item) => (
+                        <label key={item.key} className="flex items-center gap-1.5 text-[10.5px] font-medium text-slate-700 cursor-pointer hover:bg-slate-100 p-0.5 rounded">
+                          <input
+                            type="checkbox"
+                            checked={(kisiForm.konteksLokal || []).includes(item.key)}
+                            onChange={() => handleToggleKisiContext(item.key)}
+                            className="rounded text-indigo-600 focus:ring-indigo-500 h-3 w-3"
+                          />
+                          <span>{item.label}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
+
+                  {/* STIMULUS & PENGEMBANGAN KONTEN */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1.5">📖 STIMULUS & PENGEMBANGAN KONTEN</label>
+                    <div className="space-y-1 max-h-36 overflow-y-auto pr-1 border border-slate-200/60 p-2 rounded-lg bg-slate-50/50">
+                      {[
+                        { key: 'Teks Bacaan', label: '📖 Teks Bacaan' },
+                        { key: 'Gambar/Ilustrasi', label: '🖼️ Gambar/Ilustrasi' },
+                        { key: 'Data/Tabel', label: '📊 Data/Tabel' },
+                        { key: 'Grafik/Diagram', label: '📈 Grafik/Diagram' },
+                        { key: 'Kasus Nyata', label: '🔍 Kasus Nyata' },
+                        { key: 'Cerita Pendek', label: '📚 Cerita Pendek' },
+                        { key: 'Berita/Artikel', label: '📰 Berita/Artikel' }
+                      ].map((item) => (
+                        <label key={item.key} className="flex items-center gap-1.5 text-[10.5px] font-medium text-slate-700 cursor-pointer hover:bg-slate-100 p-0.5 rounded">
+                          <input
+                            type="checkbox"
+                            checked={(kisiForm.stimulusKonten || []).includes(item.key)}
+                            onChange={() => handleToggleKisiStimulus(item.key)}
+                            className="rounded text-indigo-600 focus:ring-indigo-500 h-3 w-3"
+                          />
+                          <span>{item.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* CHECKLIST STANDAR KUALITAS SOAL TKA */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 mb-1.5">📋 STANDAR KUALITAS SOAL TKA</label>
+                    <div className="space-y-1 max-h-36 overflow-y-auto pr-1 border border-slate-200/60 p-2 rounded-lg bg-slate-50/50">
+                      {[
+                        'Validasi Bahasa', 'Konstruksi Soal', 'Kesesuaian Materi', 
+                        'Level Kognitif', 'Konteks Relevan', 'Tidak Bias', 
+                        'Kejelasan Instruksi', 'Kunci Jawaban Tepat', 'Distractor Berkualitas', 
+                        'Sesuai Kurikulum', 'Waktu Pengerjaan', 'Inklusivitas'
+                      ].map((item) => (
+                        <label key={item} className="flex items-center gap-1.5 text-[10.5px] font-medium text-slate-700 cursor-pointer hover:bg-slate-100 p-0.5 rounded">
+                          <input
+                            type="checkbox"
+                            checked={(kisiForm.kualitasChecklist || []).includes(item)}
+                            onChange={() => handleToggleKisiQuality(item)}
+                            className="rounded text-emerald-600 focus:ring-emerald-500 h-3 w-3"
+                          />
+                          <span className="truncate">{item}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Form Buttons */}
+                <div className="md:col-span-2 flex justify-end gap-2 border-t border-slate-100 pt-3 mt-2">
+                  <button
+                    type="submit"
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg text-xs px-5 py-2 transition whitespace-nowrap"
+                  >
+                    {isEditingKisi ? 'Update' : 'Simpan'}
+                  </button>
+                  {isEditingKisi && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditingKisi(false);
+                        setEditingKisiId(null);
+                        setKisiForm({
+                          bentukSoal: 'pilihan_ganda_sederhana',
+                          levelKognitif: 'level_2',
+                          elemenMateri: '',
+                          subElemenMateri: '',
+                          kompetensi: '',
+                          batasanCatatan: '',
+                          jumlahSoal: 5,
+                          konteksNusantara: '',
+                          stimulusTambahan: '',
+                          konteksLokal: [],
+                          stimulusKonten: [],
+                          kualitasChecklist: []
+                        });
+                      }}
+                      className="bg-slate-300 text-slate-700 font-semibold rounded-lg text-xs px-4 py-2 transition"
+                    >
+                      Batal
+                    </button>
+                  )}
                 </div>
               </form>
             </div>
@@ -3542,6 +4954,7 @@ Pembahasan:
                       <th className="py-3.5 px-4">Sub-elemen / Submateri</th>
                       <th className="py-3.5 px-4">Kompetensi yang Diuji</th>
                       <th className="py-3.5 px-4">Batasan / Catatan</th>
+                      <th className="py-3.5 px-4 w-[220px]">🇮🇩 Konteks & Stimulus</th>
                       <th className="py-3.5 px-4 text-center w-24">Jumlah Soal</th>
                       <th className="py-3.5 px-4 text-center w-32 no-print">Tindakan</th>
                     </tr>
@@ -3549,7 +4962,7 @@ Pembahasan:
                   <tbody>
                     {kisiList.length === 0 ? (
                       <tr>
-                        <td colSpan={9} className="text-center py-12 text-slate-400 font-medium">
+                        <td colSpan={10} className="text-center py-12 text-slate-400 font-medium">
                           Belum ada data kisi-kisi. Sila tambahkan di atas atau gunakan tombol AI untuk membuat otomatis!
                         </td>
                       </tr>
@@ -3601,6 +5014,63 @@ Pembahasan:
                           <td className="py-4 px-4 text-slate-600">{item.subElemenMateri}</td>
                           <td className="py-4 px-4 text-slate-700 leading-relaxed font-medium">{item.kompetensi}</td>
                           <td className="py-4 px-4 text-slate-500 italic">{item.batasanCatatan || '-'}</td>
+                          <td className="py-4 px-4 min-w-[240px]">
+                            {/* Konteks Nusantara */}
+                            {((item.konteksLokal && item.konteksLokal.length > 0) || item.konteksNusantara) ? (
+                              <div className="mb-2">
+                                <span className="inline-block font-bold text-indigo-700 bg-indigo-50 px-1 rounded text-[10px] mr-1">🇮🇩 Konteks:</span>
+                                {item.konteksLokal && item.konteksLokal.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-1 mb-1">
+                                    {item.konteksLokal.map(k => (
+                                      <span key={k} className="bg-slate-100 text-slate-800 text-[9px] px-1.5 py-0.5 rounded font-medium">
+                                        {k}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                                {item.konteksNusantara && (
+                                  <span className="text-slate-700 block text-[11px] leading-relaxed">{item.konteksNusantara}</span>
+                                )}
+                              </div>
+                            ) : null}
+
+                            {/* Stimulus Tambahan */}
+                            {((item.stimulusKonten && item.stimulusKonten.length > 0) || item.stimulusTambahan) ? (
+                              <div className="mb-2">
+                                <span className="inline-block font-bold text-purple-700 bg-purple-50 px-1 rounded text-[10px] mr-1">📖 Stimulus:</span>
+                                {item.stimulusKonten && item.stimulusKonten.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-1 mb-1">
+                                    {item.stimulusKonten.map(s => (
+                                      <span key={s} className="bg-purple-100/50 text-purple-800 text-[9px] px-1.5 py-0.5 rounded font-medium">
+                                        {s}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                                {item.stimulusTambahan && (
+                                  <span className="text-slate-700 block text-[11px] leading-relaxed">{item.stimulusTambahan}</span>
+                                )}
+                              </div>
+                            ) : null}
+
+                            {/* Standar Mutu */}
+                            {item.kualitasChecklist && item.kualitasChecklist.length > 0 ? (
+                              <div>
+                                <span className="inline-block font-bold text-emerald-700 bg-emerald-50 px-1 rounded text-[10px] mr-1">📋 Standar Mutu:</span>
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {item.kualitasChecklist.map(c => (
+                                    <span key={c} className="bg-emerald-100/50 text-emerald-800 text-[9px] px-1.5 py-0.5 rounded font-medium">
+                                      {c}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {!item.konteksNusantara && !item.stimulusTambahan && (!item.konteksLokal || item.konteksLokal.length === 0) && (!item.stimulusKonten || item.stimulusKonten.length === 0) && (!item.kualitasChecklist || item.kualitasChecklist.length === 0) ? (
+                              <span className="text-slate-400 italic">-</span>
+                            ) : null}
+                          </td>
                           <td className="py-4 px-4 text-center">
                             <div className="font-bold text-slate-800 text-sm">
                               {item.jumlahSoal}
@@ -3714,19 +5184,26 @@ Pembahasan:
                   <span>Download Excel (.xls)</span>
                 </button>
                 <button
-                  onClick={() => exportQuestionsToWord(questions, config.mataPelajaran)}
+                  onClick={() => exportQuestionsToWord(questions, config.mataPelajaran, printConfig.pageSize)}
                   className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-sm"
                 >
                   <FileText className="h-4.5 w-4.5" />
                   <span>Download Word (.doc)</span>
                 </button>
-                <button
-                  onClick={() => setIsEditingQuestion(true)}
-                  className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
-                >
-                  <Plus className="h-4.5 w-4.5" />
-                  <span>Tambah Soal</span>
-                </button>
+                {isAdmin ? (
+                  <button
+                    onClick={() => setIsEditingQuestion(true)}
+                    className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
+                  >
+                    <Plus className="h-4.5 w-4.5" />
+                    <span>Tambah Soal</span>
+                  </button>
+                ) : (
+                  <div className="bg-slate-100 text-slate-500 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border border-slate-200 cursor-not-allowed select-none">
+                    <Lock className="h-4 w-4" />
+                    <span>Tambah Soal (Hanya Admin)</span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -4066,6 +5543,19 @@ Pembahasan:
                     <span className="text-[11px] font-bold text-blue-400 uppercase tracking-widest block border-l-2 border-blue-500 pl-2">
                       Identitas Akademik & Kop Surat
                     </span>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                        Dinas / Kementerian (Kop Atas - Bisa beberapa baris)
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={printConfig.kopDepartment}
+                        onChange={(e) => setPrintConfig({ ...printConfig, kopDepartment: e.target.value })}
+                        className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                        placeholder="Contoh:&#10;PEMERINTAH PROVINSI JAWA TIMUR&#10;DINAS PENDIDIKAN"
+                      />
+                    </div>
                     
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
@@ -4303,7 +5793,7 @@ Pembahasan:
                       </label>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800/80">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-800/80">
                       <div>
                         <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1 flex items-center gap-1">
                           <Type className="h-3 w-3" /> Ukuran Huruf (Font)
@@ -4331,21 +5821,559 @@ Pembahasan:
                           <option value="2">2 Kolom (Hemat Kertas)</option>
                         </select>
                       </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1 flex items-center gap-1">
+                          <FileText className="h-3 w-3" /> Ukuran Kertas (Page)
+                        </label>
+                        <select
+                          value={printConfig.pageSize}
+                          onChange={(e) => setPrintConfig({ ...printConfig, pageSize: e.target.value })}
+                          className="w-full bg-slate-800/85 border border-slate-700 rounded-xl px-2 py-1.5 text-xs text-white focus:outline-none"
+                        >
+                          <option value="A4">A4 (210 x 297 mm)</option>
+                          <option value="F4">F4 / Folio (215 x 330 mm)</option>
+                        </select>
+                      </div>
                     </div>
 
-                    <div className="pt-1 flex justify-end">
+                    <div className="pt-1 flex flex-col items-end gap-2">
                       <button
                         onClick={handlePrint}
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition shadow-lg"
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition shadow-lg w-full sm:w-auto justify-center"
                       >
                         <Printer className="h-4 w-4" />
                         <span>Mulai Cetak / Simpan ke PDF</span>
+                      </button>
+                      <button
+                        onClick={() => exportQuestionsToWord(questions, config.mataPelajaran, printConfig.pageSize)}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition shadow-lg w-full sm:w-auto justify-center"
+                      >
+                        <FileText className="h-4 w-4" />
+                        <span>Unduh / Cetak Versi Word (DOC)</span>
                       </button>
                     </div>
                   </div>
                 </motion.div>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Tab 4: Pembuatan Materi & Panduan */}
+        {activeTab === 'materi' && (
+          <div id="materi-panel" className="space-y-6 animate-fadeIn no-print">
+            
+            {/* Panduan Mapel & PDF Upload Card */}
+            <div className="bg-gradient-to-r from-purple-900 to-indigo-900 text-white rounded-2xl p-6 shadow-md border border-purple-700/50 flex flex-col lg:flex-row items-center justify-between gap-6">
+              <div className="space-y-2 lg:max-w-2xl">
+                <div className="inline-flex items-center gap-2 bg-purple-800/80 border border-purple-600 px-3 py-1 rounded-full text-[10px] uppercase font-extrabold tracking-widest text-purple-200">
+                  <Sparkles className="h-3.5 w-3.5 text-yellow-300 animate-pulse" /> Kurikulum Merdeka Official
+                </div>
+                <h3 className="text-xl font-bold tracking-tight">Panduan Kurikulum & Peta Capaian Pembelajaran</h3>
+                <p className="text-xs text-purple-200 leading-relaxed">
+                  Untuk hasil penyusunan materi yang selaras dengan kebijakan KEMDIKDASMEN, silakan unduh <b>Panduan Mata Pelajaran</b> resmi terlebih dahulu, kemudian unggah dokumen PDF tersebut di samping agar dibaca & dikontekstualisasikan oleh AI dalam merancang Ringkasan Materi.
+                </p>
+                <div className="pt-2 flex flex-wrap gap-3">
+                  <a 
+                    href="https://kurikulum.kemendikdasmen.go.id/panduan-mapel" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="bg-yellow-400 hover:bg-yellow-500 text-slate-950 px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition shadow-md hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    <Download className="h-4 w-4" />
+                    <span>Download Panduan di Situs Resmi</span>
+                  </a>
+                </div>
+              </div>
+
+              <div className="w-full lg:w-80 bg-white/10 backdrop-blur-sm border border-white/20 p-4 rounded-xl flex flex-col justify-center text-center relative">
+                <input 
+                  type="file" 
+                  accept="application/pdf" 
+                  onChange={handlePdfUpload}
+                  id="pdf-guide-uploader" 
+                  className="hidden" 
+                />
+                <label 
+                  htmlFor="pdf-guide-uploader" 
+                  className="cursor-pointer flex flex-col items-center justify-center p-3 border-2 border-dashed border-white/30 hover:border-white/60 rounded-lg transition"
+                >
+                  <Upload className="h-8 w-8 text-purple-200 mb-2" />
+                  <span className="text-xs font-bold text-white block">Unggah Dokumen Panduan (PDF)</span>
+                  <span className="text-[10px] text-purple-200 mt-1 block">Drag & drop atau klik file</span>
+                </label>
+                
+                {isUploadingPdf && (
+                  <div className="absolute inset-0 bg-slate-900/90 rounded-xl flex flex-col items-center justify-center p-3">
+                    <RefreshCw className="h-6 w-6 animate-spin text-yellow-400 mb-2" />
+                    <span className="text-xs font-semibold text-white">Menganalisis Panduan Resmi...</span>
+                  </div>
+                )}
+                
+                {uploadedPdf && (
+                  <div className="mt-3 bg-purple-950/50 border border-purple-600/40 p-2.5 rounded-lg text-left text-[11px] flex items-start gap-2">
+                    <CheckSquare className="h-4 w-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    <div className="overflow-hidden">
+                      <span className="font-bold text-emerald-300 block truncate">{uploadedPdf.name}</span>
+                      <span className="text-[10px] text-purple-300 block">{(uploadedPdf.size / (1024 * 1024)).toFixed(2)} MB • Terbaca oleh AI</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {uploadedPdfStatus && (
+              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs py-2.5 px-4 rounded-xl flex items-center gap-2">
+                <CheckSquare className="h-4.5 w-4.5 text-emerald-600" />
+                <span>{uploadedPdfStatus}</span>
+              </div>
+            )}
+
+            {/* Main Content Layout for Materi */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              
+              {/* Left Column: List of Kisi-Kisi items for materi mapel */}
+              <div className="lg:col-span-5 space-y-4">
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4 space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                    <h4 className="font-bold text-slate-800 text-sm">Pilih Kisi-Kisi Matriks</h4>
+                    <div className="flex items-center gap-1.5">
+                      {Object.keys(generatedMaterials).length > 0 && (
+                        <button
+                          onClick={() => exportAllMateriToWord(kisiList, generatedMaterials, config.mataPelajaran, printConfig.pageSize)}
+                          className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-100 px-2 px-2.5 py-1 rounded-xl text-[10px] font-bold flex items-center gap-1 transition"
+                          title="Unduh semua materi yang telah disusun dalam satu file Word"
+                        >
+                          <Download className="h-3 w-3" />
+                          <span>Unduh Semua Word</span>
+                        </button>
+                      )}
+                      <span className="bg-slate-100 text-slate-600 font-mono text-xs font-bold px-2 py-0.5 rounded-full">
+                        {kisiList.length} Baris
+                      </span>
+                    </div>
+                  </div>
+
+                  {kisiList.length === 0 ? (
+                    <div className="text-center py-8 text-slate-400 space-y-2">
+                      <Layers className="h-8 w-8 mx-auto text-slate-300" />
+                      <p className="text-xs">Belum ada kisi-kisi terdaftar. Silakan buat di Tab 1 atau Tab 2 terlebih dahulu!</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5 max-h-[500px] overflow-y-auto pr-1">
+                      {kisiList.map((kisi) => {
+                        const isSelected = activeMateriKisiId === kisi.id;
+                        const isCompiled = !!generatedMaterials[kisi.id];
+                        const isGenerating = !!generatingMateriIds[kisi.id];
+
+                        return (
+                          <div 
+                            key={kisi.id}
+                            onClick={() => {
+                              if (isCompiled) {
+                                setActiveMateriKisiId(kisi.id);
+                              }
+                            }}
+                            className={`p-3.5 rounded-xl border text-left cursor-pointer transition ${
+                              isSelected 
+                                ? 'bg-purple-50 border-purple-300 shadow-sm' 
+                                : 'bg-slate-50 hover:bg-slate-100/70 border-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="font-mono text-[10px] font-extrabold bg-slate-200 text-slate-700 h-5 w-5 rounded-full flex items-center justify-center flex-shrink-0">
+                                {kisi.no}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <span className="text-xs font-extrabold text-slate-900 block truncate">
+                                  {kisi.elemenMateri}
+                                </span>
+                                <span className="text-[10px] text-slate-500 block truncate mt-0.5">
+                                  {kisi.subElemenMateri}
+                                </span>
+                              </div>
+                              
+                              <div className="flex-shrink-0">
+                                {isCompiled ? (
+                                  <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 text-[9px] font-bold px-2 py-0.5 rounded-full">
+                                    <Check className="h-2.5 w-2.5" /> Ready
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 text-[9px] font-bold px-2 py-0.5 rounded-full">
+                                    Belum
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <p className="text-[11px] text-slate-600 mt-2 line-clamp-2 leading-relaxed">
+                              {kisi.kompetensi}
+                            </p>
+
+                            <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2">
+                              <div className="flex gap-1.5">
+                                <span className="bg-slate-200 text-slate-700 text-[9px] font-semibold px-1.5 py-0.5 rounded">
+                                  {getLevelKognitifLabel(kisi.levelKognitif)}
+                                </span>
+                              </div>
+
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleGenerateMateri(kisi);
+                                }}
+                                disabled={isGenerating}
+                                className={`text-[10px] font-black px-2.5 py-1 rounded transition-all flex items-center gap-1 ${
+                                  isCompiled 
+                                    ? 'bg-slate-200 hover:bg-slate-300 text-slate-700' 
+                                    : 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm hover:from-purple-700 hover:to-indigo-700'
+                                }`}
+                              >
+                                {isGenerating ? (
+                                  <>
+                                    <RefreshCw className="h-3 w-3 animate-spin" />
+                                    <span>Menyusun...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Sparkles className="h-3 w-3" />
+                                    <span>{isCompiled ? 'Susun Ulang' : 'Susun Materi AI'}</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column: Material Viewer / Workspace */}
+              <div className="lg:col-span-7">
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 space-y-4 min-h-[400px] flex flex-col justify-between">
+                  {(() => {
+                    const activeMateri = activeMateriKisiId ? generatedMaterials[activeMateriKisiId] : null;
+                    const activeKisi = kisiList.find(k => k.id === activeMateriKisiId);
+
+                    if (!activeKisi) {
+                      return (
+                        <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-slate-400 space-y-3">
+                          <FileText className="h-12 w-12 text-slate-300" />
+                          <div>
+                            <h5 className="font-bold text-slate-700 text-sm">Pilih atau Susun Materi</h5>
+                            <p className="text-xs max-w-sm mt-1">
+                              Silakan klik tombol <b>"Susun Materi AI"</b> pada daftar di sebelah kiri untuk menghasilkan bahan ajar ringkas yang sistematis berdasarkan kompetensi target.
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="space-y-4 flex-1 flex flex-col justify-between">
+                        <div>
+                          {/* Header Detail */}
+                          <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="bg-purple-100 text-purple-800 text-[9px] font-extrabold px-2 py-0.5 rounded-full">
+                                  MODUL {activeKisi.no}
+                                </span>
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  {getLevelKognitifLabel(activeKisi.levelKognitif)}
+                                </span>
+                              </div>
+                              <h3 className="font-extrabold text-slate-900 text-base mt-1">
+                                {activeKisi.elemenMateri}
+                              </h3>
+                              <p className="text-xs text-slate-500 font-medium">
+                                Sub-materi: {activeKisi.subElemenMateri}
+                              </p>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                onClick={() => {
+                                  if (activeMateri) {
+                                    navigator.clipboard.writeText(activeMateri);
+                                    alert("Bahan ajar dalam format Markdown berhasil disalin ke clipboard!");
+                                  }
+                                }}
+                                className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+                              >
+                                <Copy className="h-3.5 w-3.5" />
+                                <span>Salin</span>
+                              </button>
+
+                              {activeMateri && (
+                                <>
+                                  <button
+                                    onClick={() => exportMateriToWord(activeKisi, activeMateri, config.mataPelajaran, printConfig.pageSize)}
+                                    className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+                                    title="Unduh Materi sebagai file Word (.doc)"
+                                  >
+                                    <Download className="h-3.5 w-3.5" />
+                                    <span>Word</span>
+                                  </button>
+
+                                  <button
+                                    onClick={() => handlePrintMateri(activeKisi, activeMateri)}
+                                    className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+                                    title="Cetak Materi atau simpan sebagai PDF"
+                                  >
+                                    <Printer className="h-3.5 w-3.5" />
+                                    <span>PDF / Cetak</span>
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Materi Render Area */}
+                          <div className="mt-4 bg-slate-50/65 border border-slate-100 rounded-xl p-5 max-h-[500px] overflow-y-auto shadow-inner">
+                            {activeMateri ? (
+                              <SimpleMarkdown content={activeMateri} />
+                            ) : (
+                              <div className="text-center py-12 text-slate-400 space-y-3">
+                                <RefreshCw className="h-8 w-8 animate-spin mx-auto text-purple-400" />
+                                <p className="text-xs">Sedang menyusun materi akademik secara terstruktur...</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Bottom Actions inside Card */}
+                        <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                          <span className="flex items-center gap-1">
+                            <Info className="h-3.5 w-3.5 text-indigo-500" />
+                            <span>Materi diselaraskan dengan Panduan Resmi KEMDIKDASMEN</span>
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+        )}
+
+        {/* Tab 5: Manajemen Pengguna */}
+        {activeTab === 'users' && userRole === 'admin' && (
+          <div id="users-panel" className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-fadeIn no-print">
+            {/* Left Col: Add User Form */}
+            <section className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-5">
+              <div className="flex items-center gap-2 pb-4 border-b border-slate-100">
+                <UserPlus className="h-5 w-5 text-amber-500" />
+                <h2 className="text-lg font-bold text-slate-800">Tambah Akun Guru Baru</h2>
+              </div>
+
+              {userError && (
+                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-700 p-3 rounded-xl text-xs flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>{userError}</span>
+                </div>
+              )}
+
+              {userSuccess && (
+                <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 p-3 rounded-xl text-xs flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 shrink-0" />
+                  <span>{userSuccess}</span>
+                </div>
+              )}
+
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                if (!newUserName || !newUserEmail || !newUserPassword) {
+                  setUserError("Silakan lengkapi semua isian.");
+                  return;
+                }
+                setUserError(null);
+                setUserSuccess(null);
+                setIsAddingUser(true);
+                try {
+                  await createNewUserByAdmin(newUserEmail.trim(), newUserPassword, newUserName, newUserRole);
+                  setUserSuccess(`Akun ${newUserName} (${newUserRole === 'admin' ? 'Admin' : 'Guru'}) berhasil didaftarkan!`);
+                  setNewUserName('');
+                  setNewUserEmail('');
+                  setNewUserPassword('');
+                  setNewUserRole('user');
+                } catch (err: any) {
+                  console.error(err);
+                  if (err.code === 'auth/email-already-in-use') {
+                    setUserError("Alamat email sudah terdaftar.");
+                  } else if (err.code === 'auth/weak-password') {
+                    setUserError("Password terlalu lemah (minimal 6 karakter).");
+                  } else {
+                    setUserError(`Gagal membuat akun: ${err.message}`);
+                  }
+                } finally {
+                  setIsAddingUser(false);
+                }
+              }} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Nama Lengkap Guru</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: Budi Santoso, S.Pd."
+                    value={newUserName}
+                    onChange={(e) => setNewUserName(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl px-4 py-2.5 text-xs text-slate-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Alamat Email Resmi</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="nama.guru@sekolah.sch.id"
+                    value={newUserEmail}
+                    onChange={(e) => setNewUserEmail(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl px-4 py-2.5 text-xs text-slate-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Password Baru</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Minimal 6 karakter"
+                    value={newUserPassword}
+                    onChange={(e) => setNewUserPassword(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl px-4 py-2.5 text-xs text-slate-800"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Peran Hak Akses (Role)</label>
+                  <div className="grid grid-cols-2 gap-3 mt-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setNewUserRole('user')}
+                      className={`py-2 px-3 text-xs font-bold rounded-xl border flex items-center justify-center gap-1.5 transition ${
+                        newUserRole === 'user'
+                          ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
+                          : 'bg-slate-50 border-slate-200 text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      <User className="h-4 w-4" />
+                      Guru Sosiologi
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewUserRole('admin')}
+                      className={`py-2 px-3 text-xs font-bold rounded-xl border flex items-center justify-center gap-1.5 transition ${
+                        newUserRole === 'admin'
+                          ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
+                          : 'bg-slate-50 border-slate-200 text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      <Shield className="h-4 w-4" />
+                      Administrator
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isAddingUser}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-extrabold py-3 px-4 rounded-xl shadow-md transition flex items-center justify-center gap-2 text-xs"
+                >
+                  {isAddingUser ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      <span>Mendaftarkan Guru...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="h-4 w-4" />
+                      <span>Daftarkan Guru Baru</span>
+                    </>
+                  )}
+                </button>
+              </form>
+            </section>
+
+            {/* Right Col: Current Users List */}
+            <section className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl shadow-sm p-6 flex flex-col">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
+                <div className="flex items-center gap-2">
+                  <Users className="h-5 w-5 text-indigo-600" />
+                  <h2 className="text-lg font-bold text-slate-800">Daftar Pengguna Sistem</h2>
+                </div>
+                <span className="bg-indigo-50 text-indigo-700 text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
+                  {usersList.length} Pengguna
+                </span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-150 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
+                      <th className="py-3 px-2">Nama Pengguna</th>
+                      <th className="py-3 px-2">Email</th>
+                      <th className="py-3 px-2">Role</th>
+                      <th className="py-3 px-2 text-right">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {usersList.map((usr) => (
+                      <tr key={usr.id} className="hover:bg-slate-50/50 transition">
+                        <td className="py-3.5 px-2 font-bold text-slate-800">{usr.name || 'Guru Sosiologi'}</td>
+                        <td className="py-3.5 px-2 text-slate-600">{usr.email}</td>
+                        <td className="py-3.5 px-2">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold text-[9px] uppercase tracking-wide ${
+                            usr.role === 'admin'
+                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                              : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                          }`}>
+                            {usr.role === 'admin' ? <Shield className="h-2.5 w-2.5" /> : <User className="h-2.5 w-2.5" />}
+                            {usr.role === 'admin' ? 'Admin' : 'Guru'}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-2 text-right">
+                          <button
+                            disabled={usr.email === currentUser?.email}
+                            onClick={async () => {
+                              if (confirm(`Apakah Anda yakin ingin menghapus akses pengguna ${usr.name || usr.email}?`)) {
+                                try {
+                                  await deleteDoc(doc(db, 'users', usr.id));
+                                } catch (err) {
+                                  console.error("Gagal menghapus pengguna:", err);
+                                  alert("Gagal menghapus pengguna dari database.");
+                                }
+                              }
+                            }}
+                            className={`p-1.5 rounded-lg border transition ${
+                              usr.email === currentUser?.email
+                                ? 'opacity-40 cursor-not-allowed bg-slate-100 border-slate-200 text-slate-400'
+                                : 'bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200 hover:border-rose-300'
+                            }`}
+                            title={usr.email === currentUser?.email ? "Anda tidak dapat menghapus akun Anda sendiri" : "Hapus Pengguna"}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {usersList.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="text-center py-8 text-slate-400">
+                          Tidak ada pengguna terdaftar.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           </div>
         )}
 
@@ -4372,7 +6400,12 @@ Pembahasan:
                     </div>
                   )}
                   <div className="flex-1">
-                    <h4 className="text-xs font-bold uppercase tracking-wide">KEMENTERIAN PENDIDIKAN, KEBUDAYAAN, RISET, DAN TEKNOLOGI</h4>
+                    {(printConfig.kopDepartment || 'KEMENTERIAN PENDIDIKAN, KEBUDAYAAN, RISET, DAN TEKNOLOGI')
+                      .split('\n')
+                      .map((line, idx) => (
+                        <h4 key={idx} className="text-xs font-bold uppercase tracking-wide">{line.trim()}</h4>
+                      ))
+                    }
                     <h3 className="text-sm sm:text-base font-black uppercase tracking-wider">{printConfig.schoolName}</h3>
                     <p className="text-[9px] text-slate-600 italic">Jalan Pendidikan Raya No. 45 Nusantara - Telp/Fax: (021) 777-1234 - Website: www.sekolahkita.sch.id</p>
                     <div className="border-t border-slate-400 mt-1 pt-1 flex justify-center gap-4 text-[9px] font-bold text-slate-700">
@@ -4446,7 +6479,7 @@ Pembahasan:
               ) : (
                 <div className={`${printConfig.layoutColumns === '2' ? 'columns-1 md:columns-2 gap-x-8 gap-y-6 print:columns-2 print:gap-x-8' : 'space-y-8'} ${printConfig.fontSize}`}>
                   {questions.map((q, idx) => (
-                    <div key={q.id} className="break-inside-avoid page-break-inside-avoid pb-6 border-b border-slate-100 last:border-b-0 space-y-3">
+                    <div key={q.id} className="inline-block w-full break-inside-avoid page-break-inside-avoid pb-6 mb-6 border-b border-slate-100 last:border-b-0 space-y-3">
                       
                       {/* Question Header (Always contains technical metadata on screen, but can be formatted nicely or hidden on print if showCompetencyTag is false) */}
                       {printConfig.showCompetencyTag ? (
@@ -4482,7 +6515,7 @@ Pembahasan:
                                     Batal
                                   </button>
                                 </div>
-                              ) : (
+                              ) : isAdmin ? (
                                 <>
                                   <button
                                     onClick={() => handleEditQuestion(q)}
@@ -4499,7 +6532,7 @@ Pembahasan:
                                     <Trash2 className="h-3 w-3" />
                                   </button>
                                 </>
-                              )}
+                              ) : null}
                             </div>
                           </div>
                         </div>
@@ -4527,7 +6560,7 @@ Pembahasan:
                                   Batal
                                 </button>
                               </div>
-                            ) : (
+                            ) : isAdmin ? (
                               <>
                                 <button
                                   onClick={() => handleEditQuestion(q)}
@@ -4544,7 +6577,7 @@ Pembahasan:
                                   <Trash2 className="h-3 w-3" />
                                 </button>
                               </>
-                            )}
+                            ) : null}
                           </div>
                         </div>
                       )}
@@ -4671,9 +6704,17 @@ Pembahasan:
             <p className="font-bold text-slate-200 mb-1">Generator Kisi-Kisi & Pembuat Soal TKA SMA</p>
             <p>Sistem Asesmen Pintar untuk Guru, Dosen, dan Pengajar Seluruh Indonesia.</p>
           </div>
-          <div className="text-right">
+          <div className="text-right flex flex-col items-end gap-1">
             <p>© 2026 Kemdikbud SMA TKA Assessment. All Rights Reserved.</p>
             <p>Dikembangkan dengan <span className="text-rose-500">♥</span> menggunakan Gemini Flash & React.</p>
+            <a 
+              href="https://lynk.id/ajisosiologi" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 px-3 py-1 bg-slate-800 hover:bg-indigo-950 text-[10px] font-extrabold text-indigo-400 hover:text-indigo-300 rounded-lg border border-slate-700 hover:border-indigo-500/50 transition duration-200 mt-1"
+            >
+              <span>Create @ajisosiologi</span>
+            </a>
           </div>
         </div>
       </footer>
@@ -4952,7 +6993,163 @@ Pembahasan:
             </motion.div>
           </motion.div>
         )}
+        {showSignOutConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[999] flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl p-6 relative"
+            >
+              <div className="flex items-center gap-3.5 mb-4 text-amber-500">
+                <div className="h-10 w-10 rounded-2xl bg-amber-500/10 flex items-center justify-center">
+                  <LogOut className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Konfirmasi Keluar</h3>
+                  <p className="text-xs text-slate-400">Yakin ingin meninggalkan sistem?</p>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-300 leading-relaxed mb-6">
+                Anda akan keluar dari sesi saat ini. Pastikan semua perubahan data parameter atau draf Anda telah tersimpan dengan benar di sistem.
+              </p>
+
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  onClick={() => setShowSignOutConfirm(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={executeSignOut}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition"
+                >
+                  Ya, Keluar
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
     </div>
   );
+}
+
+function SimpleMarkdown({ content }: { content: string }) {
+  const blocks = content.split('\n\n');
+
+  return (
+    <div className="space-y-4 text-slate-700 leading-relaxed text-sm">
+      {blocks.map((block, bIdx) => {
+        const trimmed = block.trim();
+        if (!trimmed) return null;
+
+        // Header 1
+        if (trimmed.startsWith('# ')) {
+          return <h1 key={bIdx} className="text-xl font-extrabold text-indigo-950 mt-6 mb-2 pb-1 border-b border-slate-200">{trimmed.slice(2)}</h1>;
+        }
+        // Header 2
+        if (trimmed.startsWith('## ')) {
+          return <h2 key={bIdx} className="text-lg font-bold text-indigo-950 mt-5 mb-2">{trimmed.slice(3)}</h2>;
+        }
+        // Header 3
+        if (trimmed.startsWith('### ')) {
+          return <h3 key={bIdx} className="text-md font-bold text-slate-850 mt-4 mb-2">{trimmed.slice(4)}</h3>;
+        }
+        // Bullet points
+        if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
+          const lines = trimmed.split('\n');
+          return (
+            <ul key={bIdx} className="list-disc pl-5 space-y-1.5">
+              {lines.map((line, lIdx) => {
+                const itemText = line.replace(/^[*-\s]+/, '');
+                return <li key={lIdx}>{renderInlines(itemText)}</li>;
+              })}
+            </ul>
+          );
+        }
+        // Numbered list
+        if (/^\d+\.\s/.test(trimmed)) {
+          const lines = trimmed.split('\n');
+          return (
+            <ol key={bIdx} className="list-decimal pl-5 space-y-1.5">
+              {lines.map((line, lIdx) => {
+                const itemText = line.replace(/^\d+\.\s+/, '');
+                return <li key={lIdx}>{renderInlines(itemText)}</li>;
+              })}
+            </ol>
+          );
+        }
+        // Blockquote
+        if (trimmed.startsWith('> ')) {
+          const text = trimmed.slice(2).replace(/\n>\s/g, '\n');
+          return (
+            <blockquote key={bIdx} className="border-l-4 border-purple-500 bg-slate-100/50 p-3 rounded-r-xl italic text-slate-600 my-2">
+              {renderInlines(text)}
+            </blockquote>
+          );
+        }
+
+        // Standard paragraph
+        return (
+          <p key={bIdx} className="whitespace-pre-line text-slate-650 leading-relaxed">
+            {renderInlines(trimmed)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function renderInlines(text: string) {
+  const parts = [];
+  let currentText = text;
+
+  while (currentText.length > 0) {
+    const boldMatch = currentText.match(/\*\*([^*]+)\*\*/);
+    const codeMatch = currentText.match(/`([^`]+)`/);
+
+    let firstMatch = null;
+    let type = '';
+
+    if (boldMatch && codeMatch) {
+      if ((boldMatch.index ?? 0) < (codeMatch.index ?? 0)) {
+        firstMatch = boldMatch;
+        type = 'bold';
+      } else {
+        firstMatch = codeMatch;
+        type = 'code';
+      }
+    } else if (boldMatch) {
+      firstMatch = boldMatch;
+      type = 'bold';
+    } else if (codeMatch) {
+      firstMatch = codeMatch;
+      type = 'code';
+    }
+
+    if (firstMatch && firstMatch.index !== undefined) {
+      if (firstMatch.index > 0) {
+        parts.push(currentText.substring(0, firstMatch.index));
+      }
+      if (type === 'bold') {
+        parts.push(<strong key={currentText.length} className="font-extrabold text-slate-900">{firstMatch[1]}</strong>);
+      } else if (type === 'code') {
+        parts.push(<code key={currentText.length} className="bg-slate-250 px-1.5 py-0.5 rounded text-rose-600 font-mono text-xs">{firstMatch[1]}</code>);
+      }
+      currentText = currentText.substring(firstMatch.index + firstMatch[0].length);
+    } else {
+      parts.push(currentText);
+      break;
+    }
+  }
+
+  return <>{parts}</>;
 }
