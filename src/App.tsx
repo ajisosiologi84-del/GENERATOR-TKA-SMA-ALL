@@ -5517,7 +5517,7 @@ Pembahasan:
                   </div>
                   <div>
                     <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
-                      Menu Pengaturan Cetak Lembar Ujian TKA SMA
+                      Menu Pengaturan MasterPrint TKA SMA
                     </h3>
                     <p className="text-[11px] text-slate-400">
                       Atur Kop Surat, identitas siswa, tata letak dua kolom, ukuran tulisan, dan cetak lembar kosong siswa atau lembar kunci jawaban.

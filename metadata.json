@@ -1,6 +1,6 @@
 {
-  "name": "Copy of Remix: Generator Kisi-Kisi \u0026 Soal TKA SMA",
-  "description": "Aplikasi Generator Prompt, Pembuat Kisi-Kisi (Matriks Asesmen), dan Penyusun Soal TKA SMA dengan Integrasi AI Gemini serta Ekspor Word \u0026 Excel.",
+  "name": "MasterPrint TKA SMA",
+  "description": "MasterPrint TKA SMA: Sistem Manajemen Kisi-Kisi & Soal TKA SMA berbasis AI.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
