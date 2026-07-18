@@ -507,7 +507,11 @@ if (process.env.NODE_ENV !== "production") {
     res.sendFile(path.join(distPath, "index.html"));
   });
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[PROD] Server running on port ${PORT}`);
-  });
+  if (!process.env.VERCEL) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`[PROD] Server running on port ${PORT}`);
+    });
+  }
 }
+
+export default app;
