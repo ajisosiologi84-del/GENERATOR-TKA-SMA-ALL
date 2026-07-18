@@ -1,6 +1,5 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
@@ -489,7 +488,8 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 // Serve frontend static assets in production, or let Vite handle it in dev
 if (process.env.NODE_ENV !== "production") {
   const startDevServer = async () => {
-    const vite = await createViteServer({
+    const { createServer } = await import("vite");
+    const vite = await createServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
