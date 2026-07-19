@@ -1700,6 +1700,83 @@ export default function App() {
   const [isGeneratingIllustration, setIsGeneratingIllustration] = useState(false);
   const [aiIllustratorStatus, setAiIllustratorStatus] = useState('');
 
+  // AI Config state (Support client-side direct bypass of Vercel 10s timeouts)
+  const [aiConfig, setAiConfig] = useState(() => {
+    const savedKey = localStorage.getItem('gemini_api_key') || '';
+    const savedMode = localStorage.getItem('gemini_api_mode') || 'server';
+    return {
+      mode: savedMode as 'server' | 'client',
+      apiKey: savedKey
+    };
+  });
+  const [showApiKey, setShowApiKey] = useState(false);
+
+  const handleSetAiMode = (mode: 'server' | 'client') => {
+    setAiConfig(prev => ({ ...prev, mode }));
+    localStorage.setItem('gemini_api_mode', mode);
+  };
+
+  const callGeminiDirect = async (
+    systemInstruction: string,
+    promptText: string,
+    responseSchema?: any
+  ): Promise<string> => {
+    if (!aiConfig.apiKey) {
+      throw new Error("Kunci API Gemini belum diatur! Silakan masukkan kunci API terlebih dahulu di Tab 1 (Pengaturan Koneksi AI) atau beralih ke mode Server.");
+    }
+
+    const model = "gemini-2.5-flash";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${aiConfig.apiKey}`;
+
+    const requestBody: any = {
+      contents: [
+        {
+          parts: [{ text: promptText }]
+        }
+      ],
+      generationConfig: {
+        temperature: 0.7,
+      }
+    };
+
+    if (systemInstruction) {
+      requestBody.systemInstruction = {
+        parts: [{ text: systemInstruction }]
+      };
+    }
+
+    if (responseSchema) {
+      requestBody.generationConfig.responseMimeType = "application/json";
+      requestBody.generationConfig.responseSchema = responseSchema;
+    }
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!res.ok) {
+      let errorText = '';
+      try {
+        const errObj = await res.json();
+        errorText = errObj.error?.message || JSON.stringify(errObj);
+      } catch {
+        errorText = await res.text();
+      }
+      throw new Error(`Google API Error: ${errorText || res.statusText}`);
+    }
+
+    const result = await res.json();
+    const candidateText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!candidateText) {
+      throw new Error("Tidak ada respon yang dihasilkan oleh model Gemini.");
+    }
+    return candidateText;
+  };
+
   // Prompt Generator outputs
   const [generatedKisiPrompt, setGeneratedKisiPrompt] = useState('');
   const [generatedSoalPrompt, setGeneratedSoalPrompt] = useState('');
@@ -2386,7 +2463,7 @@ Pembahasan:
     });
   };
 
-  // Trigger server-side AI generation of Kisi-Kisi
+  // Trigger server-side or client-side AI generation of Kisi-Kisi
   const handleGenerateKisiViaAI = async () => {
     if (!config.mataPelajaran) {
       alert('Sila pilih Mata Pelajaran terlebih dahulu di Tab 1!');
@@ -2394,45 +2471,90 @@ Pembahasan:
     }
     setIsGeneratingKisi(true);
     try {
-      const response = await fetch('/api/generate-kisi', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mataPelajaran: config.mataPelajaran,
-          definisi: config.definisi,
-          muatan: config.muatan,
-          kompetensi: config.kompetensi,
-          elemenMateri: config.elemenMateri,
-          subElemenMateri: config.subElemenMateri,
-          count: 3
-        })
-      });
-
-      if (!response.ok) {
-        let errorMsg = 'Terjadi kesalahan pada server AI.';
-        try {
-          const textError = await response.text();
-          if (textError.includes('<!doctype') || textError.includes('<html')) {
-            errorMsg = 'Server sedang sibuk atau mengalami timeout (Gateway Timeout). Silakan coba lagi beberapa saat.';
-          } else {
-            try {
-              const errorData = JSON.parse(textError);
-              errorMsg = errorData.error || errorMsg;
-            } catch {
-              errorMsg = textError || errorMsg;
-            }
-          }
-        } catch {}
-        throw new Error(errorMsg);
-      }
-
       let data;
-      try {
+      if (aiConfig.mode === 'client') {
+        const systemInstruction = `Anda adalah ahli kurikulum pendidikan Indonesia. Buatkan matriks kisi-kisi ujian TKA SMA tingkat tinggi (HOTS) berdasarkan masukan parameter mata pelajaran.`;
+        const prompt = `Buatkan 3 baris matriks asesmen kisi-kisi baru yang bervariasi secara otomatis untuk Mata Pelajaran ${config.mataPelajaran} dengan parameter:
+Definisi/Tujuan: ${config.definisi || ""}
+Muatan Kurikulum: ${config.muatan || ""}
+Kompetensi Umum: ${config.kompetensi || ""}
+Elemen/Materi: ${config.elemenMateri || ""}
+Sub-Elemen: ${config.subElemenMateri || ""}
+
+Aturan Penyusunan Matriks:
+1. Setiap baris harus bervariasi jenis bentuk soalnya: 'pilihan_ganda_sederhana' (PG Sederhana), 'mcma' (PG Kompleks Multiple Choice Multiple Answers), atau 'kategori' (PG Kompleks kategori Benar/Salah atau Sesuai/Tidak Sesuai).
+2. Tingkat kognitif harus bervariasi antara: 'level_1' (Pemahaman), 'level_2' (Penerapan), atau 'level_3' (Penalaran).
+3. Buat rincian elemen, sub-elemen, kompetensi yang diukur, serta batasan materi secara logis dan mendalam.
+4. Distribusikan jumlah soal per kisi-kisi (misalnya antara 3-10 soal per baris).
+5. Hasilkan juga 'konteksNusantara' serta 'stimulusTambahan' untuk meningkatkan kualitas stimulus soal.`;
+
+        const kisiSchema = {
+          type: "ARRAY",
+          items: {
+            type: "OBJECT",
+            properties: {
+              bentukSoal: { 
+                type: "STRING", 
+                description: "Nilai wajib berupa salah satu dari: 'pilihan_ganda_sederhana', 'mcma', atau 'kategori'" 
+              },
+              levelKognitif: { 
+                type: "STRING", 
+                description: "Nilai wajib berupa salah satu dari: 'level_1', 'level_2', atau 'level_3'" 
+              },
+              elemenMateri: { type: "STRING" },
+              subElemenMateri: { type: "STRING" },
+              kompetensi: { type: "STRING" },
+              batasanCatatan: { type: "STRING" },
+              jumlahSoal: { type: "INTEGER" },
+              konteksNusantara: { type: "STRING" },
+              stimulusTambahan: { type: "STRING" }
+            },
+            required: [
+              "bentukSoal", "levelKognitif", "elemenMateri", "subElemenMateri",
+              "kompetensi", "batasanCatatan", "jumlahSoal", "konteksNusantara", "stimulusTambahan"
+            ]
+          }
+        };
+
+        const responseText = await callGeminiDirect(systemInstruction, prompt, kisiSchema);
+        data = JSON.parse(responseText);
+      } else {
+        const response = await fetch('/api/generate-kisi', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mataPelajaran: config.mataPelajaran,
+            definisi: config.definisi,
+            muatan: config.muatan,
+            kompetensi: config.kompetensi,
+            elemenMateri: config.elemenMateri,
+            subElemenMateri: config.subElemenMateri,
+            count: 3
+          })
+        });
+
+        if (!response.ok) {
+          let errorMsg = 'Terjadi kesalahan pada server AI.';
+          try {
+            const textError = await response.text();
+            if (textError.includes('<!doctype') || textError.includes('<html')) {
+              errorMsg = 'Server sedang sibuk atau mengalami timeout (Gateway Timeout). Silakan coba lagi beberapa saat.';
+            } else {
+              try {
+                const errorData = JSON.parse(textError);
+                errorMsg = errorData.error || errorMsg;
+              } catch {
+                errorMsg = textError || errorMsg;
+              }
+            }
+          } catch {}
+          throw new Error(errorMsg);
+        }
+
         const responseText = await response.text();
         data = JSON.parse(responseText);
-      } catch {
-        throw new Error('Respon dari server tidak valid (bukan format JSON).');
       }
+
       if (Array.isArray(data)) {
         // Map to KisiKisiItem schema
         const mapped: KisiKisiItem[] = data.map((item: any, idx: number) => ({
@@ -2530,31 +2652,53 @@ Pembahasan:
     setIsPromptModalOpen(true);
   };
 
-  // Optimize prompt using server-side Gemini AI
+  // Optimize prompt using server-side or client-side Gemini AI
   const handleOptimizePromptWithAi = async () => {
     if (!selectedKisiForPrompt) return;
     setIsGeneratingPrompt(true);
     try {
-      const response = await fetch('/api/optimize-prompt', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          kisi: selectedKisiForPrompt,
-          mataPelajaran: config.mataPelajaran,
-        }),
-      });
+      if (aiConfig.mode === 'client') {
+        const systemInstruction = `Anda adalah pakar prompt engineering pendidikan.`;
+        const prompt = `Anda adalah seorang ahli instruktur prompt (prompt engineer) yang berpengalaman membuat instruktur sistem tingkat lanjut (system instructions) dan prompt untuk AI LLM generasi terbaru.
+Tugas Anda adalah memformulasikan prompt instruksi spesifik dan sangat mendalam (Super-Prompt) untuk menghasilkan butir-butir soal berkualitas tinggi (HOTS), lengkap dengan stimulus bacaan/tabel, opsi jawaban, kunci jawaban yang tepat, dan pembahasan terperinci.
 
-      if (!response.ok) {
-        throw new Error('Gagal menghubungi server AI untuk optimasi.');
-      }
+Masukan Parameter Kisi-Kisi:
+- Mata Pelajaran: ${config.mataPelajaran}
+- Bentuk Soal: ${selectedKisiForPrompt.bentukSoal}
+- Tingkat Kognitif: ${selectedKisiForPrompt.levelKognitif}
+- Elemen/Materi: ${selectedKisiForPrompt.elemenMateri}
+- Sub-Elemen/Submateri: ${selectedKisiForPrompt.subElemenMateri}
+- Kompetensi yang Diuji: ${selectedKisiForPrompt.kompetensi}
+- Batasan/Catatan Khusus: ${selectedKisiForPrompt.batasanCatatan || 'Tidak ada'}
+- Konteks Nusantara: ${selectedKisiForPrompt.konteksNusantara || 'Tidak ada'}
+- Stimulus Tambahan: ${selectedKisiForPrompt.stimulusTambahan || 'Tidak ada'}
 
-      const data = await response.json();
-      if (data.prompt) {
-        setGeneratedPromptText(data.prompt);
+Hasilkan rancangan prompt instruksi lengkap, terstruktur, profesional, dan dalam bahasa Indonesia formal, tanpa mencantumkan kode JSON atau Markdown codeblock, melainkan langsung teks prompt siap pakai yang bisa disalin oleh guru.`;
+
+        const optimizedPrompt = await callGeminiDirect(systemInstruction, prompt);
+        setGeneratedPromptText(optimizedPrompt);
       } else {
-        throw new Error('Format respon tidak sesuai.');
+        const response = await fetch('/api/optimize-prompt', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            kisi: selectedKisiForPrompt,
+            mataPelajaran: config.mataPelajaran,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Gagal menghubungi server AI untuk optimasi.');
+        }
+
+        const data = await response.json();
+        if (data.prompt) {
+          setGeneratedPromptText(data.prompt);
+        } else {
+          throw new Error('Format respon tidak sesuai.');
+        }
       }
     } catch (err: any) {
       alert(`Gagal optimasi prompt: ${err.message}. Menggunakan draf prompt lokal default.`);
@@ -2591,48 +2735,128 @@ Pembahasan:
           statusText: `Merancang butir soal #${i + 1} s.d #${i + countForThisChunk} via AI...`
         }));
         
-        const response = await fetch('/api/generate-soal', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            kisi,
-            count: countForThisChunk,
-            mataPelajaran: config.mataPelajaran,
-            definisi: config.definisi,
-            muatan: config.muatan,
-            jumlahOpsi: config.jumlahOpsi,
-            jenisSoal: config.jenisSoal,
-            konteksLokal: config.konteksLokal,
-            stimulusKonten: config.stimulusKonten,
-            kualitasChecklist: config.kualitasChecklist,
-            noSoalStart: currentNoSoal
-          })
-        });
-
-        if (!response.ok) {
-          let errorMsg = `Gagal menghubungi server AI untuk kumpulan soal ke-${Math.floor(i / chunkSize) + 1}`;
-          try {
-            const textError = await response.text();
-            if (textError.includes('<!doctype') || textError.includes('<html')) {
-              errorMsg = 'Server sedang sibuk atau mengalami timeout (Gateway Timeout). Coba lagi beberapa saat atau kurangi jumlah soal.';
-            } else {
-              try {
-                const errorData = JSON.parse(textError);
-                errorMsg = errorData.error || errorMsg;
-              } catch {
-                errorMsg = textError || errorMsg;
-              }
-            }
-          } catch {}
-          throw new Error(errorMsg);
-        }
-
         let data;
-        try {
-          const responseText = await response.text();
+        if (aiConfig.mode === 'client') {
+          const systemInstruction = `Anda adalah ahli pembuat soal ujian nasional dan TKA (Tes Kemampuan Akademik) SMA di Indonesia. Anda sangat terampil menyusun soal tingkat tinggi (HOTS), bervariasi, mendalam, dan bebas dari bias. Patuhi instruksi bentuk soal dan parameter kognitif secara presisi.`;
+
+          const activeKonteksLokal = (kisi.konteksLokal && kisi.konteksLokal.length > 0) ? kisi.konteksLokal : config.konteksLokal;
+          const activeStimulusKonten = (kisi.stimulusKonten && kisi.stimulusKonten.length > 0) ? kisi.stimulusKonten : config.stimulusKonten;
+          const activeKualitasChecklist = (kisi.kualitasChecklist && kisi.kualitasChecklist.length > 0) ? kisi.kualitasChecklist : config.kualitasChecklist;
+
+          const konteksStr = activeKonteksLokal.length > 0 
+            ? `Integrasikan KONTEKS LOKAL INDONESIA berikut ke dalam stimulus atau soal: ${activeKonteksLokal.join(", ")}.`
+            : "";
+
+          const stimulusStr = activeStimulusKonten.length > 0
+            ? `Gunakan tipe STIMULUS DAN PENGEMBANGAN KONTEN berikut: ${activeStimulusKonten.join(", ")} (misal teks bacaan, data/tabel, berita, kasus nyata).`
+            : "Gunakan stimulus yang relevan jika sesuai dengan kompetensi.";
+
+          const checklistStr = activeKualitasChecklist.length > 0
+            ? `Pastikan memenuhi KUALITAS SOAL berikut: ${activeKualitasChecklist.join(", ")}.`
+            : "";
+
+          const bentukSoalDesc = 
+            kisi.bentukSoal === "pilihan_ganda_sederhana"
+              ? `Pilihan ganda sederhana: Hanya ada satu jawaban yang benar. Sediakan pilihan A sampai ${config.jumlahOpsi === 5 ? "E" : "D"}.`
+              : kisi.bentukSoal === "mcma"
+              ? `Pilihan ganda kompleks model multiple choice multiple answers (MCMA): Ada lebih dari satu jawaban yang benar. Peserta diminta memilih semua jawaban benar. Kunci jawaban harus menyebutkan semua pilihan yang benar (misal: 'A, C'). Sediakan pilihan A sampai ${config.jumlahOpsi === 5 ? "E" : "D"}.`
+              : "Pilihan ganda kompleks kategori: Menyajikan beberapa pernyataan (minimal 3-4 pernyataan) yang semuanya harus direspon, misalnya dengan pilihan 'Benar'/'Salah' atau 'Sesuai'/'Tidak Sesuai'. Kunci jawaban harus merinci status setiap pernyataan (misal: '1. Benar, 2. Salah, 3. Benar').";
+
+          const prompt = `Buatkan tepat sebanyak ${countForThisChunk} butir soal ujian TKA SMA yang berbeda untuk Mata Pelajaran ${config.mataPelajaran}.
+          
+PENTING: Jumlah objek soal yang dihasilkan dalam array JSON HARUS tepat sebanyak ${countForThisChunk} butir soal, tidak kurang dan tidak lebih.
+Setiap butir soal harus unik, bervariasi, dan didasarkan pada kisi-kisi berikut.
+
+INFORMASI MATRIKS ASESMEN KISI-KISI:
+- No Soal Mulai: ${currentNoSoal}
+- Bentuk Soal: ${kisi.bentukSoal} (${bentukSoalDesc})
+- Tingkat Kognitif: ${kisi.levelKognitif} (${kisi.levelKognitif === 'level_1' ? 'Pemahaman (Knowing) - Mengenali, mengingat, dan memahami konsep dasar' : kisi.levelKognitif === 'level_2' ? 'Penerapan (Applying) - Menerapkan konsep pada fenomena nyata' : 'Penalaran (Reasoning) - Berpikir kritis dan menalar secara logis'})
+- Elemen/Materi: ${kisi.elemenMateri}
+- Sub-Elemen/Submateri: ${kisi.subElemenMateri}
+- Kompetensi yang Diuji: ${kisi.kompetensi}
+- Batasan/Catatan Khusus: ${kisi.batasanCatatan || "Tidak ada"}
+- Konteks Nusantara: ${kisi.konteksNusantara || "Tidak ada khusus"}
+- Stimulus Tambahan: ${kisi.stimulusTambahan || "Tidak ada khusus"}
+- Jenis Soal: ${config.jenisSoal} (Soal Tunggal atau Soal Grup/Terhubung)
+
+PANDUAN EKSTRA:
+1. ${konteksStr} ${kisi.konteksNusantara ? `Integrasikan juga secara mendalam target Konteks Nusantara berikut ke dalam stimulus atau pokok soal agar bernuansa ke-Indonesia-an yang otentik: "${kisi.konteksNusantara}".` : ""}
+2. ${stimulusStr} ${kisi.stimulusTambahan ? `Gunakan secara aktif target Stimulus Tambahan berikut untuk merancang stimulus/skenario pendukung yang kaya dan berbobot: "${kisi.stimulusTambahan}".` : ""}
+3. ${checklistStr}
+4. Kunci jawaban harus sangat akurat dan pembahasan harus lengkap, ilmiah, edukatif, dan terstruktur dengan rapi agar mudah dipahami siswa SMA. Tambahkan juga field 'kataKunci' yang berisi kata kunci atau konsep penting/topik utama yang digunakan/diuji dalam soal ini.
+5. JIKA soal membutuhkan visual pendukung (seperti grafik fungsi, diagram kartesius, bangun geometri, dsb.), Anda disarankan untuk membuat kode SVG inline yang valid (dimulai dengan '<svg' dan ditutup '</svg>' lengkap dengan viewBox, stroke, fill, teks label agar indah dan responsive) ATAU mencantumkan URL gambar Unsplash yang relevan pada field 'gambarUrl'. Jika tidak membutuhkan visual, isi 'gambarUrl' dengan string kosong "".
+6. Harap sesuaikan bahasa agar baku, formal, sesuai EBI (Ejaan Bahasa Indonesia), namun mudah dimengerti.
+7. Hasilkan tepat ${countForThisChunk} objek soal di dalam array hasil.`;
+
+          const soalSchema = {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                kompetensi: { type: "STRING" },
+                subKompetensi: { type: "STRING" },
+                bentukSoal: { type: "STRING" },
+                stimulus: { type: "STRING", description: "Paragraf stimulus atau pengantar soal (bila ada)" },
+                soal: { type: "STRING", description: "Pertanyaan atau pokok soal utama" },
+                opsi: { 
+                  type: "ARRAY", 
+                  items: { type: "STRING" }, 
+                  description: "Array pilihan jawaban (misal ['A. ...', 'B. ...']) atau daftar pernyataan untuk tipe kategori" 
+                },
+                kunciJawaban: { type: "STRING" },
+                pembahasan: { type: "STRING" },
+                kataKunci: { type: "STRING" },
+                gambarUrl: { type: "STRING" }
+              },
+              required: ["kompetensi", "subKompetensi", "bentukSoal", "soal", "opsi", "kunciJawaban", "pembahasan", "kataKunci", "gambarUrl"]
+            }
+          };
+
+          const responseText = await callGeminiDirect(systemInstruction, prompt, soalSchema);
           data = JSON.parse(responseText);
-        } catch (jsonErr: any) {
-          throw new Error('Respon dari server tidak valid (bukan JSON format). Silakan coba lagi.');
+        } else {
+          const response = await fetch('/api/generate-soal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              kisi,
+              count: countForThisChunk,
+              mataPelajaran: config.mataPelajaran,
+              definisi: config.definisi,
+              muatan: config.muatan,
+              jumlahOpsi: config.jumlahOpsi,
+              jenisSoal: config.jenisSoal,
+              konteksLokal: config.konteksLokal,
+              stimulusKonten: config.stimulusKonten,
+              kualitasChecklist: config.kualitasChecklist,
+              noSoalStart: currentNoSoal
+            })
+          });
+
+          if (!response.ok) {
+            let errorMsg = `Gagal menghubungi server AI untuk kumpulan soal ke-${Math.floor(i / chunkSize) + 1}`;
+            try {
+              const textError = await response.text();
+              if (textError.includes('<!doctype') || textError.includes('<html')) {
+                errorMsg = 'Server sedang sibuk atau mengalami timeout (Gateway Timeout). Coba lagi beberapa saat atau kurangi jumlah soal.';
+              } else {
+                try {
+                  const errorData = JSON.parse(textError);
+                  errorMsg = errorData.error || errorMsg;
+                } catch {
+                  errorMsg = textError || errorMsg;
+                }
+              }
+            } catch {}
+            throw new Error(errorMsg);
+          }
+
+          try {
+            const responseText = await response.text();
+            data = JSON.parse(responseText);
+          } catch (jsonErr: any) {
+            throw new Error('Respon dari server tidak valid (bukan JSON format). Silakan coba lagi.');
+          }
         }
 
         if (Array.isArray(data)) {
@@ -2718,42 +2942,64 @@ Pembahasan:
     }, 1500);
 
     try {
-      const response = await fetch('/api/generate-illustration', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: aiIllustratorPrompt,
-          context: questionForm.soal || ''
-        })
-      });
-
-      clearInterval(interval);
-
-      if (!response.ok) {
-        let errorMsg = 'Gagal menghasilkan gambar.';
-        try {
-          const textError = await response.text();
-          if (textError.includes('<!doctype') || textError.includes('<html')) {
-            errorMsg = 'Server sedang sibuk atau mengalami timeout (Gateway Timeout).';
-          } else {
-            try {
-              const errorData = JSON.parse(textError);
-              errorMsg = errorData.error || errorMsg;
-            } catch {
-              errorMsg = textError || errorMsg;
-            }
-          }
-        } catch {}
-        throw new Error(errorMsg);
-      }
-
       let data;
-      try {
-        const responseText = await response.text();
-        data = JSON.parse(responseText);
-      } catch {
-        throw new Error('Respon dari server tidak valid.');
+      if (aiConfig.mode === 'client') {
+        const systemInstruction = `Anda adalah desainer grafis vektor SVG profesional untuk konten edukasi sains, matematika, dan ilmu sosial. Hasilkan HANYA kode SVG inline lengkap yang valid, dimulai dengan '<svg' dan diakhiri dengan '</svg>' tanpa penjelasan markdown atau sapaan lainnya. Pastikan SVG menggunakan atribut viewBox agar responsif, berwarna elegan dengan skema modern, kontras tinggi yang jelas di latar belakang putih.`;
+        const promptText = `Buatkan grafis vektor SVG profesional dan edukatif berdasarkan instruksi berikut:
+"${aiIllustratorPrompt}"
+
+Konteks soal/konten:
+"${questionForm.soal || ''}"
+
+Ingat: HANYA berikan kode SVG murni. Jika Anda membungkusnya dengan blok markdown seperti \`\`\`xml atau \`\`\`html, pastikan bagian luar dibersihkan. Namun lebih baik langsung string SVG murni dimulai dengan <svg.`;
+
+        let responseText = await callGeminiDirect(systemInstruction, promptText);
+        clearInterval(interval);
+        
+        // Clean markdown blocks if returned by any chance
+        if (responseText.includes('```')) {
+          responseText = responseText.replace(/```[a-z]*\n?/gi, '').trim();
+        }
+        
+        data = { svg: responseText };
+      } else {
+        const response = await fetch('/api/generate-illustration', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: aiIllustratorPrompt,
+            context: questionForm.soal || ''
+          })
+        });
+
+        clearInterval(interval);
+
+        if (!response.ok) {
+          let errorMsg = 'Gagal menghasilkan gambar.';
+          try {
+            const textError = await response.text();
+            if (textError.includes('<!doctype') || textError.includes('<html')) {
+              errorMsg = 'Server sedang sibuk atau mengalami timeout (Gateway Timeout).';
+            } else {
+              try {
+                const errorData = JSON.parse(textError);
+                errorMsg = errorData.error || errorMsg;
+              } catch {
+                errorMsg = textError || errorMsg;
+              }
+            }
+          } catch {}
+          throw new Error(errorMsg);
+        }
+
+        try {
+          const responseText = await response.text();
+          data = JSON.parse(responseText);
+        } catch {
+          throw new Error('Respon dari server tidak valid.');
+        }
       }
+
       if (data.svg) {
         setQuestionForm(prev => ({ ...prev, gambarUrl: data.svg }));
         setIsAiIllustratorOpen(false);
@@ -2818,48 +3064,128 @@ Pembahasan:
             statusText: `Merancang butir soal #${i + 1} s.d #${i + countForThisChunk} untuk kisi-kisi No. ${kisi.no} via AI...`
           }));
 
-          const response = await fetch('/api/generate-soal', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              kisi,
-              count: countForThisChunk,
-              mataPelajaran: config.mataPelajaran,
-              definisi: config.definisi,
-              muatan: config.muatan,
-              jumlahOpsi: config.jumlahOpsi,
-              jenisSoal: config.jenisSoal,
-              konteksLokal: config.konteksLokal,
-              stimulusKonten: config.stimulusKonten,
-              kualitasChecklist: config.kualitasChecklist,
-              noSoalStart: currentNoSoal
-            })
-          });
-
-          if (!response.ok) {
-            let errorMsg = `Gagal pada kisi-kisi No. ${kisi.no} (kumpulan ke-${Math.floor(i / chunkSize) + 1})`;
-            try {
-              const textError = await response.text();
-              if (textError.includes('<!doctype') || textError.includes('<html')) {
-                errorMsg = 'Server sedang sibuk atau mengalami timeout (Gateway Timeout).';
-              } else {
-                try {
-                  const errorData = JSON.parse(textError);
-                  errorMsg = errorData.error || errorMsg;
-                } catch {
-                  errorMsg = textError || errorMsg;
-                }
-              }
-            } catch {}
-            throw new Error(errorMsg);
-          }
-
           let data;
-          try {
-            const responseText = await response.text();
+          if (aiConfig.mode === 'client') {
+            const systemInstruction = `Anda adalah ahli pembuat soal ujian nasional dan TKA (Tes Kemampuan Akademik) SMA di Indonesia. Anda sangat terampil menyusun soal tingkat tinggi (HOTS), bervariasi, mendalam, dan bebas dari bias. Patuhi instruksi bentuk soal dan parameter kognitif secara presisi.`;
+
+            const activeKonteksLokal = (kisi.konteksLokal && kisi.konteksLokal.length > 0) ? kisi.konteksLokal : config.konteksLokal;
+            const activeStimulusKonten = (kisi.stimulusKonten && kisi.stimulusKonten.length > 0) ? kisi.stimulusKonten : config.stimulusKonten;
+            const activeKualitasChecklist = (kisi.kualitasChecklist && kisi.kualitasChecklist.length > 0) ? kisi.kualitasChecklist : config.kualitasChecklist;
+
+            const konteksStr = activeKonteksLokal.length > 0 
+              ? `Integrasikan KONTEKS LOKAL INDONESIA berikut ke dalam stimulus atau soal: ${activeKonteksLokal.join(", ")}.`
+              : "";
+
+            const stimulusStr = activeStimulusKonten.length > 0
+              ? `Gunakan tipe STIMULUS DAN PENGEMBANGAN KONTEN berikut: ${activeStimulusKonten.join(", ")} (misal teks bacaan, data/tabel, berita, kasus nyata).`
+              : "Gunakan stimulus yang relevan jika sesuai dengan kompetensi.";
+
+            const checklistStr = activeKualitasChecklist.length > 0
+              ? `Pastikan memenuhi KUALITAS SOAL berikut: ${activeKualitasChecklist.join(", ")}.`
+              : "";
+
+            const bentukSoalDesc = 
+              kisi.bentukSoal === "pilihan_ganda_sederhana"
+                ? `Pilihan ganda sederhana: Hanya ada satu jawaban yang benar. Sediakan pilihan A sampai ${config.jumlahOpsi === 5 ? "E" : "D"}.`
+                : kisi.bentukSoal === "mcma"
+                ? `Pilihan ganda kompleks model multiple choice multiple answers (MCMA): Ada lebih dari satu jawaban yang benar. Peserta diminta memilih semua jawaban benar. Kunci jawaban harus menyebutkan semua pilihan yang benar (misal: 'A, C'). Sediakan pilihan A sampai ${config.jumlahOpsi === 5 ? "E" : "D"}.`
+                : "Pilihan ganda kompleks kategori: Menyajikan beberapa pernyataan (minimal 3-4 pernyataan) yang semuanya harus direspon, misalnya dengan pilihan 'Benar'/'Salah' atau 'Sesuai'/'Tidak Sesuai'. Kunci jawaban harus merinci status setiap pernyataan (misal: '1. Benar, 2. Salah, 3. Benar').";
+
+            const prompt = `Buatkan tepat sebanyak ${countForThisChunk} butir soal ujian TKA SMA yang berbeda untuk Mata Pelajaran ${config.mataPelajaran}.
+            
+PENTING: Jumlah objek soal yang dihasilkan dalam array JSON HARUS tepat sebanyak ${countForThisChunk} butir soal, tidak kurang dan tidak lebih.
+Setiap butir soal harus unik, bervariasi, dan didasarkan pada kisi-kisi berikut.
+
+INFORMASI MATRIKS ASESMEN KISI-KISI:
+- No Soal Mulai: ${currentNoSoal}
+- Bentuk Soal: ${kisi.bentukSoal} (${bentukSoalDesc})
+- Tingkat Kognitif: ${kisi.levelKognitif} (${kisi.levelKognitif === 'level_1' ? 'Pemahaman (Knowing) - Mengenali, mengingat, dan memahami konsep dasar' : kisi.levelKognitif === 'level_2' ? 'Penerapan (Applying) - Menerapkan konsep pada fenomena nyata' : 'Penalaran (Reasoning) - Berpikir kritis dan menalar secara logis'})
+- Elemen/Materi: ${kisi.elemenMateri}
+- Sub-Elemen/Submateri: ${kisi.subElemenMateri}
+- Kompetensi yang Diuji: ${kisi.kompetensi}
+- Batasan/Catatan Khusus: ${kisi.batasanCatatan || "Tidak ada"}
+- Konteks Nusantara: ${kisi.konteksNusantara || "Tidak ada khusus"}
+- Stimulus Tambahan: ${kisi.stimulusTambahan || "Tidak ada khusus"}
+- Jenis Soal: ${config.jenisSoal} (Soal Tunggal atau Soal Grup/Terhubung)
+
+PANDUAN EKSTRA:
+1. ${konteksStr} ${kisi.konteksNusantara ? `Integrasikan juga secara mendalam target Konteks Nusantara berikut ke dalam stimulus atau pokok soal agar bernuansa ke-Indonesia-an yang otentik: "${kisi.konteksNusantara}".` : ""}
+2. ${stimulusStr} ${kisi.stimulusTambahan ? `Gunakan secara aktif target Stimulus Tambahan berikut untuk merancang stimulus/skenario pendukung yang kaya dan berbobot: "${kisi.stimulusTambahan}".` : ""}
+3. ${checklistStr}
+4. Kunci jawaban harus sangat akurat dan pembahasan harus lengkap, ilmiah, edukatif, dan terstruktur dengan rapi agar mudah dipahami siswa SMA. Tambahkan juga field 'kataKunci' yang berisi kata kunci atau konsep penting/topik utama yang digunakan/diuji dalam soal ini.
+5. JIKA soal membutuhkan visual pendukung (seperti grafik fungsi, diagram kartesius, bangun geometri, dsb.), Anda disarankan untuk membuat kode SVG inline yang valid (dimulai dengan '<svg' dan ditutup '</svg>' lengkap dengan viewBox, stroke, fill, teks label agar indah dan responsive) ATAU mencantumkan URL gambar Unsplash yang relevan pada field 'gambarUrl'. Jika tidak membutuhkan visual, isi 'gambarUrl' dengan string kosong "".
+6. Harap sesuaikan bahasa agar baku, formal, sesuai EBI (Ejaan Bahasa Indonesia), namun mudah dimengerti.
+7. Hasilkan tepat ${countForThisChunk} objek soal di dalam array hasil.`;
+
+            const soalSchema = {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  kompetensi: { type: "STRING" },
+                  subKompetensi: { type: "STRING" },
+                  bentukSoal: { type: "STRING" },
+                  stimulus: { type: "STRING", description: "Paragraf stimulus atau pengantar soal (bila ada)" },
+                  soal: { type: "STRING", description: "Pertanyaan atau pokok soal utama" },
+                  opsi: { 
+                    type: "ARRAY", 
+                    items: { type: "STRING" }, 
+                    description: "Array pilihan jawaban (misal ['A. ...', 'B. ...']) atau daftar pernyataan untuk tipe kategori" 
+                  },
+                  kunciJawaban: { type: "STRING" },
+                  pembahasan: { type: "STRING" },
+                  kataKunci: { type: "STRING" },
+                  gambarUrl: { type: "STRING" }
+                },
+                required: ["kompetensi", "subKompetensi", "bentukSoal", "soal", "opsi", "kunciJawaban", "pembahasan", "kataKunci", "gambarUrl"]
+              }
+            };
+
+            const responseText = await callGeminiDirect(systemInstruction, prompt, soalSchema);
             data = JSON.parse(responseText);
-          } catch {
-            throw new Error('Respon dari server tidak valid (bukan JSON format).');
+          } else {
+            const response = await fetch('/api/generate-soal', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                kisi,
+                count: countForThisChunk,
+                mataPelajaran: config.mataPelajaran,
+                definisi: config.definisi,
+                muatan: config.muatan,
+                jumlahOpsi: config.jumlahOpsi,
+                jenisSoal: config.jenisSoal,
+                konteksLokal: config.konteksLokal,
+                stimulusKonten: config.stimulusKonten,
+                kualitasChecklist: config.kualitasChecklist,
+                noSoalStart: currentNoSoal
+              })
+            });
+
+            if (!response.ok) {
+              let errorMsg = `Gagal pada kisi-kisi No. ${kisi.no} (kumpulan ke-${Math.floor(i / chunkSize) + 1})`;
+              try {
+                const textError = await response.text();
+                if (textError.includes('<!doctype') || textError.includes('<html')) {
+                  errorMsg = 'Server sedang sibuk atau mengalami timeout (Gateway Timeout).';
+                } else {
+                  try {
+                    const errorData = JSON.parse(textError);
+                    errorMsg = errorData.error || errorMsg;
+                  } catch {
+                    errorMsg = textError || errorMsg;
+                  }
+                }
+              } catch {}
+              throw new Error(errorMsg);
+            }
+
+            try {
+              const responseText = await response.text();
+              data = JSON.parse(responseText);
+            } catch {
+              throw new Error('Respon dari server tidak valid (bukan JSON format).');
+            }
           }
 
           if (Array.isArray(data)) {
@@ -4213,6 +4539,83 @@ Pembahasan:
             {/* Right: Extra Aspects + Prompts Outputs */}
             <div className="lg:col-span-7 space-y-6">
               
+              {/* AI Connection Settings Card */}
+              <section id="ai-settings-card" className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-indigo-600 animate-pulse" />
+                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Pengaturan Koneksi AI (Gemini)</h3>
+                  </div>
+                  <span className={`px-2.5 py-0.5 text-[10px] font-bold uppercase rounded-full ${aiConfig.mode === 'client' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-50 text-slate-600 border border-slate-200'}`}>
+                    Mode Aktif: {aiConfig.mode === 'client' ? 'Bypass Browser' : 'Default Server'}
+                  </span>
+                </div>
+
+                <div className="space-y-4 text-xs">
+                  <p className="text-slate-600 leading-relaxed">
+                    Jika fitur pembuat soal AI gagal di server produksi (Vercel) akibat batas waktu eksekusi (timeout 10 detik), silakan beralih ke <b>Mode Browser (Direct API)</b> dengan memasukkan Kunci API Gemini Anda sendiri untuk bypass timeout tersebut secara total.
+                  </p>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSetAiMode('server')}
+                      className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition flex items-center justify-center gap-1.5 ${aiConfig.mode === 'server' ? 'bg-slate-900 border-slate-900 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      <span>🌐 Mode Server</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetAiMode('client')}
+                      className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition flex items-center justify-center gap-1.5 ${aiConfig.mode === 'client' ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      <span>⚡ Mode Browser (Direct)</span>
+                    </button>
+                  </div>
+
+                  {aiConfig.mode === 'client' && (
+                    <div className="space-y-2 p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl animate-fadeIn">
+                      <div className="flex justify-between items-center">
+                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide">
+                          Kunci API Gemini Anda (Direct API)
+                        </label>
+                        <a
+                          href="https://aistudio.google.com/"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] text-indigo-600 hover:underline font-bold"
+                        >
+                          Dapatkan API Key Gratis ↗
+                        </a>
+                      </div>
+                      <div className="relative">
+                        <input
+                          type={showApiKey ? "text" : "password"}
+                          value={aiConfig.apiKey}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setAiConfig(prev => ({ ...prev, apiKey: val }));
+                            localStorage.setItem('gemini_api_key', val);
+                          }}
+                          placeholder="AIzaSy..."
+                          className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg pl-3 pr-10 py-1.5 text-xs font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKey(!showApiKey)}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        >
+                          {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-slate-500">
+                        🔒 Kunci API disimpan secara lokal di browser Anda dan <b>tidak pernah</b> dikirimkan ke server eksternal mana pun selain Google API langsung.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </section>
+
               {/* Context and Quality Checklist Selector */}
               <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
                 <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-1.5 uppercase tracking-wide">
