@@ -115,12 +115,14 @@ async function generateContentWithFallbackAndRetry(
 }
 
 // API Routes
-app.get("/api/health", (req, res) => {
+const apiRouter = express.Router();
+
+apiRouter.get("/health", (req, res) => {
   res.json({ status: "ok", apiKeyPresent: !!process.env.GEMINI_API_KEY });
 });
 
 // Endpoint 1: Generate Kisi-Kisi (Matriks Asesmen) via AI
-app.post("/api/generate-kisi", async (req, res) => {
+apiRouter.post("/generate-kisi", async (req, res) => {
   try {
     const {
       mataPelajaran,
@@ -209,7 +211,7 @@ Aturan Penyusunan Matriks:
 });
 
 // Endpoint 2: Generate Soal (Pembuat Soal) dari Kisi-Kisi via AI
-app.post("/api/generate-soal", async (req, res) => {
+apiRouter.post("/generate-soal", async (req, res) => {
   try {
     const {
       kisi,
@@ -327,7 +329,7 @@ PANDUAN EKSTRA:
 });
 
 // Endpoint 3: Generate Custom SVG Illustration/Graphic via AI Gemini
-app.post("/api/generate-illustration", async (req, res) => {
+apiRouter.post("/generate-illustration", async (req, res) => {
   try {
     const { prompt, context } = req.body;
     if (!prompt) {
@@ -378,7 +380,7 @@ Ingat, hanya hasilkan kode SVG langsung tanpa penanda kode atau pembungkus markd
 });
 
 // Endpoint 4: Optimize/Generate Professional AI Prompt for a Kisi-Kisi Row
-app.post("/api/optimize-prompt", async (req, res) => {
+apiRouter.post("/optimize-prompt", async (req, res) => {
   try {
     const { kisi, mataPelajaran } = req.body;
     if (!kisi) {
@@ -430,7 +432,7 @@ Tulis draf prompt tersebut langsung dalam format Markdown yang elegan, berwibawa
 });
 
 // Endpoint 5: Generate Systematic Learning Material from Kisi-Kisi Row
-app.post("/api/generate-materi", async (req, res) => {
+apiRouter.post("/generate-materi", async (req, res) => {
   try {
     const { kisi, mataPelajaran, guidanceText } = req.body;
     if (!kisi) {
@@ -478,6 +480,10 @@ Ingat, buat modul ini SANGAT DETAIL dan kaya teks penjelasan ilmiah agar layak d
     res.status(500).json({ error: error.message || "Gagal membuat materi pembelajaran" });
   }
 });
+
+// Mount the API Router on both /api and / to handle Vercel routing variations seamlessly
+app.use("/api", apiRouter);
+app.use("/", apiRouter);
 
 // Global Error Handling Middleware to guarantee JSON response format on failure
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
