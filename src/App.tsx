@@ -48,7 +48,9 @@ import {
   collection, 
   onSnapshot, 
   writeBatch,
-  deleteDoc
+  deleteDoc,
+  query,
+  where
 } from 'firebase/firestore';
 import LoginScreen from './components/LoginScreen';
 import { 
@@ -1597,57 +1599,34 @@ export default function App() {
     if (!currentUser) return;
 
     // Listen to Kisi-Kisi
-    const unsubscribeKisi = onSnapshot(collection(db, 'kisi_kisi'), async (snapshot) => {
-      if (!snapshot.empty) {
-        const list: KisiKisiItem[] = [];
-        snapshot.forEach((doc) => {
-          list.push({ id: doc.id, ...doc.data() } as KisiKisiItem);
-        });
-        list.sort((a, b) => (a.no || 0) - (b.no || 0));
-        setKisiList(list);
-      } else {
-        console.log("Seeding default Kisi-Kisi to Firestore...");
-        try {
-          const batch = writeBatch(db);
-          defaultKisiList.forEach((item) => {
-            batch.set(doc(db, 'kisi_kisi', item.id), item);
-          });
-          await batch.commit();
-        } catch (err) {
-          console.error("Gagal seeding default kisi-kisi:", err);
-        }
-      }
+    const qKisi = query(collection(db, 'kisi_kisi'), where('userId', '==', currentUser.uid));
+    const unsubscribeKisi = onSnapshot(qKisi, async (snapshot) => {
+      const list: KisiKisiItem[] = [];
+      snapshot.forEach((doc) => {
+        list.push({ id: doc.id, ...doc.data() } as KisiKisiItem);
+      });
+      list.sort((a, b) => (a.no || 0) - (b.no || 0));
+      setKisiList(list);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'kisi_kisi');
     });
 
     // Listen to Questions
-    const unsubscribeQuestions = onSnapshot(collection(db, 'questions'), async (snapshot) => {
-      if (!snapshot.empty) {
-        const list: Question[] = [];
-        snapshot.forEach((doc) => {
-          list.push({ id: doc.id, ...doc.data() } as Question);
-        });
-        list.sort((a, b) => (a.noSoal || 0) - (b.noSoal || 0));
-        setQuestions(list);
-      } else {
-        console.log("Seeding default Questions to Firestore...");
-        try {
-          const batch = writeBatch(db);
-          defaultQuestions.forEach((q) => {
-            batch.set(doc(db, 'questions', q.id), q);
-          });
-          await batch.commit();
-        } catch (err) {
-          console.error("Gagal seeding default questions:", err);
-        }
-      }
+    const qQuestions = query(collection(db, 'questions'), where('userId', '==', currentUser.uid));
+    const unsubscribeQuestions = onSnapshot(qQuestions, async (snapshot) => {
+      const list: Question[] = [];
+      snapshot.forEach((doc) => {
+        list.push({ id: doc.id, ...doc.data() } as Question);
+      });
+      list.sort((a, b) => (a.noSoal || 0) - (b.noSoal || 0));
+      setQuestions(list);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'questions');
     });
 
     // Listen to Materials
-    const unsubscribeMaterials = onSnapshot(collection(db, 'materials'), (snapshot) => {
+    const qMaterials = query(collection(db, 'materials'), where('userId', '==', currentUser.uid));
+    const unsubscribeMaterials = onSnapshot(qMaterials, (snapshot) => {
       const mats: Record<string, string> = {};
       snapshot.forEach((doc) => {
         mats[doc.id] = doc.data().content;
@@ -1904,6 +1883,7 @@ export default function App() {
       if (data.materi) {
         await setDoc(doc(db, 'materials', kisi.id), {
           content: data.materi,
+          userId: currentUser?.uid,
           updatedAt: new Date()
         });
         setActiveMateriKisiId(kisi.id);
@@ -2457,6 +2437,7 @@ Pembahasan:
         // Map to KisiKisiItem schema
         const mapped: KisiKisiItem[] = data.map((item: any, idx: number) => ({
           id: `kisi-ai-${Date.now()}-${idx}`,
+          userId: currentUser?.uid,
           no: kisiList.length + idx + 1,
           bentukSoal: ['pilihan_ganda_sederhana', 'mcma', 'kategori'].includes(item.bentukSoal) 
             ? item.bentukSoal 
@@ -2657,6 +2638,7 @@ Pembahasan:
         if (Array.isArray(data)) {
           const mapped: Question[] = data.map((q: any, idx: number) => ({
             id: `q-ai-${Date.now()}-${i}-${idx}`,
+            userId: currentUser?.uid,
             noSoal: currentNoSoal + idx,
             kisiKisiId: kisi.id,
             kompetensi: q.kompetensi || kisi.kompetensi,
@@ -2952,6 +2934,7 @@ Pembahasan:
     try {
       const newItem: KisiKisiItem = {
         id: `kisi-pusmendik-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        userId: currentUser?.uid,
         no: kisiList.length + 1,
         bentukSoal: 'pilihan_ganda_sederhana',
         levelKognitif: 'level_2',
@@ -3023,6 +3006,7 @@ Pembahasan:
       try {
         const newItems: KisiKisiItem[] = activePresets.map((preset, idx) => ({
           id: `kisi-pusmendik-all-${Date.now()}-${idx}`,
+          userId: currentUser?.uid,
           no: kisiList.length + idx + 1,
           bentukSoal: 'pilihan_ganda_sederhana',
           levelKognitif: 'level_2',
@@ -3090,6 +3074,7 @@ Pembahasan:
       if (isEditingKisi && editingKisiId) {
         const updatedItem = {
           id: editingKisiId,
+          userId: currentUser?.uid,
           no: kisiList.find(item => item.id === editingKisiId)?.no || 1,
           bentukSoal: kisiForm.bentukSoal as BentukSoal,
           levelKognitif: kisiForm.levelKognitif as LevelKognitif,
@@ -3110,6 +3095,7 @@ Pembahasan:
       } else {
         const newItem: KisiKisiItem = {
           id: `kisi-manual-${Date.now()}`,
+          userId: currentUser?.uid,
           no: kisiList.length + 1,
           bentukSoal: kisiForm.bentukSoal as BentukSoal,
           levelKognitif: kisiForm.levelKognitif as LevelKognitif,
@@ -3213,6 +3199,7 @@ Pembahasan:
       if (isEditingQuestion && editingQuestionId) {
         const updatedQ = {
           id: editingQuestionId,
+          userId: currentUser?.uid,
           noSoal: questions.find(q => q.id === editingQuestionId)?.noSoal || 1,
           kisiKisiId: questionForm.kisiKisiId || '',
           kompetensi: questionForm.kompetensi || '',
@@ -3232,6 +3219,7 @@ Pembahasan:
       } else {
         const newQ: Question = {
           id: `q-manual-${Date.now()}`,
+          userId: currentUser?.uid,
           noSoal: questions.length + 1,
           kisiKisiId: questionForm.kisiKisiId || '',
           kompetensi: questionForm.kompetensi || 'Kompetensi Umum',

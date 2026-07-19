@@ -8,6 +8,7 @@ export type JenisSoal = 'tunggal' | 'grup';
 
 export interface KisiKisiItem {
   id: string;
+  userId?: string;
   no: number;
   bentukSoal: BentukSoal;
   levelKognitif: LevelKognitif;
@@ -25,6 +26,7 @@ export interface KisiKisiItem {
 
 export interface Question {
   id: string;
+  userId?: string;
   noSoal: number;
   kisiKisiId: string; // Reference to which Kisi-Kisi row this belongs to
   kompetensi: string;
@@ -36,7 +38,7 @@ export interface Question {
   kunciJawaban: string; // Kunci jawaban
   pembahasan: string; // Structured explanation
   kataKunci?: string; // Kata Kunci atau Konsep yang digunakan
-  gambarUrl?: string; // URL Gambar, Ilustrasi, atau Grafik (Opsional)
+  gambarUrl?: string; // URL Gambar, Ilustrasi, or Grafik (Opsional)
 }
 
 export interface GeneratorConfig {
