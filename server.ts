@@ -47,11 +47,11 @@ async function generateContentWithFallbackAndRetry(
     config?: any;
   }
 ): Promise<any> {
-  // Ordered by preferred + high availability (2.5-flash is extremely fast, followed by 3.5-flash and lite)
+  // Ordered by preferred + high availability
   const modelsToTry = [
-    "gemini-2.5-flash",
     "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
+    "gemini-2.5-flash",
     "gemini-flash-latest"
   ];
 
@@ -75,23 +75,24 @@ async function generateContentWithFallbackAndRetry(
     const isCoolOff = coolOffModels.has(model) && (now - (coolOffModels.get(model) || 0) <= COOL_OFF_DURATION);
     console.log(`Calling Gemini API using model ${model}${isCoolOff ? ' (deferred fallback)' : ''}...`);
     try {
-      // 15-second timeout per model call to allow fast failover before gateway/client times out
+      // 90-second timeout per model call to allow sufficient time for complex JSON structure generation
       let timeoutId: any;
       const apiCall = ai.models.generateContent({
         model,
         contents: params.contents,
         config: params.config,
-      }).then(res => {
-        if (timeoutId) clearTimeout(timeoutId);
-        return res;
       });
 
       const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(`Timeout waiting for model ${model}`)), 15000);
+        timeoutId = setTimeout(() => reject(new Error(`Timeout waiting for model ${model}`)), 90000);
       });
 
-      const response = await Promise.race([apiCall, timeoutPromise]);
-      return response;
+      try {
+        const response = await Promise.race([apiCall, timeoutPromise]);
+        return response;
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
     } catch (error: any) {
       lastError = error;
       console.error(`Model ${model} failed with error:`, error);
