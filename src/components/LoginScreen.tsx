@@ -29,10 +29,15 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState<'admin' | 'user'>('user');
+  const [adminSecretCode, setAdminSecretCode] = useState('');
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Check if ?register=true or ?reg=1 or ?setup=admin is in URL to enable self-registration
+  const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
+  const isRegisterParamPresent = params.get('register') === 'true' || params.get('reg') === '1' || params.get('setup') === 'admin';
 
   const handleFetchUserProfileAndCallback = async (uid: string, fallbackEmail: string) => {
     try {
@@ -114,6 +119,16 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       setError("Silakan lengkapi seluruh formulir pendaftaran.");
       return;
     }
+
+    // Secure Admin Registration verification
+    if (role === 'admin') {
+      const trimmedCode = adminSecretCode.trim();
+      if (trimmedCode !== 'MASTERPRINT-ADMIN' && trimmedCode !== 'TKA-SMA-ADMIN') {
+        setError("Kode Verifikasi Administrator salah atau tidak sah.");
+        return;
+      }
+    }
+
     setLoading(true);
     setError(null);
     try {
@@ -152,63 +167,6 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
     }
   };
 
-  const handleQuickDemoLogin = async (demoRole: 'admin' | 'user') => {
-    setLoading(true);
-    setError(null);
-    const demoEmail = demoRole === 'admin' ? 'admin@tka.com' : 'user@tka.com';
-    const demoPassword = demoRole === 'admin' ? 'admin123' : 'user123';
-    const demoName = demoRole === 'admin' ? 'Admin TKA SMA' : 'Guru Sosiologi';
-
-    try {
-      // Attempt sign in first
-      const userCred = await signInWithEmailAndPassword(auth, demoEmail, demoPassword);
-      await handleFetchUserProfileAndCallback(userCred.user.uid, demoEmail);
-    } catch (err: any) {
-      // If user doesn't exist, create it automatically
-      const isUserNotFound = 
-        err.code === 'auth/user-not-found' || 
-        err.code === 'auth/invalid-credential' || 
-        err.code === 'auth/invalid-login-credentials' ||
-        (err.message && (
-          err.message.includes('invalid-credential') || 
-          err.message.includes('invalid-login-credentials') ||
-          err.message.includes('user-not-found')
-        ));
-
-      if (isUserNotFound) {
-        try {
-          const newUserCred = await createUserWithEmailAndPassword(auth, demoEmail, demoPassword);
-          const uid = newUserCred.user.uid;
-
-          await updateProfile(newUserCred.user, {
-            displayName: demoName
-          });
-
-          await setDoc(doc(db, 'users', uid), {
-            uid,
-            email: demoEmail,
-            name: demoName,
-            role: demoRole,
-            createdAt: new Date()
-          });
-
-          onLoginSuccess(demoRole, demoName);
-        } catch (signupErr: any) {
-          console.error("Quick login signup failed:", signupErr);
-          if (signupErr.code === 'auth/email-already-in-use') {
-            setError(`Akun uji coba (${demoEmail}) sudah terdaftar dengan password lain. Silakan masuk secara manual.`);
-          } else {
-            setError(`Gagal membuat akun uji coba otomatis: ${signupErr.message}`);
-          }
-        }
-      } else {
-        setError(`Akses uji coba gagal: ${err.message}`);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center px-4 relative overflow-hidden">
       {/* Absolute Decorative Circles */}
@@ -231,12 +189,48 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           <p className="text-xs text-slate-400 mt-1">Sistem Manajemen Kisi-Kisi & Soal TKA SMA berbasis AI</p>
         </div>
 
-        {/* Sign In Only Header */}
-        <div className="bg-indigo-600/10 border border-indigo-500/20 py-2.5 px-4 rounded-xl mb-6 text-center">
-          <span className="text-[11px] font-extrabold text-indigo-400 uppercase tracking-widest flex items-center justify-center gap-1.5">
-            <Lock className="h-3.5 w-3.5" /> Portal Masuk Pengguna Resmi
-          </span>
-        </div>
+        {/* Conditional Tab Selector for Registration */}
+        {isRegisterParamPresent && (
+          <div className="flex border border-slate-800 mb-6 bg-slate-950/40 p-1 rounded-2xl">
+            <button
+              onClick={() => {
+                setActiveTab('signin');
+                setError(null);
+                setSuccessMsg(null);
+              }}
+              className={`flex-1 py-2 px-3 text-center rounded-xl font-bold text-xs transition-all ${
+                activeTab === 'signin'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Masuk
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('signup');
+                setError(null);
+                setSuccessMsg(null);
+              }}
+              className={`flex-1 py-2 px-3 text-center rounded-xl font-bold text-xs transition-all ${
+                activeTab === 'signup'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Daftar Baru
+            </button>
+          </div>
+        )}
+
+        {/* Portal Header when registration tab isn't shown */}
+        {!isRegisterParamPresent && (
+          <div className="bg-indigo-600/10 border border-indigo-500/20 py-2.5 px-4 rounded-xl mb-6 text-center">
+            <span className="text-[11px] font-extrabold text-indigo-400 uppercase tracking-widest flex items-center justify-center gap-1.5">
+              <Lock className="h-3.5 w-3.5" /> Portal Masuk Pengguna Resmi
+            </span>
+          </div>
+        )}
 
         {/* Alert Messages */}
         {error && (
@@ -261,58 +255,188 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           </motion.div>
         )}
 
-        {/* Form Inputs */}
-        <form onSubmit={handleSignIn} className="space-y-4">
-          <div>
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Alamat Email</label>
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
-                <Mail className="h-4 w-4" />
-              </span>
-              <input
-                type="email"
-                placeholder="nama@sekolah.sch.id"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
-                disabled={loading}
-              />
+        {/* Form Inputs (Conditional by Tab) */}
+        {activeTab === 'signin' ? (
+          <form onSubmit={handleSignIn} className="space-y-4">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Alamat Email</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
+                  <Mail className="h-4 w-4" />
+                </span>
+                <input
+                  type="email"
+                  placeholder="nama@sekolah.sch.id"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
+                  disabled={loading}
+                />
+              </div>
             </div>
-          </div>
 
-          <div>
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Password</label>
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
-                <Lock className="h-4 w-4" />
-              </span>
-              <input
-                type="password"
-                placeholder="******"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
-                disabled={loading}
-              />
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Password</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
+                  <Lock className="h-4 w-4" />
+                </span>
+                <input
+                  type="password"
+                  placeholder="******"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
+                  disabled={loading}
+                />
+              </div>
             </div>
+
+            {/* Action Button */}
+            <button
+              type="submit"
+              className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-extrabold py-3 px-4 rounded-xl shadow-lg transition-all duration-200 flex items-center justify-center gap-2 text-xs mt-2 disabled:opacity-50"
+              disabled={loading}
+            >
+              {loading ? "Memproses..." : "Masuk ke Aplikasi"}
+              {!loading && <ArrowRight className="h-4 w-4" />}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleSignUp} className="space-y-4">
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Nama Lengkap</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
+                  <User className="h-4 w-4" />
+                </span>
+                <input
+                  type="text"
+                  placeholder="Nama Lengkap & Gelar"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
+                  disabled={loading}
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Alamat Email</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
+                  <Mail className="h-4 w-4" />
+                </span>
+                <input
+                  type="email"
+                  placeholder="nama@sekolah.sch.id"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
+                  disabled={loading}
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Password</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
+                  <Lock className="h-4 w-4" />
+                </span>
+                <input
+                  type="password"
+                  placeholder="Minimal 6 Karakter"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
+                  disabled={loading}
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Peran Pengguna (Role)</label>
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                <button
+                  type="button"
+                  onClick={() => setRole('user')}
+                  className={`py-2 px-3 text-xs font-semibold rounded-xl border transition ${
+                    role === 'user'
+                      ? 'bg-slate-800 border-indigo-500 text-indigo-400'
+                      : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  Guru Sosiologi
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRole('admin')}
+                  className={`py-2 px-3 text-xs font-semibold rounded-xl border transition ${
+                    role === 'admin'
+                      ? 'bg-slate-800 border-indigo-500 text-indigo-400'
+                      : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  Administrator
+                </button>
+              </div>
+            </div>
+
+            {role === 'admin' && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                className="space-y-1"
+              >
+                <label className="block text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Kode Khusus Verifikasi Admin</label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-indigo-500">
+                    <Shield className="h-4 w-4" />
+                  </span>
+                  <input
+                    type="password"
+                    placeholder="Masukkan Kode Khusus Admin"
+                    value={adminSecretCode}
+                    onChange={(e) => setAdminSecretCode(e.target.value)}
+                    className="w-full bg-slate-950 border border-indigo-950 text-indigo-300 rounded-xl pl-10 pr-4 py-2.5 text-xs placeholder-slate-700 focus:outline-none focus:border-indigo-500 transition font-mono"
+                    disabled={loading}
+                    required
+                  />
+                </div>
+              </motion.div>
+            )}
+
+            {/* Action Button */}
+            <button
+              type="submit"
+              className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-extrabold py-3 px-4 rounded-xl shadow-lg transition-all duration-200 flex items-center justify-center gap-2 text-xs mt-2 disabled:opacity-50"
+              disabled={loading}
+            >
+              {loading ? "Mendaftarkan..." : "Selesaikan Pendaftaran"}
+              {!loading && <ArrowRight className="h-4 w-4" />}
+            </button>
+          </form>
+        )}
+
+        {/* Notice of Registration disabled (only shown when register query isn't used) */}
+        {!isRegisterParamPresent && (
+          <div className="mt-6 text-center text-[10px] text-slate-500 bg-slate-950/40 p-4 border border-slate-800/60 rounded-2xl leading-relaxed">
+            <span className="font-bold text-slate-400 block mb-1">Pendaftaran Mandiri Dinonaktifkan</span>
+            Sistem ini hanya dapat diakses oleh Guru & Admin resmi. Hubungi <span className="text-indigo-400 font-semibold">Admin TKA SMA</span> untuk didaftarkan ke sistem.
           </div>
+        )}
 
-          {/* Action Button */}
-          <button
-            type="submit"
-            className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-extrabold py-3 px-4 rounded-xl shadow-lg transition-all duration-200 flex items-center justify-center gap-2 text-xs mt-2 disabled:opacity-50"
-            disabled={loading}
-          >
-            {loading ? "Memproses..." : "Masuk ke Aplikasi"}
-            {!loading && <ArrowRight className="h-4 w-4" />}
-          </button>
-        </form>
-
-        {/* Notice of Registration disabled */}
-        <div className="mt-6 text-center text-[10px] text-slate-500 bg-slate-950/40 p-4 border border-slate-800/60 rounded-2xl leading-relaxed">
-          <span className="font-bold text-slate-400 block mb-1">Pendaftaran Mandiri Dinonaktifkan</span>
-          Sistem ini hanya dapat diakses oleh Guru & Admin resmi. Hubungi <span className="text-indigo-400 font-semibold">Admin TKA SMA</span> untuk didaftarkan ke sistem.
-        </div>
+        {/* Helper text when register query IS used */}
+        {isRegisterParamPresent && (
+          <div className="mt-6 text-center text-[10px] text-slate-400 bg-indigo-950/20 p-3 border border-indigo-900/40 rounded-2xl leading-relaxed">
+            <span className="font-bold text-indigo-400 block mb-1">🔑 Mode Registrasi Aktif (Melalui URL Khusus)</span>
+            Daftarkan akun Admin menggunakan kode verifikasi khusus, atau daftarkan akun Guru langsung dari sini.
+          </div>
+        )}
 
         {/* Developer Credit Link */}
         <div className="mt-5 text-center">

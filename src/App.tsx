@@ -1975,8 +1975,9 @@ export default function App() {
               await seedDefaultData(user.uid);
             }
           } else {
-            const defaultRole = user.email === 'admin@tka.com' ? 'admin' : 'user';
-            const defaultName = user.displayName || (user.email === 'admin@tka.com' ? 'Admin TKA SMA' : 'Guru Sosiologi');
+            const isAdminEmail = user.email === 'admin@tka.com' || user.email === 'ajisosiologi84@gmail.com';
+            const defaultRole = isAdminEmail ? 'admin' : 'user';
+            const defaultName = user.displayName || (isAdminEmail ? 'Admin TKA SMA' : 'Guru Sosiologi');
             
             await setDoc(userDocRef, {
               uid: user.uid,
