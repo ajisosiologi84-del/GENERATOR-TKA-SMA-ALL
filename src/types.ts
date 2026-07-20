@@ -61,7 +61,7 @@ export interface GeneratorConfig {
 
 export interface JadwalItem {
   id: string;
-  bulan: 'Juli' | 'Agustus' | 'Oktober';
+  bulan: 'Juli' | 'Agustus' | 'September' | 'Oktober';
   mingguKe: number;
   elemenMateri: string;
   subElemenMateri: string;

@@ -1746,10 +1746,10 @@ export default function App() {
   };
 
   const executeImportAllJadwalPresets = (presets: any[]) => {
-    const months: ('Juli' | 'Agustus' | 'Oktober')[] = ['Juli', 'Agustus', 'Oktober'];
+    const months: ('Juli' | 'Agustus' | 'September' | 'Oktober')[] = ['Juli', 'Agustus', 'September', 'Oktober'];
     const newItems: JadwalItem[] = presets.map((preset, index) => {
       const slotIndex = index;
-      const monthIndex = Math.min(2, Math.floor(slotIndex / 4));
+      const monthIndex = Math.min(3, Math.floor(slotIndex / 4));
       const weekNum = (slotIndex % 4) + 1;
       return {
         id: `jadwal-preset-${Date.now()}-${index}`,
@@ -5920,7 +5920,7 @@ PANDUAN EKSTRA:
                   <FileText className="h-4.5 w-4.5" />
                   <span>Download Word (.doc)</span>
                 </button>
-                {isAdmin ? (
+                {currentUser ? (
                   <button
                     onClick={() => setIsEditingQuestion(true)}
                     className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
@@ -6909,7 +6909,7 @@ PANDUAN EKSTRA:
                       <span>Jadwal Rencana Pembelajaran TKA Kelas XII</span>
                     </h2>
                     <p className="text-xs text-slate-500 mt-1">
-                      Distribusi materi mingguan khusus bulan <b>Juli, Agustus, dan Oktober</b>.
+                      Distribusi materi mingguan khusus bulan <b>Juli, Agustus, September dan Oktober</b>.
                     </p>
                   </div>
                   
@@ -6968,9 +6968,9 @@ PANDUAN EKSTRA:
                             </style>
                           </head>
                           <body>
-                            <h2>TABEL JADWAL RENCANA PEMBELAJARAN TKA KELAS XII (Juli, Agustus, Oktober)</h2>
+                            <h2>TABEL JADWAL RENCANA PEMBELAJARAN TKA KELAS XII (Juli, Agustus, September, Oktober)</h2>
                             <p><b>Mata Pelajaran:</b> ${selectedJadwalPresetSubject}</p>
-                            <p><b>Periode Pembelajaran:</b> Juli, Agustus, Oktober</p>
+                            <p><b>Periode Pembelajaran:</b> Juli, Agustus, September dan Oktober</p>
                             <p><b>Tanggal Cetak:</b> ${new Date().toLocaleDateString('id-ID')}</p>
                             <table>
                               <thead>
@@ -7029,6 +7029,7 @@ PANDUAN EKSTRA:
                         >
                           <option value="Juli">Juli</option>
                           <option value="Agustus">Agustus</option>
+                          <option value="September">September</option>
                           <option value="Oktober">Oktober</option>
                         </select>
                       </div>
@@ -7154,6 +7155,7 @@ PANDUAN EKSTRA:
                                   >
                                     <option value="Juli">Juli</option>
                                     <option value="Agustus">Agustus</option>
+                                    <option value="September">September</option>
                                     <option value="Oktober">Oktober</option>
                                   </select>
                                 </td>
@@ -7848,7 +7850,7 @@ PANDUAN EKSTRA:
                                     Batal
                                   </button>
                                 </div>
-                              ) : isAdmin ? (
+                              ) : currentUser ? (
                                 <>
                                   <button
                                     onClick={() => handleEditQuestion(q)}
@@ -7893,7 +7895,7 @@ PANDUAN EKSTRA:
                                   Batal
                                 </button>
                               </div>
-                            ) : isAdmin ? (
+                            ) : currentUser ? (
                               <>
                                 <button
                                   onClick={() => handleEditQuestion(q)}
@@ -8502,7 +8504,7 @@ PANDUAN EKSTRA:
               <p className="text-xs text-slate-600 leading-relaxed mb-6">
                 Apakah Anda yakin ingin mengimpor sekaligus seluruh <strong>{showImportPresetsConfirm.count} rencana pembelajaran</strong> standar Pusmendik <strong>{showImportPresetsConfirm.subject}</strong> ke tabel jadwal Anda?
                 <br /><br />
-                Sistem akan secara otomatis mendistribusikannya secara merata ke minggu-minggu pada bulan <strong>Juli, Agustus, dan Oktober</strong>.
+                Sistem akan secara otomatis mendistribusikannya secara merata ke minggu-minggu pada bulan <strong>Juli, Agustus, September, dan Oktober</strong>.
               </p>
 
               <div className="flex items-center justify-end gap-3">

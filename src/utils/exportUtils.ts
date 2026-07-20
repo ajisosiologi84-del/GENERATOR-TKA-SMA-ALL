@@ -718,7 +718,7 @@ export function exportJadwalToExcel(items: JadwalItem[], mataPelajaran: string) 
     <body>
       <h2>TABEL JADWAL RENCANA PEMBELAJARAN TKA KELAS XII</h2>
       <p><b>Mata Pelajaran:</b> ${mataPelajaran}</p>
-      <p><b>Periode Pembelajaran:</b> Juli, Agustus, Oktober</p>
+      <p><b>Periode Pembelajaran:</b> Juli, Agustus, September dan Oktober</p>
       <p><b>Tanggal Ekspor:</b> ${new Date().toLocaleDateString('id-ID')}</p>
       <br/>
       <table style="border-collapse: collapse; border: 1px solid #cccccc; width: 100%;">
@@ -789,7 +789,7 @@ export function exportJadwalToWord(items: JadwalItem[], mataPelajaran: string, p
       <h2>TABEL JADWAL RENCANA PEMBELAJARAN TKA KELAS XII</h2>
       <div class="meta">
         <b>Mata Pelajaran:</b> ${mataPelajaran}<br/>
-        <b>Periode Pembelajaran:</b> Juli, Agustus, Oktober<br/>
+        <b>Periode Pembelajaran:</b> Juli, Agustus, September dan Oktober<br/>
         <b>Tanggal Pembuatan:</b> ${new Date().toLocaleDateString('id-ID')}<br/>
       </div>
       
