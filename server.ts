@@ -468,16 +468,46 @@ Tulis draf prompt tersebut langsung dalam format Markdown yang elegan, berwibawa
   }
 });
 
-// Endpoint 5: Generate Systematic Learning Material from Kisi-Kisi Row (Optimized as Mega-Prompt for NotebookLM & Gemini AI)
+// Endpoint 5: Generate Systematic Learning Material from Kisi-Kisi Row (Supports Ringkasan Materi & Mega-Prompt for NotebookLM & Gemini AI)
 apiRouter.post("/generate-materi", async (req, res) => {
   try {
-    const { kisi, mataPelajaran } = req.body;
+    const { kisi, mataPelajaran, mode } = req.body;
     if (!kisi) {
       return res.status(400).json({ error: "Data kisi-kisi harus disediakan." });
     }
 
     const ai = getGeminiClient();
-    const systemInstruction = `Anda adalah ahli prompt engineering pendidikan dan desainer instruksional kelas dunia.
+    
+    let systemInstruction = "";
+    let userPrompt = "";
+
+    if (mode === "materi") {
+      systemInstruction = `Anda adalah ahli kurikulum sosiologi dan pengajar senior kelas dunia.
+Tugas Anda adalah menyusun RINGKASAN MATERI AJAR (bukan prompt) yang sangat detail, akademis, komprehensif, mendalam, dan sistematis berdasarkan parameter kisi-kisi matriks yang diberikan.
+Materi ajar ini wajib terdiri dari 4 bagian utama yang diberi nomor/judul Markdown:
+# 1. PENDAHULUAN & DEFINISI
+Berikan pengantar sejarah konsep dan definisi teoretis mendalam berdasarkan pandangan para tokoh/ahli sosiologi terkemuka (seperti Auguste Comte, Emile Durkheim, Max Weber, Karl Marx, dll. yang relevan).
+# 2. KONSEP UTAMA & TEORI PENDEKATAN
+Berikan penjelasan teoretis sosiologis yang kuat, klasifikasi, dimensi, indikator, atau mekanisme penting di dalam topik ini secara mendalam.
+# 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)
+Berikan penjelasan mendalam tentang satu studi kasus nyata, faktual, spesifik, atau fenomena sosial kontemporer di kalangan masyarakat Indonesia saat ini yang menggambarkan konsep tersebut.
+# 4. ANALISIS KRITIS & REFLEKSI
+Tuliskan 1-2 pertanyaan reflektif tingkat tinggi (HOTS) yang mendalam untuk merangsang pemikiran kritis siswa.
+
+Gunakan format Markdown yang indah dan mudah dibaca. Tulis isi materi secara detail dan komprehensif, jangan berikan kata pengantar/penutup atau penjelasan tambahan di luar isi materi itu sendiri.`;
+
+      userPrompt = `Buatkan RINGKASAN MATERI AJAR yang komprehensif dan mendalam untuk tingkat SMA Kelas XII berdasarkan unit berikut:
+Mata Pelajaran: ${mataPelajaran || "Sosiologi"}
+Topik / Elemen Materi: ${kisi.elemenMateri}
+Sub-elemen / Sub-materi: ${kisi.subElemenMateri}
+Target Kompetensi Siswa: ${kisi.kompetensi}
+Level Kognitif: ${kisi.levelKognitif === 'level_1' ? 'Pemahaman & Pengetahuan (Knowing - C1/C2)' : kisi.levelKognitif === 'level_2' ? 'Penerapan/Aplikasi (Applying - C3)' : 'Penalaran/Analisis Tinggi (Reasoning/HOTS - C4/C5/C6)'}
+Batasan & Catatan Kurikulum: ${kisi.batasanCatatan || "Tidak ada batasan khusus"}
+
+Tulis secara panjang lebar dan kaya konten akademis tanpa meringkas berlebihan.`;
+    } else {
+      // Default to "prompt" mode
+      systemInstruction = `Anda adalah ahli prompt engineering pendidikan dan desainer instruksional kelas dunia.
 Tugas Anda adalah merumuskan sebuah MEGA-PROMPT yang sangat detail, komprehensif, terstruktur rapi, dan siap saji (copy-pasteable) untuk digunakan oleh guru/pengajar di NOTEBOOK LM atau GEMINI AI guna menghasilkan INFOGRAFIS PEMBELAJARAN atau SLIDE PRESENTASI INTERAKTIF yang berkualitas tinggi, estetis, dan mendalam.
 
 Mega-prompt yang Anda susun harus secara utuh menggabungkan dan mendetailkan seluruh materi pokok berdasarkan parameter kisi-kisi matriks yang diberikan. Di dalam mega-prompt tersebut, Anda harus:
@@ -488,7 +518,7 @@ Mega-prompt yang Anda susun harus secara utuh menggabungkan dan mendetailkan sel
 
 Format keluaran Anda harus langsung berupa teks MEGA-PROMPT utuh siap pakai yang rapi, menggunakan Markdown yang sangat estetis (seperti menggunakan blockquotes, penomoran, tabel, atau pembatas yang jelas) sehingga pengguna tinggal menyalin (copy) seluruh teks tersebut dan menempelkannya (paste) ke NotebookLM atau Gemini AI.`;
 
-    const userPrompt = `Buatkan MEGA-PROMPT siap pakai untuk menyusun Slide Presentasi dan Infografis Pembelajaran tingkat SMA Kelas XII yang sangat detail dan kaya konten untuk unit berikut:
+      userPrompt = `Buatkan MEGA-PROMPT siap pakai untuk menyusun Slide Presentasi dan Infografis Pembelajaran tingkat SMA Kelas XII yang sangat detail dan kaya konten untuk unit berikut:
 Mata Pelajaran: ${mataPelajaran || "Sosiologi"}
 Topik / Elemen Materi: ${kisi.elemenMateri}
 Sub-elemen / Sub-materi: ${kisi.subElemenMateri}
@@ -497,6 +527,7 @@ Level Kognitif: ${kisi.levelKognitif === 'level_1' ? 'Pemahaman & Pengetahuan (K
 Batasan & Catatan Kurikulum: ${kisi.batasanCatatan || "Tidak ada batasan khusus"}
 
 Sediakan di dalam prompt tersebut uraian materi yang sangat kaya, komprehensif, dan detail terkait topik ini (termasuk definisi tokoh, teori, dimensi sosiologis/ilmiah, serta studi kasus nyata sosiologis/kontekstual Indonesia yang sedang hangat) agar konten presentasi/infografisnya memiliki bobot akademis tinggi dan tidak superfisial. Sajikan langsung dalam bentuk MEGA-PROMPT utuh siap salin dalam format Markdown lengkap tanpa teks pengantar atau penutup dari Anda.`;
+    }
 
     const response = await generateContentWithFallbackAndRetry(ai, {
       contents: userPrompt,

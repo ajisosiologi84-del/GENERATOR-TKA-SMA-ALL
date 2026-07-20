@@ -2041,9 +2041,13 @@ export default function App() {
     // Listen to Materials
     const qMaterials = query(collection(db, 'materials'), where('userId', '==', currentUser.uid));
     const unsubscribeMaterials = onSnapshot(qMaterials, (snapshot) => {
-      const mats: Record<string, string> = {};
+      const mats: Record<string, { content?: string; prompt?: string }> = {};
       snapshot.forEach((doc) => {
-        mats[doc.id] = doc.data().content;
+        const data = doc.data();
+        mats[doc.id] = {
+          content: data.content || '',
+          prompt: data.prompt || ''
+        };
       });
       setGeneratedMaterials(mats);
     }, (error) => {
@@ -2381,7 +2385,8 @@ export default function App() {
   const [guidanceContext, setGuidanceContext] = useState<string>('');
   const [activeMateriKisiId, setActiveMateriKisiId] = useState<string | null>(null);
   const [generatingMateriIds, setGeneratingMateriIds] = useState<Record<string, boolean>>({});
-  const [generatedMaterials, setGeneratedMaterials] = useState<Record<string, string>>({});
+  const [generatedMaterials, setGeneratedMaterials] = useState<Record<string, { content?: string; prompt?: string }>>({});
+  const [activeSubTab, setActiveSubTab] = useState<'materi' | 'prompt'>('materi');
 
   // Automatically select the first Kisi-Kisi on load or keep selected one valid
   useEffect(() => {
@@ -2430,7 +2435,8 @@ export default function App() {
     }, 1500);
   };
 
-  const handleGenerateMateri = async (kisi: KisiKisiItem) => {
+  const handleGenerateMateri = async (kisi: KisiKisiItem, modeOverride?: 'materi' | 'prompt') => {
+    const mode = modeOverride || activeSubTab;
     setGeneratingMateriIds(prev => ({ ...prev, [kisi.id]: true }));
     try {
       const response = await fetch('/api/generate-materi', {
@@ -2439,7 +2445,8 @@ export default function App() {
         body: JSON.stringify({
           kisi,
           mataPelajaran: config.mataPelajaran,
-          guidanceText: guidanceContext || undefined
+          guidanceText: guidanceContext || undefined,
+          mode
         })
       });
       if (!response.ok) {
@@ -2447,47 +2454,55 @@ export default function App() {
       }
       const data = await response.json();
       if (data.materi) {
+        const updateField = mode === 'materi' ? 'content' : 'prompt';
         await setDoc(doc(db, 'materials', kisi.id), {
-          content: data.materi,
+          [updateField]: data.materi,
           userId: currentUser?.uid,
           updatedAt: new Date()
-        });
+        }, { merge: true });
         setActiveMateriKisiId(kisi.id);
       } else {
         alert("AI mengembalikan format yang tidak sesuai.");
       }
     } catch (err: any) {
       console.error(err);
-      alert("Gagal membuat materi pembelajaran secara dinamis: " + (err.message || err));
+      alert(`Gagal membuat ${mode === 'materi' ? 'materi pembelajaran' : 'prompt slide & infografis'} secara dinamis: ` + (err.message || err));
     } finally {
       setGeneratingMateriIds(prev => ({ ...prev, [kisi.id]: false }));
     }
   };
 
   const handleDeleteMateri = async (kisiId: string) => {
-    if (!confirm("Apakah Anda yakin ingin menghapus prompt untuk kisi-kisi ini?")) return;
+    const label = activeSubTab === 'materi' ? 'Ringkasan Materi' : 'Prompt Slide & Infografis';
+    if (!confirm(`Apakah Anda yakin ingin menghapus ${label} untuk kisi-kisi ini?`)) return;
     try {
-      await deleteDoc(doc(db, 'materials', kisiId));
+      const updateField = activeSubTab === 'materi' ? 'content' : 'prompt';
+      await setDoc(doc(db, 'materials', kisiId), {
+        [updateField]: '',
+        updatedAt: new Date()
+      }, { merge: true });
       setIsEditingMateri(false);
-      alert("Prompt berhasil dihapus!");
+      alert(`${label} berhasil dihapus!`);
     } catch (err: any) {
       console.error(err);
-      alert("Gagal menghapus prompt: " + (err.message || err));
+      alert(`Gagal menghapus ${label}: ` + (err.message || err));
     }
   };
 
-  const handleSaveMateri = async (kisiId: string, content: string) => {
+  const handleSaveMateri = async (kisiId: string, text: string) => {
+    const label = activeSubTab === 'materi' ? 'Ringkasan Materi' : 'Prompt Slide & Infografis';
     try {
+      const updateField = activeSubTab === 'materi' ? 'content' : 'prompt';
       await setDoc(doc(db, 'materials', kisiId), {
-        content,
+        [updateField]: text,
         userId: currentUser?.uid,
         updatedAt: new Date()
-      });
+      }, { merge: true });
       setIsEditingMateri(false);
-      alert("Prompt berhasil disimpan!");
+      alert(`${label} berhasil disimpan!`);
     } catch (err: any) {
       console.error(err);
-      alert("Gagal menyimpan prompt: " + (err.message || err));
+      alert(`Gagal menyimpan ${label}: ` + (err.message || err));
     }
   };
 
@@ -2495,20 +2510,22 @@ export default function App() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const label = activeSubTab === 'materi' ? 'Ringkasan Materi' : 'Prompt Slide & Infografis';
     const reader = new FileReader();
     reader.onload = async (event) => {
       const text = event.target?.result as string;
       if (text) {
         try {
+          const updateField = activeSubTab === 'materi' ? 'content' : 'prompt';
           await setDoc(doc(db, 'materials', kisiId), {
-            content: text,
+            [updateField]: text,
             userId: currentUser?.uid,
             updatedAt: new Date()
-          });
-          alert("File Prompt berhasil diunggah!");
+          }, { merge: true });
+          alert(`File ${label} berhasil diunggah!`);
         } catch (err: any) {
           console.error(err);
-          alert("Gagal mengunggah file prompt: " + (err.message || err));
+          alert(`Gagal mengunggah file ${label}: ` + (err.message || err));
         }
       }
     };
@@ -7221,7 +7238,8 @@ PANDUAN EKSTRA:
                     <div className="space-y-2.5 max-h-[500px] overflow-y-auto pr-1">
                       {kisiList.map((kisi) => {
                         const isSelected = activeMateriKisiId === kisi.id;
-                        const isCompiled = !!generatedMaterials[kisi.id];
+                        const isMateriReady = !!generatedMaterials[kisi.id]?.content;
+                        const isPromptReady = !!generatedMaterials[kisi.id]?.prompt;
                         const isGenerating = !!generatingMateriIds[kisi.id];
 
                         return (
@@ -7250,13 +7268,19 @@ PANDUAN EKSTRA:
                                 </span>
                               </div>
                               
-                              <div className="flex-shrink-0">
-                                {isCompiled ? (
-                                  <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 text-[9px] font-bold px-2 py-0.5 rounded-full">
-                                    <Check className="h-2.5 w-2.5" /> Ready
+                              <div className="flex-shrink-0 flex gap-1 flex-wrap justify-end max-w-[100px]">
+                                {isMateriReady && (
+                                  <span className="inline-flex items-center gap-0.5 bg-emerald-100 text-emerald-800 text-[8px] font-bold px-1.5 py-0.5 rounded-full">
+                                    Materi
                                   </span>
-                                ) : (
-                                  <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 text-[9px] font-bold px-2 py-0.5 rounded-full">
+                                )}
+                                {isPromptReady && (
+                                  <span className="inline-flex items-center gap-0.5 bg-indigo-100 text-indigo-800 text-[8px] font-bold px-1.5 py-0.5 rounded-full">
+                                    Prompt
+                                  </span>
+                                )}
+                                {!isMateriReady && !isPromptReady && (
+                                  <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 text-[8px] font-bold px-2 py-0.5 rounded-full">
                                     Belum
                                   </span>
                                 )}
@@ -7277,11 +7301,11 @@ PANDUAN EKSTRA:
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleGenerateMateri(kisi);
+                                  handleGenerateMateri(kisi, activeSubTab);
                                 }}
                                 disabled={isGenerating}
                                 className={`text-[10px] font-black px-2.5 py-1 rounded transition-all flex items-center gap-1 ${
-                                  isCompiled 
+                                  (activeSubTab === 'materi' ? isMateriReady : isPromptReady)
                                     ? 'bg-slate-200 hover:bg-slate-300 text-slate-700' 
                                     : 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm hover:from-purple-700 hover:to-indigo-700'
                                 }`}
@@ -7289,12 +7313,17 @@ PANDUAN EKSTRA:
                                 {isGenerating ? (
                                   <>
                                     <RefreshCw className="h-3 w-3 animate-spin" />
-                                    <span>Merumuskan Prompt...</span>
+                                    <span>Memproses...</span>
                                   </>
                                 ) : (
                                   <>
                                     <Sparkles className="h-3 w-3" />
-                                    <span>{isCompiled ? 'Buat Ulang Prompt' : 'Buat Prompt AI'}</span>
+                                    <span>
+                                      {(activeSubTab === 'materi' ? isMateriReady : isPromptReady)
+                                        ? `Buat Ulang ${activeSubTab === 'materi' ? 'Materi' : 'Prompt'}`
+                                        : `Buat ${activeSubTab === 'materi' ? 'Materi' : 'Prompt'} AI`
+                                      }
+                                    </span>
                                   </>
                                 )}
                               </button>
@@ -7309,220 +7338,274 @@ PANDUAN EKSTRA:
 
               {/* Right Column: Material Viewer / Workspace */}
               <div className="lg:col-span-7">
-                <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 space-y-4 min-h-[400px] flex flex-col justify-between">
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-0 overflow-hidden min-h-[500px] flex flex-col justify-between">
                   {(() => {
                     const activeMateri = activeMateriKisiId ? generatedMaterials[activeMateriKisiId] : null;
                     const activeKisi = kisiList.find(k => k.id === activeMateriKisiId);
+                    const activeMateriContent = activeMateri ? (activeSubTab === 'materi' ? activeMateri.content : activeMateri.prompt) : '';
 
                     if (!activeKisi) {
                       return (
                         <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-slate-400 space-y-3">
-                          <FileText className="h-12 w-12 text-slate-300" />
+                          <FileText className="h-12 w-12 text-slate-300 animate-pulse" />
                           <div>
                             <h5 className="font-bold text-slate-700 text-sm">Pilih atau Buat Prompt Slide & Infografis</h5>
                             <p className="text-xs max-w-sm mt-1">
-                              Silakan klik salah satu <b>Kisi-Kisi Matriks</b> di sebelah kiri untuk melihat, merumuskan, mengedit, mengunggah, atau menghapus prompt untuk Slide Pembelajaran dan Infografis.
+                              Silakan klik salah satu <b>Kisi-Kisi Matriks</b> di sebelah kiri untuk melihat, merumuskan, mengedit, atau menghapus materi dan prompt NotebookLM.
                             </p>
                           </div>
                         </div>
                       );
                     }
 
-                    if (isEditingMateri) {
-                      return (
-                        <div className="space-y-4 flex-1 flex flex-col justify-between">
-                          <div className="flex-1 flex flex-col space-y-3">
-                            <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
-                              <div>
-                                <span className="bg-purple-100 text-purple-800 text-[9px] font-extrabold px-2 py-0.5 rounded-full">
-                                  MODE EDIT PROMPT {activeKisi.no}
-                                </span>
-                                <h3 className="font-extrabold text-slate-900 text-sm mt-1">
-                                  {activeKisi.elemenMateri}
-                                </h3>
+                    return (
+                      <div className="flex-1 flex flex-col justify-between">
+                        {/* Sub-Tabs Selector */}
+                        <div className="flex border-b border-slate-200 bg-slate-50/55">
+                          <button
+                            onClick={() => {
+                              setActiveSubTab('materi');
+                              setIsEditingMateri(false);
+                            }}
+                            className={`flex-1 py-3 px-4 text-center font-bold text-xs flex items-center justify-center gap-2 border-b-2 transition-all ${
+                              activeSubTab === 'materi'
+                                ? 'border-purple-600 text-purple-700 bg-white shadow-sm font-black'
+                                : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-100/40'
+                            }`}
+                          >
+                            <BookOpen className="h-4 w-4 text-purple-500" />
+                            <span>1. Ringkasan Materi Ajar</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setActiveSubTab('prompt');
+                              setIsEditingMateri(false);
+                            }}
+                            className={`flex-1 py-3 px-4 text-center font-bold text-xs flex items-center justify-center gap-2 border-b-2 transition-all ${
+                              activeSubTab === 'prompt'
+                                ? 'border-purple-600 text-purple-700 bg-white shadow-sm font-black'
+                                : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-100/40'
+                            }`}
+                          >
+                            <Sparkles className="h-4 w-4 text-purple-500" />
+                            <span>2. Prompt Slide & Infografis (NotebookLM)</span>
+                          </button>
+                        </div>
+
+                        {isEditingMateri ? (
+                          <div className="p-5 space-y-4 flex-1 flex flex-col justify-between">
+                            <div className="flex-1 flex flex-col space-y-3">
+                              <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+                                <div>
+                                  <span className="bg-purple-100 text-purple-800 text-[9px] font-extrabold px-2 py-0.5 rounded-full uppercase">
+                                    {activeSubTab === 'materi' ? 'MODE EDIT RINGKASAN MATERI' : 'MODE EDIT PROMPT NOTEBOOKLM'} {activeKisi.no}
+                                  </span>
+                                  <h3 className="font-extrabold text-slate-900 text-sm mt-1">
+                                    {activeKisi.elemenMateri}
+                                  </h3>
+                                </div>
+                                <button
+                                  onClick={() => setIsEditingMateri(false)}
+                                  className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition"
+                                >
+                                  <X className="h-5 w-5" />
+                                </button>
                               </div>
+
+                              <div className="flex-1 flex flex-col">
+                                <label className="text-xs font-bold text-slate-700 mb-1 block">
+                                  {activeSubTab === 'materi' ? 'Isi Materi Pembelajaran:' : 'Isi Prompt Slide & Infografis:'}
+                                </label>
+                                <textarea
+                                  value={editingMateriContent}
+                                  onChange={(e) => setEditingMateriContent(e.target.value)}
+                                  placeholder={
+                                    activeSubTab === 'materi'
+                                      ? "Tulis ringkasan materi pembelajaran sosiologi lengkap di sini..."
+                                      : "Tulis mega-prompt untuk NotebookLM & Gemini AI di sini secara lengkap..."
+                                  }
+                                  className="w-full flex-1 min-h-[350px] bg-slate-50 border border-slate-200 rounded-xl p-4 font-mono text-xs text-slate-800 focus:ring-2 focus:ring-purple-400 focus:border-purple-400 focus:outline-none shadow-inner resize-y"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">
                               <button
                                 onClick={() => setIsEditingMateri(false)}
-                                className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition"
+                                className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
                               >
-                                <X className="h-5 w-5" />
+                                <X className="h-3.5 w-3.5" />
+                                <span>Batal</span>
+                              </button>
+
+                              <button
+                                onClick={() => handleSaveMateri(activeKisi.id, editingMateriContent)}
+                                className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
+                              >
+                                <Save className="h-3.5 w-3.5" />
+                                <span>Simpan {activeSubTab === 'materi' ? 'Materi' : 'Prompt'}</span>
                               </button>
                             </div>
-
-                            <div className="flex-1 flex flex-col">
-                              <label className="text-xs font-bold text-slate-700 mb-1 block">Isi Prompt:</label>
-                              <textarea
-                                value={editingMateriContent}
-                                onChange={(e) => setEditingMateriContent(e.target.value)}
-                                placeholder="Tulis atau paste prompt slide dan infografis di sini secara lengkap..."
-                                className="w-full flex-1 min-h-[300px] bg-slate-50 border border-slate-200 rounded-xl p-4 font-mono text-xs text-slate-800 focus:ring-2 focus:ring-purple-400 focus:border-purple-400 focus:outline-none shadow-inner resize-y"
-                              />
-                            </div>
                           </div>
-
-                          <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">
-                            <button
-                              onClick={() => setIsEditingMateri(false)}
-                              className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
-                            >
-                              <X className="h-3.5 w-3.5" />
-                              <span>Batal</span>
-                            </button>
-
-                            <button
-                              onClick={() => handleSaveMateri(activeKisi.id, editingMateriContent)}
-                              className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
-                            >
-                              <Save className="h-3.5 w-3.5" />
-                              <span>Simpan Prompt</span>
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div className="space-y-4 flex-1 flex flex-col justify-between">
-                        <div>
-                          {/* Header Detail */}
-                          <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        ) : (
+                          <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
                             <div>
-                              <div className="flex items-center gap-2">
-                                <span className="bg-purple-100 text-purple-800 text-[9px] font-extrabold px-2 py-0.5 rounded-full">
-                                  PROMPT {activeKisi.no}
-                                </span>
-                                <span className="text-[10px] text-slate-400 font-mono">
-                                  {getLevelKognitifLabel(activeKisi.levelKognitif)}
-                                </span>
-                              </div>
-                              <h3 className="font-extrabold text-slate-900 text-base mt-1">
-                                {activeKisi.elemenMateri}
-                              </h3>
-                              <p className="text-xs text-slate-500 font-medium">
-                                Sub-materi: {activeKisi.subElemenMateri}
-                              </p>
-                            </div>
-
-                            <div className="flex flex-wrap gap-2">
-                              {activeMateri ? (
-                                <>
-                                  <button
-                                    onClick={() => {
-                                      setIsEditingMateri(true);
-                                      setEditingMateriContent(activeMateri);
-                                    }}
-                                    className="bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
-                                    title="Edit prompt secara manual"
-                                  >
-                                    <Edit className="h-3.5 w-3.5" />
-                                    <span>Edit</span>
-                                  </button>
-
-                                  <button
-                                    onClick={() => handleDeleteMateri(activeKisi.id)}
-                                    className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
-                                    title="Hapus prompt"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                    <span>Hapus</span>
-                                  </button>
-
-                                  <button
-                                    onClick={() => {
-                                      navigator.clipboard.writeText(activeMateri);
-                                      alert("Mega-Prompt untuk NotebookLM & Gemini berhasil disalin ke clipboard! Anda dapat menempelkannya langsung ke NotebookLM atau Gemini AI untuk menghasilkan Slide/Infografis.");
-                                    }}
-                                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
-                                  >
-                                    <Copy className="h-3.5 w-3.5" />
-                                    <span>Salin</span>
-                                  </button>
-
-                                  <button
-                                    onClick={() => exportMateriToWord(activeKisi, activeMateri, config.mataPelajaran, printConfig.pageSize)}
-                                    className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
-                                    title="Unduh Prompt sebagai file Word (.doc)"
-                                  >
-                                    <Download className="h-3.5 w-3.5" />
-                                    <span>Word</span>
-                                  </button>
-
-                                  <button
-                                    onClick={() => handlePrintMateri(activeKisi, activeMateri)}
-                                    className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
-                                    title="Cetak Prompt"
-                                  >
-                                    <Printer className="h-3.5 w-3.5" />
-                                    <span>Cetak</span>
-                                  </button>
-                                </>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    type="file"
-                                    id={`prompt-file-${activeKisi.id}`}
-                                    accept=".txt,.md"
-                                    onChange={(e) => handleUploadPromptFile(e, activeKisi.id)}
-                                    className="hidden"
-                                  />
-                                  <label
-                                    htmlFor={`prompt-file-${activeKisi.id}`}
-                                    className="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
-                                    title="Unggah file teks (.txt / .md)"
-                                  >
-                                    <Upload className="h-3.5 w-3.5" />
-                                    <span>Unggah File</span>
-                                  </label>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Materi Render Area */}
-                          <div className="mt-4 bg-slate-50/65 border border-slate-100 rounded-xl p-5 max-h-[500px] overflow-y-auto shadow-inner">
-                            {activeMateri ? (
-                              <SimpleMarkdown content={activeMateri} />
-                            ) : (
-                              <div className="text-center py-12 px-4 space-y-4">
-                                <FileText className="h-10 w-10 mx-auto text-slate-300" />
-                                <div className="max-w-md mx-auto space-y-1">
-                                  <p className="text-sm font-bold text-slate-700">Prompt Belum Tersedia</p>
-                                  <p className="text-xs text-slate-500">
-                                    Silakan pilih salah satu opsi di bawah ini untuk menyusun Mega-Prompt slide & infografis untuk kisi-kisi ini:
+                              {/* Header Detail */}
+                              <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span className="bg-purple-100 text-purple-800 text-[9px] font-extrabold px-2 py-0.5 rounded-full uppercase">
+                                      {activeSubTab === 'materi' ? 'Ringkasan Materi' : 'Prompt NotebookLM'} {activeKisi.no}
+                                    </span>
+                                    <span className="text-[10px] text-slate-400 font-mono">
+                                      {getLevelKognitifLabel(activeKisi.levelKognitif)}
+                                    </span>
+                                  </div>
+                                  <h3 className="font-extrabold text-slate-900 text-base mt-1">
+                                    {activeKisi.elemenMateri}
+                                  </h3>
+                                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                                    Sub-materi: {activeKisi.subElemenMateri}
                                   </p>
                                 </div>
-                                <div className="flex flex-col sm:flex-row justify-center items-center gap-2.5 pt-2">
-                                  <button
-                                    onClick={() => handleGenerateMateri(activeKisi)}
-                                    className="w-full sm:w-auto bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition shadow-sm"
-                                  >
-                                    <Sparkles className="h-3.5 w-3.5" />
-                                    <span>Buat dengan AI</span>
-                                  </button>
 
-                                  <button
-                                    onClick={() => {
-                                      setIsEditingMateri(true);
-                                      setEditingMateriContent('');
-                                    }}
-                                    className="w-full sm:w-auto bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition"
-                                  >
-                                    <Plus className="h-3.5 w-3.5" />
-                                    <span>Tulis Manual</span>
-                                  </button>
+                                <div className="flex flex-wrap gap-2">
+                                  {activeMateriContent ? (
+                                    <>
+                                      <button
+                                        onClick={() => {
+                                          setIsEditingMateri(true);
+                                          setEditingMateriContent(activeMateriContent);
+                                        }}
+                                        className="bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+                                        title={`Edit ${activeSubTab === 'materi' ? 'materi' : 'prompt'} secara manual`}
+                                      >
+                                        <Edit className="h-3.5 w-3.5" />
+                                        <span>Edit</span>
+                                      </button>
+
+                                      <button
+                                        onClick={() => handleDeleteMateri(activeKisi.id)}
+                                        className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+                                        title={`Hapus ${activeSubTab === 'materi' ? 'materi' : 'prompt'}`}
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                        <span>Hapus</span>
+                                      </button>
+
+                                      <button
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(activeMateriContent);
+                                          const successMsg = activeSubTab === 'materi'
+                                            ? "Ringkasan materi berhasil disalin ke clipboard!"
+                                            : "Mega-Prompt untuk NotebookLM & Gemini berhasil disalin ke clipboard! Anda dapat menempelkannya langsung ke NotebookLM atau Gemini AI.";
+                                          alert(successMsg);
+                                        }}
+                                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+                                      >
+                                        <Copy className="h-3.5 w-3.5" />
+                                        <span>Salin</span>
+                                      </button>
+
+                                      <button
+                                        onClick={() => exportMateriToWord(activeKisi, activeMateriContent, config.mataPelajaran, printConfig.pageSize)}
+                                        className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+                                        title={`Unduh ${activeSubTab === 'materi' ? 'Materi' : 'Prompt'} sebagai file Word (.doc)`}
+                                      >
+                                        <Download className="h-3.5 w-3.5" />
+                                        <span>Word</span>
+                                      </button>
+
+                                      <button
+                                        onClick={() => handlePrintMateri(activeKisi, activeMateriContent)}
+                                        className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+                                        title={`Cetak ${activeSubTab === 'materi' ? 'Materi' : 'Prompt'}`}
+                                      >
+                                        <Printer className="h-3.5 w-3.5" />
+                                        <span>Cetak</span>
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="file"
+                                        id={`prompt-file-${activeKisi.id}`}
+                                        accept=".txt,.md"
+                                        onChange={(e) => handleUploadPromptFile(e, activeKisi.id)}
+                                        className="hidden"
+                                      />
+                                      <label
+                                        htmlFor={`prompt-file-${activeKisi.id}`}
+                                        className="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                                        title="Unggah file teks (.txt / .md)"
+                                      >
+                                        <Upload className="h-3.5 w-3.5" />
+                                        <span>Unggah File</span>
+                                      </label>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
-                            )}
-                          </div>
-                        </div>
 
-                        {/* Bottom Actions inside Card */}
-                        <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                          <span className="flex items-center gap-1">
-                            <Info className="h-3.5 w-3.5 text-indigo-500" />
-                            <span>Prompt dioptimalkan khusus untuk di-copy paste ke NotebookLM dan Gemini AI</span>
-                          </span>
-                        </div>
+                              {/* Content Render Area */}
+                              <div className="mt-4 bg-slate-50/65 border border-slate-100 rounded-xl p-5 max-h-[500px] overflow-y-auto shadow-inner">
+                                {activeMateriContent ? (
+                                  <SimpleMarkdown content={activeMateriContent} />
+                                ) : (
+                                  <div className="text-center py-12 px-4 space-y-4">
+                                    <FileText className="h-10 w-10 mx-auto text-slate-300" />
+                                    <div className="max-w-md mx-auto space-y-1">
+                                      <p className="text-sm font-bold text-slate-700">
+                                        {activeSubTab === 'materi' ? 'Ringkasan Materi Belum Tersedia' : 'Prompt Belum Tersedia'}
+                                      </p>
+                                      <p className="text-xs text-slate-500 leading-relaxed">
+                                        {activeSubTab === 'materi'
+                                          ? 'Silakan pilih opsi di bawah untuk menyusun Ringkasan Materi Ajar komprehensif bagi sosiologi kelas XII berdasarkan parameter kisi-kisi ini:'
+                                          : 'Silakan pilih opsi di bawah untuk membuat Mega-Prompt siap saji yang dioptimalkan untuk menyusun slide & infografis di NotebookLM:'
+                                        }
+                                      </p>
+                                    </div>
+                                    <div className="flex flex-col sm:flex-row justify-center items-center gap-2.5 pt-2">
+                                      <button
+                                        onClick={() => handleGenerateMateri(activeKisi, activeSubTab)}
+                                        className="w-full sm:w-auto bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition shadow-sm"
+                                      >
+                                        <Sparkles className="h-3.5 w-3.5" />
+                                        <span>
+                                          {activeSubTab === 'materi' ? 'Buat Materi dengan AI' : 'Buat Prompt dengan AI'}
+                                        </span>
+                                      </button>
+
+                                      <button
+                                        onClick={() => {
+                                          setIsEditingMateri(true);
+                                          setEditingMateriContent('');
+                                        }}
+                                        className="w-full sm:w-auto bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition"
+                                      >
+                                        <Plus className="h-3.5 w-3.5" />
+                                        <span>Tulis Manual</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Bottom Actions inside Card */}
+                            <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                              <span className="flex items-center gap-1">
+                                <Info className="h-3.5 w-3.5 text-indigo-500" />
+                                <span>
+                                  {activeSubTab === 'materi' 
+                                    ? 'Materi ajar dioptimalkan dengan teori mendalam & studi kasus nyata Indonesia.' 
+                                    : 'Prompt dirancang khusus untuk memandu NotebookLM & Gemini AI agar konten interaktif.'
+                                  }
+                                </span>
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
