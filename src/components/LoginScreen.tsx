@@ -422,13 +422,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           </form>
         )}
 
-        {/* Notice of Registration disabled (only shown when register query isn't used) */}
-        {!isRegisterParamPresent && (
-          <div className="mt-6 text-center text-[10px] text-slate-500 bg-slate-950/40 p-4 border border-slate-800/60 rounded-2xl leading-relaxed">
-            <span className="font-bold text-slate-400 block mb-1">Pendaftaran Mandiri Dinonaktifkan</span>
-            Sistem ini hanya dapat diakses oleh Guru & Admin resmi. Hubungi <span className="text-indigo-400 font-semibold">Admin TKA SMA</span> untuk didaftarkan ke sistem.
-          </div>
-        )}
+
 
         {/* Helper text when register query IS used */}
         {isRegisterParamPresent && (
