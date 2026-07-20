@@ -8,6 +8,7 @@ import {
   Check, 
   Plus, 
   Trash2, 
+  Edit,
   BookOpen, 
   FileText, 
   FileSpreadsheet, 
@@ -33,7 +34,9 @@ import {
   UserPlus,
   Shield,
   User,
-  Calendar
+  Calendar,
+  Save,
+  X
 } from 'lucide-react';
 import { KisiKisiItem, Question, GeneratorConfig, BentukSoal, LevelKognitif, JumlahOpsi, JenisSoal, JadwalItem } from './types';
 import { auth, db, createNewUserByAdmin } from './lib/firebase';
@@ -46,6 +49,7 @@ import {
   doc, 
   setDoc, 
   getDoc, 
+  getDocs,
   collection, 
   onSnapshot, 
   writeBatch,
@@ -1815,28 +1819,176 @@ export default function App() {
     setShowClearJadwalConfirm(false);
   };
 
+  const seedDefaultData = async (userId: string) => {
+    try {
+      const batch = writeBatch(db);
+      
+      const defaultKisiList: KisiKisiItem[] = [
+        {
+          id: `kisi-sosiologi-ref-1-${userId}`,
+          userId: userId,
+          no: 1,
+          bentukSoal: "pilihan_ganda_sederhana",
+          levelKognitif: "level_1",
+          elemenMateri: "Sosiologi sebagai Ilmu",
+          subElemenMateri: "Pengertian dan perkembangan sosiologi dan manfaat sosiologi dalam kehidupan masyarakat.",
+          kompetensi: "Mendeskripsikan dan menganalisis pengertian dan perkembangan serta manfaat sosiologi sebagai ilmu pengetahuan.",
+          batasanCatatan: "Sejarah sosiologi, objek kajian sosiologi, fungsi dan manfaat sosiologi bagi masyarakat.",
+          jumlahSoal: 1
+        },
+        {
+          id: `kisi-sosiologi-ref-2-${userId}`,
+          userId: userId,
+          no: 2,
+          bentukSoal: "kategori",
+          levelKognitif: "level_2",
+          elemenMateri: "Hubungan dan Gejala Sosial",
+          subElemenMateri: "Ragam gejala sosial.",
+          kompetensi: "Menjelaskan ragam gejala sosial di lingkungan sekitar.",
+          batasanCatatan: "Perilaku menyimpang, masalah sosial, sosiologi perkotaan/pedesaan, dan dampaknya bagi keteraturan sosial.",
+          jumlahSoal: 1
+        },
+        {
+          id: `kisi-sosiologi-ref-3-${userId}`,
+          userId: userId,
+          no: 3,
+          bentukSoal: "mcma",
+          levelKognitif: "level_3",
+          elemenMateri: "Penelitian Sosial",
+          subElemenMateri: "Langkah penelitian sosial dan metode penelitian.",
+          kompetensi: "Menjelaskan dan menganalisis berbagai langkah dan metode penelitian sosial.",
+          batasanCatatan: "Rancangan penelitian, jenis penelitian (kualitatif/kuantitatif), teknik sampling, pengumpulan data, dan penyusunan laporan.",
+          jumlahSoal: 1
+        }
+      ];
+
+      defaultKisiList.forEach((item) => {
+        batch.set(doc(db, 'kisi_kisi', item.id), item);
+      });
+
+      const defaultQuestions: Question[] = [
+        {
+          id: `question-sosiologi-ref-1-${userId}`,
+          userId: userId,
+          noSoal: 1,
+          kisiKisiId: `kisi-sosiologi-ref-1-${userId}`,
+          kompetensi: "Mendeskripsikan dan menganalisis pengertian dan perkembangan serta manfaat sosiologi sebagai ilmu pengetahuan.",
+          subKompetensi: "Mengidentifikasi objek kajian sosiologi di era masyarakat digital.",
+          bentukSoal: "pilihan_ganda_sederhana",
+          stimulus: "Sosiologi merupakan ilmu pengetahuan murni yang membatasi diri pada apa yang nyata-nyata terjadi saat ini (das sein) dan bukan membicarakan apa yang seharusnya terjadi (das sollen). Di tengah era disrupsi teknologi digital saat ini, berbagai fenomena interaksi sosial baru bermunculan, mulai dari maraknya penggunaan media sosial, kecanduan gawai, hingga pola komunikasi virtual di kalangan remaja yang menggeser norma-norma konvensional di masyarakat.",
+          soal: "Berdasarkan ilustrasi di atas, objek kajian sosiologi yang paling tepat ditunjukkan oleh pernyataan...",
+          opsi: [
+            "A. Dampak radiasi gelombang elektromagnetik gawai terhadap kesehatan mata dan fisik remaja secara klinis.",
+            "B. Kecanduan teknologi yang mengubah pola interaksi, cara berpikir, dan perilaku sosial di kalangan remaja dalam kehidupan sehari-hari.",
+            "C. Kerusakan jaringan infrastruktur internet nasional akibat dari maraknya serangan keamanan siber (cyber attack).",
+            "D. Penurunan nilai tukar mata uang asing yang memengaruhi harga jual gawai di pasar lokal secara signifikan.",
+            "E. Perancangan algoritma kecerdasan buatan pada aplikasi media sosial untuk meningkatkan efisiensi komputasi."
+          ],
+          kunciJawaban: "B",
+          pembahasan: "Objek kajian sosiologi berpusat pada masyarakat dan segala fenomena interaksi sosial serta gejala sosial yang terjadi di dalamnya. Dampak sosial kemajuan teknologi (kecanduan gawai yang mengubah pola interaksi, cara berpikir, dan perilaku sosial remaja) merupakan gejala sosial nyata yang menjadi objek kajian sosiologi (das sein). Pilihan lainnya berada di luar ranah kajian sosiologi, seperti kesehatan fisik/klinis (A), teknik informatika/cyber (C & E), dan ekonomi makro (D).",
+          kataKunci: "Objek Kajian Sosiologi, Gejala Sosial, Disrupsi Teknologi"
+        },
+        {
+          id: `question-sosiologi-ref-2-${userId}`,
+          userId: userId,
+          noSoal: 2,
+          kisiKisiId: `kisi-sosiologi-ref-2-${userId}`,
+          kompetensi: "Menjelaskan ragam gejala sosial di lingkungan sekitar.",
+          subKompetensi: "Menerapkan konsep sosialisasi dan ragam gejala sosial terkait pembatasan screen-time pada anak.",
+          bentukSoal: "kategori",
+          stimulus: "Perhatikan anjuran durasi aman layar (screen-time) bagi anak-anak berikut ini!\nMenurut rekomendasi para ahli evaluasi perkembangan anak, anak usia 0 sampai 1,5 tahun disarankan sama sekali tidak terpapar layar gawai (0 jam). Anak usia 1,5 sampai 2 tahun diperbolehkan mengakses program yang berkualitas tinggi maksimal selama 1 jam dengan pendampingan ketat oleh orang tua. Anak usia 2 sampai 5 tahun juga dibatasi maksimal 1 jam per hari dengan pendampingan, sementara anak di atas 5 tahun harus memiliki batas waktu penggunaan gawai yang konsisten dan seimbang demi menjaga kesehatan fisik dan mental mereka.",
+          soal: "Evaluasilah kesesuaian pernyataan terkait gejala penggunaan gawai pada anak berdasarkan anjuran tersebut! Tentukan SESUAI atau TIDAK SESUAI untuk setiap pernyataan berikut.",
+          opsi: [
+            "Pernyataan 1: Penggunaan gawai pada anak usia dini perlu diawasi ketat oleh orang tua agar proses sosialisasi primer anak tidak terhambat secara negatif.",
+            "Pernyataan 2: Anak berusia 1 tahun diperbolehkan bermain gawai sendiri tanpa pendampingan asalkan kontennya edukatif dengan batas waktu maksimal 1 jam per hari.",
+            "Pola asuh yang terlalu longgar terhadap akses teknologi digital dapat mengganggu pembentukan karakter dan kepribadian sosial anak.",
+            "Pembatasan waktu layar secara konsisten bagi anak usia di atas 5 tahun dapat mengurangi risiko deviasi sosial berupa kecanduan gawai."
+          ],
+          kunciJawaban: "SESUAI, TIDAK SESUAI, SESUAI, SESUAI",
+          pembahasan: "- Pernyataan 1 [SESUAI]: Sesuai dengan anjuran dalam stimulus bahwa pendampingan orang tua sangat krusial dalam masa sosialisasi primer anak usia dini.\n- Pernyataan 2 [TIDAK SESUAI]: Anak usia 1 tahun (berada di rentang 0-1,5 tahun) direkomendasikan sama sekali tidak terpapar layar (0 jam), serta tidak boleh dilepas bermain gawai sendiri.\n- Pernyataan 3 [SESUAI]: Sesuai dengan konsep sosiologi bahwa pengawasan/pendampingan penting untuk mencegah dampak negatif pembentukan kepribadian akibat paparan gawai yang bebas.\n- Pernyataan 4 [SESUAI]: Pembatasan waktu layar secara konsisten dan seimbang bagi anak di atas 5 tahun membantu mencegah risiko penyimpangan berupa kecanduan gawai.",
+          kataKunci: "Sosialisasi, Pola Asuh, Gejala Sosial, Screen-Time"
+        },
+        {
+          id: `question-sosiologi-ref-3-${userId}`,
+          userId: userId,
+          noSoal: 3,
+          kisiKisiId: `kisi-sosiologi-ref-3-${userId}`,
+          kompetensi: "Menjelaskan dan menganalisis berbagai langkah dan metode penelitian sosial.",
+          subKompetensi: "Menganalisis rancangan metode penelitian sosial kuantitatif dan menyempurnakannya secara metodologis.",
+          bentukSoal: "mcma",
+          stimulus: "Seorang peneliti sosiologi SMA ingin meneliti pengaruh intensitas pergaulan kelompok teman sebaya (peer group) terhadap kelekatan hubungan antar-anggota keluarga di kalangan siswa kelas XII. Peneliti tersebut merumuskan masalah: 'Apakah terdapat hubungan antara pergaulan sebaya dengan kelekatan hubungan keluarga?' Peneliti menyusun instrumen pengumpulan data berupa daftar pertanyaan terbuka sebanyak 10 butir untuk wawancara mendalam. Namun, pada saat yang sama, ia juga berencana menganalisis kekuatan hubungan antar-variabel tersebut secara kuantitatif melalui uji korelasi statistik menggunakan aplikasi pengolah data.",
+          soal: "Berdasarkan rancangan penelitian di atas, manakah rekomendasi metodologis yang paling tepat dan logis untuk menyempurnakan penelitian tersebut agar valid? (Pilihlah semua jawaban yang benar! Jawaban benar lebih dari satu)",
+          opsi: [
+            "A. Peneliti perlu mengubah daftar pertanyaan terbuka menjadi kuesioner tertutup berskala Likert agar data kuantitatif yang diperoleh dapat diolah dengan uji korelasi statistik secara valid.",
+            "B. Peneliti harus menentukan teknik sampling (seperti simple random sampling atau stratified random sampling) dan ukuran sampel yang representatif terlebih dahulu sebelum menyebarkan instrumen.",
+            "C. Peneliti sebaiknya menghapus rumusan masalah utama karena analisis statistik kuantitatif tidak memerlukan perumusan masalah yang detail terkait interaksi sosial.",
+            "D. Peneliti wajib menggunakan metode observasi partisipatif penuh (peneliti tinggal bersama keluarga responden selama minimal satu tahun penuh) untuk mempercepat proses kuantifikasi.",
+            "E. Peneliti perlu melakukan operasionalisasi konsep variabel bebas (intensitas pergaulan sebaya) dan variabel terikat (kelekatan hubungan keluarga) untuk mempermudah penyusunan indikator instrumen kuesioner."
+          ],
+          kunciJawaban: "A, B, E",
+          pembahasan: "Penelitian ini memiliki kontradiksi metodologis: ingin menguji hubungan kuantitatif (korelasi statistik) tetapi instrumennya adalah pertanyaan terbuka (kualitatif). Maka rekomendasi penyempurnaan yang logis:\n1. [A BENAR] Pertanyaan terbuka harus diubah menjadi tertutup (seperti skala Likert) agar datanya berbentuk angka dan dapat diproses secara statistik.\n2. [B BENAR] Penentuan teknik sampling probabilitas dan jumlah sampel representatif sangat penting untuk penelitian kuantitatif agar hasil uji hubungan bisa digeneralisasi.\n3. [E BENAR] Operasionalisasi konsep variabel sangat krusial dalam kuantitatif untuk menerjemahkan teori sosiologi ke dalam indikator kuesioner yang valid.\nOpsi C salah karena rumusan masalah adalah fondasi utama penelitian. Opsi D tidak tepat karena observasi partisipatif penuh adalah metode khas kualitatif (etnografi) yang sangat lama dan bertolak belakang dengan kebutuhan pengujian korelasi kuantitatif cepat.",
+          kataKunci: "Metodologi Penelitian, Penelitian Kuantitatif, Teknik Sampling, Validitas"
+        }
+      ];
+
+      defaultQuestions.forEach((item) => {
+        batch.set(doc(db, 'questions', item.id), item);
+      });
+
+      const defaultMaterials = {
+        [`kisi-sosiologi-ref-1-${userId}`]: `# 1. PENDAHULUAN & DEFINISI\nSosiologi berasal dari bahasa Latin *socius* yang berarti teman atau kawan, dan bahasa Yunani *logos* yang berarti ilmu atau berbicara. Secara harfiah, sosiologi adalah ilmu tentang masyarakat. Auguste Comte, bapak sosiologi, mendefinisikan sosiologi sebagai ilmu positif tentang hukum-hukum dasar gejala sosial. Sosiologi merupakan ilmu pengetahuan murni (*pure science*) dan ilmu abstrak (*abstract science*) yang membatasi diri pada apa yang nyata terjadi (*das sein*) bukan apa yang seharusnya terjadi (*das sollen*).\n\n# 2. KONSEP UTAMA & TEORI PENDEKATAN\n* **Objek Kajian Sosiologi**: Objek material sosiologi adalah kehidupan sosial, gejala-gejala sosial, dan proses hubungan antarmanusia. Objek formal sosiologi adalah manusia sebagai makhluk sosial serta interaksi sosial antarmanusia dalam masyarakat.\n* **Paradigma Sosiologi**: Terdapat tiga paradigma utama menurut George Ritzer:\n  1. *Fakta Sosial* (Durkheim): Struktur dan institusi sosial yang memengaruhi individu secara eksternal dan memaksa.\n  2. *Definisi Sosial* (Weber): Tindakan sosial yang memiliki makna subjektif bagi pelakunya.\n  3. *Perilaku Sosial* (Skinner): Hubungan stimulus-respons dan pengulangan perilaku berdasarkan konsekuensi.\n\n# 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)\nDi era disrupsi digital Indonesia saat ini, muncul fenomena interaksi sosial virtual baru di kalangan remaja, seperti pembentukan komunitas daring di Discord dan penyebaran konten di TikTok. Interaksi ini tidak dibatasi oleh ruang fisik, namun memicu pergeseran nilai dan norma konvensional, seperti memudarnya sopan santun komunikasi langsung (tatap muka) karena terbiasa dengan anonimitas di dunia maya.\n\n# 4. ANALISIS KRITIS & REFLEKSI\n**Pertanyaan Reflektif**: Bagaimana kemunculan fenomena "flexing" (pamer kekayaan) di media sosial Indonesia dianalisis menggunakan paradigma definisi sosial Max Weber? Analisislah makna subjektif di balik tindakan pamer tersebut dan bagaimana masyarakat mengonstruksi status sosial di ruang digital!`,
+        [`kisi-sosiologi-ref-2-${userId}`]: `# 1. PENDAHULUAN & DEFINISI\nSosialisasi adalah sebuah proses seumur hidup di mana individu mempelajari nilai, norma, peran, dan perilaku sosial yang berlaku di masyarakatnya untuk membentuk kepribadian yang utuh. Sosialisasi primer merupakan tahap awal yang berlangsung di lingkungan keluarga, yang menjadi landasan utama pembentukan karakter dasar anak sebelum ia berinteraksi dengan lingkungan luar (sosialisasi sekunder).\n\n# 2. KONSEP UTAMA & TEORI PENDEKATAN\n* **Tahapan Sosialisasi (George Herbert Mead)**:\n  1. *Preparatory Stage* (Persiapan): Bayi meniru tindakan orang dewasa tanpa memahami maknanya.\n  2. *Play Stage* (Meniru): Anak mulai meniru peran orang di sekitarnya secara sadar (misal bermain peran ibu/guru).\n  3. *Game Stage* (Siap Bertindak): Anak memahami perannya sendiri dan peran orang lain yang terlibat dalam permainan terstruktur.\n  4. *Generalized Other* (Penerimaan Norma): Anak mampu menginternalisasi nilai dan norma masyarakat secara luas serta bertindak sebagai warga masyarakat yang bertanggung jawab.\n* **Pola Asuh Sosialisasi**:\n  - *Sosialisasi Represif*: Berfokus pada kepatuhan ketat, hukuman fisik, dan komunikasi satu arah (dominasi orang tua).\n  - *Sosialisasi Partisipatoris*: Berfokus pada interaksi timbal balik, hadiah atas perilaku baik, dan komunikasi dua arah yang menempatkan anak sebagai pusat perhatian.\n\n# 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)\nBanyak keluarga perkotaan di Indonesia yang menerapkan pola asuh longgar atau menggunakan gawai sebagai "pengasuh elektronik" demi kepraktisan. Anak-anak dibiarkan mengakses layar (*screen-time*) di atas durasi aman tanpa pendampingan. Gejala sosial ini mengganggu tahap *play stage* anak karena interaksi konkret dengan manusia berkurang, yang berakibat pada hambatan emosional dan lambatnya pemahaman norma-norma sosial primer.\n\n# 4. ANALISIS KRITIS & REFLEKSI\n**Pertanyaan Reflektif**: Jika dikaitkan dengan pembentukan karakter Pancasila, apa dampak jangka panjang bagi ketahanan sosial nasional apabila sosialisasi primer dalam keluarga Indonesia digantikan sepenuhnya oleh algoritma media sosial global? Rincikan solusi taktis sosiologis bagi para orang tua modern!`,
+        [`kisi-sosiologi-ref-3-${userId}`]: `# 1. PENDAHULUAN & DEFINISI\nPenelitian sosial adalah penyelidikan terencana, kritis, dan empiris untuk memecahkan masalah-masalah sosial atau menguji kebenaran teori sosiologi yang ada di masyarakat. Penelitian sosial bertumpu pada keobjektifan ilmiah, keteraturan metodologis, serta kejujuran data lapangan agar hasil kesimpulannya valid dan dapat dipertanggungjawabkan secara akademis.\n\n# 2. KONSEP UTAMA & TEORI PENDEKATAN\n* **Metode Penelitian Kuantitatif**: Berorientasi pada pembuktian teori, pengujian hubungan antar-variabel secara statistik, instrumen terstruktur (kuesioner tertutup/skala Likert), pengambilan sampel probabilitas (*random sampling*), serta analisis data objektif-numerik.\n* **Metode Penelitian Kualitatif**: Berorientasi pada pemahaman mendalam (*verstehen*), deskripsi interpretatif wacana atau makna sosial, instrumen fleksibel (wawancara mendalam, observasi partisipatif), serta teknik sampling non-probabilitas (*purposive/snowball sampling*).\n* **Operasionalisasi Variabel**: Proses menerjemahkan konsep teoretis yang abstrak (variabel bebas & terikat) menjadi indikator-indikator empiris terukur untuk memudahkan pembuatan instrumen kuesioner.\n\n# 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)\nSeorang peneliti sosiologi ingin meneliti pengaruh intensitas pergaulan kelompok teman sebaya (*peer group*) terhadap kelekatan hubungan antar-anggota keluarga siswa kelas XII di sebuah SMA di Jakarta. Agar riset kuantitatif ini valid, peneliti menerjemahkan konsep "intensitas pergaulan" menjadi indikator terukur (seperti frekuensi berkumpul dalam seminggu dan durasi interaksi) serta menggunakan skala Likert 1-5 untuk kuesioner tertutup.\n\n# 4. ANALISIS KRITIS & REFLEKSI\n**Pertanyaan Reflektif**: Mengapa pencampuran instrumen kualitatif (wawancara terbuka) ke dalam analisis korelasi statistik murni tanpa metodologi *Mixed Methods* yang jelas sering kali menghasilkan bias validitas? Jelaskan bagaimana integrasi triangulasi metode yang tepat dapat menyelesaikannya!`
+      };
+
+      Object.entries(defaultMaterials).forEach(([kId, content]) => {
+        batch.set(doc(db, 'materials', kId), {
+          content,
+          userId,
+          updatedAt: new Date()
+        });
+      });
+
+      batch.update(doc(db, 'users', userId), { isSeeded: true });
+
+      await batch.commit();
+      console.log("Seeding default data completed successfully.");
+    } catch (err) {
+      console.error("Gagal melakukan seeding data default:", err);
+    }
+  };
+
   // Auth changed hook
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         setCurrentUser(user);
         try {
-          const userDocSnap = await getDoc(doc(db, 'users', user.uid));
+          const userDocRef = doc(db, 'users', user.uid);
+          const userDocSnap = await getDoc(userDocRef);
           if (userDocSnap.exists()) {
             const data = userDocSnap.data();
             setUserRole(data.role || 'user');
             setUserName(data.name || user.displayName || user.email?.split('@')[0] || 'User');
+            
+            if (!data.isSeeded) {
+              await seedDefaultData(user.uid);
+            }
           } else {
             const defaultRole = user.email === 'admin@tka.com' ? 'admin' : 'user';
             const defaultName = user.displayName || (user.email === 'admin@tka.com' ? 'Admin TKA SMA' : 'Guru Sosiologi');
             
-            await setDoc(doc(db, 'users', user.uid), {
+            await setDoc(userDocRef, {
               uid: user.uid,
               email: user.email,
               name: defaultName,
               role: defaultRole,
+              isSeeded: true,
               createdAt: new Date()
             });
+            
+            await seedDefaultData(user.uid);
+            
             setUserRole(defaultRole);
             setUserName(defaultName);
           }
@@ -1944,6 +2096,8 @@ export default function App() {
   // Loading States
   const [isGeneratingKisi, setIsGeneratingKisi] = useState(false);
   const [isGeneratingSoal, setIsGeneratingSoal] = useState(false);
+  const [isSavingQuestion, setIsSavingQuestion] = useState(false);
+  const [importingPresetIds, setImportingPresetIds] = useState<Record<string, boolean>>({});
   const [apiStatus, setApiStatus] = useState<string | null>(null);
   const [soalProgress, setSoalProgress] = useState({
     active: false,
@@ -1961,6 +2115,8 @@ export default function App() {
   const [aiIllustratorPrompt, setAiIllustratorPrompt] = useState('');
   const [isGeneratingIllustration, setIsGeneratingIllustration] = useState(false);
   const [aiIllustratorStatus, setAiIllustratorStatus] = useState('');
+  const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
+  const [activePromptTab, setActivePromptTab] = useState<'ilustrasi' | 'tabel' | 'grafik' | 'stimulus'>('ilustrasi');
 
   // AI Config state (Support client-side direct bypass of Vercel 10s timeouts)
   const [aiConfig, setAiConfig] = useState(() => {
@@ -1998,18 +2154,21 @@ export default function App() {
       throw new Error("Kunci API Gemini belum diatur! Silakan masukkan kunci API terlebih dahulu di Tab 1 (Pengaturan Koneksi AI) atau beralih ke mode Server.");
     }
 
-    const preferredModel = aiConfig.model || "gemini-3.5-flash";
+    const preferredModel = aiConfig.model || "gemini-2.5-flash";
     
     // Fallback list of models in case the preferred model is not available for this API Key
     const modelsToTry = [preferredModel];
+    if (preferredModel !== "gemini-2.5-flash") {
+      modelsToTry.push("gemini-2.5-flash");
+    }
     if (preferredModel !== "gemini-3.5-flash") {
       modelsToTry.push("gemini-3.5-flash");
     }
-    if (preferredModel !== "gemini-3.1-flash-lite") {
-      modelsToTry.push("gemini-3.1-flash-lite");
+    if (preferredModel !== "gemini-2.0-flash") {
+      modelsToTry.push("gemini-2.0-flash");
     }
-    if (preferredModel !== "gemini-flash-latest") {
-      modelsToTry.push("gemini-flash-latest");
+    if (preferredModel !== "gemini-1.5-flash") {
+      modelsToTry.push("gemini-1.5-flash");
     }
 
     let preferredModelError: any = null;
@@ -2110,8 +2269,34 @@ export default function App() {
   // State for preset subject selection in the matrix UI
   const [selectedPresetSubject, setSelectedPresetSubject] = useState<'Matematika' | 'Bahasa Indonesia' | 'Bahasa Inggris' | 'Matematika Tingkat Lanjut' | 'Bahasa Indonesia Tingkat Lanjut' | 'Bahasa Inggris Tingkat Lanjut' | 'Fisika' | 'Kimia' | 'Biologi' | 'PPKN' | 'Ekonomi' | 'Geografi' | 'Sosiologi' | 'Sejarah Tingkat Lanjut' | 'Antropologi' | 'Bahasa Jepang' | 'Produk Kreatif dan Kewirausahaan'>('Sosiologi');
 
-  // Sync preset subject selection with config mataPelajaran if applicable
+  // State for Print Settings (Menu Setting Cetak)
+  const [printConfig, setPrintConfig] = useState({
+    showHeader: true,
+    kopDepartment: 'KEMENTERIAN PENDIDIKAN, KEBUDAYAAN, RISET, DAN TEKNOLOGI',
+    schoolName: 'SMA NEGERI NUSANTARA',
+    examName: 'PENILAIAN AKHIR SEMESTER',
+    academicYear: '2026/2027',
+    semester: 'Ganjil',
+    timeAllocation: '90 Menit',
+    showStudentFields: true,
+    showAnswerKey: false,
+    fontSize: 'text-sm', // 'text-xs' | 'text-sm' | 'text-base'
+    layoutColumns: '1', // '1' | '2'
+    showStimulus: true,
+    showIllustration: true,
+    showCompetencyTag: false, // Default false: hide "Kompetensi" tag in actual exam view
+    instructionText: 'Pilihlah salah satu jawaban yang paling tepat dengan memberi tanda silang (X) atau klik pada pilihan jawaban A, B, C, D, atau E!',
+    schoolLogo: '', // Base64 or URL for left logo
+    schoolLogoRight: '', // Base64 or URL for right logo
+    pageSize: 'A4', // 'A4' | 'F4'
+    subjectName: 'Sosiologi',
+    schoolAddress: 'Jalan Pendidikan Raya No. 45 Nusantara - Telp/Fax: (021) 777-1234 - Website: www.sekolahkita.sch.id',
+  });
+  const [isPrintSettingsOpen, setIsPrintSettingsOpen] = useState(true);
+
+  // Sync preset subject selection and subjectName with config mataPelajaran if applicable
   useEffect(() => {
+    setPrintConfig(prev => ({ ...prev, subjectName: config.mataPelajaran }));
     if (config.mataPelajaran === 'Matematika Tingkat Lanjut') {
       setSelectedPresetSubject('Matematika Tingkat Lanjut');
     } else if (config.mataPelajaran === 'Matematika') {
@@ -2148,33 +2333,25 @@ export default function App() {
       setSelectedPresetSubject('Produk Kreatif dan Kewirausahaan');
     }
   }, [config.mataPelajaran]);
+
+  const handleSelectPresetSubject = (subject: typeof selectedPresetSubject) => {
+    setSelectedPresetSubject(subject);
+    const presetSubjectMapped = subject === 'PPKN' 
+      ? 'Pendidikan Pancasila dan Kewarganegaraan'
+      : subject === 'Sejarah Tingkat Lanjut'
+      ? 'Sejarah'
+      : subject === 'Produk Kreatif dan Kewirausahaan'
+      ? 'Produk atau Projek Kreatif dan Kewirausahaan SMK dan MAK'
+      : subject;
+    setConfig(prev => ({
+      ...prev,
+      mataPelajaran: presetSubjectMapped
+    }));
+  };
   
   // Inline Deletion Confirmation States
   const [deletingKisiId, setDeletingKisiId] = useState<string | null>(null);
   const [deletingQuestionId, setDeletingQuestionId] = useState<string | null>(null);
-  
-  // State for Print Settings (Menu Setting Cetak)
-  const [printConfig, setPrintConfig] = useState({
-    showHeader: true,
-    kopDepartment: 'KEMENTERIAN PENDIDIKAN, KEBUDAYAAN, RISET, DAN TEKNOLOGI',
-    schoolName: 'SMA NEGERI NUSANTARA',
-    examName: 'PENILAIAN AKHIR SEMESTER',
-    academicYear: '2026/2027',
-    semester: 'Ganjil',
-    timeAllocation: '90 Menit',
-    showStudentFields: true,
-    showAnswerKey: false,
-    fontSize: 'text-sm', // 'text-xs' | 'text-sm' | 'text-base'
-    layoutColumns: '1', // '1' | '2'
-    showStimulus: true,
-    showIllustration: true,
-    showCompetencyTag: false, // Default false: hide "Kompetensi" tag in actual exam view
-    instructionText: 'Pilihlah salah satu jawaban yang paling tepat dengan memberi tanda silang (X) atau klik pada pilihan jawaban A, B, C, D, atau E!',
-    schoolLogo: '', // Base64 or URL for left logo
-    schoolLogoRight: '', // Base64 or URL for right logo
-    pageSize: 'A4', // 'A4' | 'F4'
-  });
-  const [isPrintSettingsOpen, setIsPrintSettingsOpen] = useState(true);
 
   const [questionForm, setQuestionForm] = useState<Partial<Question>>({
     kisiKisiId: '',
@@ -2202,13 +2379,23 @@ export default function App() {
   const [isUploadingPdf, setIsUploadingPdf] = useState(false);
   const [uploadedPdfStatus, setUploadedPdfStatus] = useState<string>('');
   const [guidanceContext, setGuidanceContext] = useState<string>('');
-  const [activeMateriKisiId, setActiveMateriKisiId] = useState<string | null>("kisi-sosiologi-ref-1");
+  const [activeMateriKisiId, setActiveMateriKisiId] = useState<string | null>(null);
   const [generatingMateriIds, setGeneratingMateriIds] = useState<Record<string, boolean>>({});
-  const [generatedMaterials, setGeneratedMaterials] = useState<Record<string, string>>({
-    "kisi-sosiologi-ref-1": `# 1. PENDAHULUAN & DEFINISI\nSosiologi berasal dari bahasa Latin *socius* yang berarti teman atau kawan, dan bahasa Yunani *logos* yang berarti ilmu atau berbicara. Secara harfiah, sosiologi adalah ilmu tentang masyarakat. Auguste Comte, bapak sosiologi, mendefinisikan sosiologi sebagai ilmu positif tentang hukum-hukum dasar gejala sosial. Sosiologi merupakan ilmu pengetahuan murni (*pure science*) dan ilmu abstrak (*abstract science*) yang membatasi diri pada apa yang nyata terjadi (*das sein*) bukan apa yang seharusnya terjadi (*das sollen*).\n\n# 2. KONSEP UTAMA & TEORI PENDEKATAN\n* **Objek Kajian Sosiologi**: Objek material sosiologi adalah kehidupan sosial, gejala-gejala sosial, dan proses hubungan antarmanusia. Objek formal sosiologi adalah manusia sebagai makhluk sosial serta interaksi sosial antarmanusia dalam masyarakat.\n* **Paradigma Sosiologi**: Terdapat tiga paradigma utama menurut George Ritzer:\n  1. *Fakta Sosial* (Durkheim): Struktur dan institusi sosial yang memengaruhi individu secara eksternal dan memaksa.\n  2. *Definisi Sosial* (Weber): Tindakan sosial yang memiliki makna subjektif bagi pelakunya.\n  3. *Perilaku Sosial* (Skinner): Hubungan stimulus-respons dan pengulangan perilaku berdasarkan konsekuensi.\n\n# 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)\nDi era disrupsi digital Indonesia saat ini, muncul fenomena interaksi sosial virtual baru di kalangan remaja, seperti pembentukan komunitas daring di Discord dan penyebaran konten di TikTok. Interaksi ini tidak dibatasi oleh ruang fisik, namun memicu pergeseran nilai dan norma konvensional, seperti memudarnya sopan santun komunikasi langsung (tatap muka) karena terbiasa dengan anonimitas di dunia maya.\n\n# 4. ANALISIS KRITIS & REFLEKSI\n**Pertanyaan Reflektif**: Bagaimana kemunculan fenomena "flexing" (pamer kekayaan) di media sosial Indonesia dianalisis menggunakan paradigma definisi sosial Max Weber? Analisislah makna subjektif di balik tindakan pamer tersebut dan bagaimana masyarakat mengonstruksi status sosial di ruang digital!`,
-    "kisi-sosiologi-ref-2": `# 1. PENDAHULUAN & DEFINISI\nSosialisasi adalah sebuah proses seumur hidup di mana individu mempelajari nilai, norma, peran, dan perilaku sosial yang berlaku di masyarakatnya untuk membentuk kepribadian yang utuh. Sosialisasi primer merupakan tahap awal yang berlangsung di lingkungan keluarga, yang menjadi landasan utama pembentukan karakter dasar anak sebelum ia berinteraksi dengan lingkungan luar (sosialisasi sekunder).\n\n# 2. KONSEP UTAMA & TEORI PENDEKATAN\n* **Tahapan Sosialisasi (George Herbert Mead)**:\n  1. *Preparatory Stage* (Persiapan): Bayi meniru tindakan orang dewasa tanpa memahami maknanya.\n  2. *Play Stage* (Meniru): Anak mulai meniru peran orang di sekitarnya secara sadar (misal bermain peran ibu/guru).\n  3. *Game Stage* (Siap Bertindak): Anak memahami perannya sendiri dan peran orang lain yang terlibat dalam permainan terstruktur.\n  4. *Generalized Other* (Penerimaan Norma): Anak mampu menginternalisasi nilai dan norma masyarakat secara luas serta bertindak sebagai warga masyarakat yang bertanggung jawab.\n* **Pola Asuh Sosialisasi**:\n  - *Sosialisasi Represif*: Berfokus pada kepatuhan ketat, hukuman fisik, dan komunikasi satu arah (dominasi orang tua).\n  - *Sosialisasi Partisipatoris*: Berfokus pada interaksi timbal balik, hadiah atas perilaku baik, dan komunikasi dua arah yang menempatkan anak sebagai pusat perhatian.\n\n# 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)\nBanyak keluarga perkotaan di Indonesia yang menerapkan pola asuh longgar atau menggunakan gawai sebagai "pengasuh elektronik" demi kepraktisan. Anak-anak dibiarkan mengakses layar (*screen-time*) di atas durasi aman tanpa pendampingan. Gejala sosial ini mengganggu tahap *play stage* anak karena interaksi konkret dengan manusia berkurang, yang berakibat pada hambatan emosional dan lambatnya pemahaman norma-norma sosial primer.\n\n# 4. ANALISIS KRITIS & REFLEKSI\n**Pertanyaan Reflektif**: Jika dikaitkan dengan pembentukan karakter Pancasila, apa dampak jangka panjang bagi ketahanan sosial nasional apabila sosialisasi primer dalam keluarga Indonesia digantikan sepenuhnya oleh algoritma media sosial global? Rincikan solusi taktis sosiologis bagi para orang tua modern!`,
-    "kisi-sosiologi-ref-3": `# 1. PENDAHULUAN & DEFINISI\nPenelitian sosial adalah penyelidikan terencana, kritis, dan empiris untuk memecahkan masalah-masalah sosial atau menguji kebenaran teori sosiologi yang ada di masyarakat. Penelitian sosial bertumpu pada keobjektifan ilmiah, keteraturan metodologis, serta kejujuran data lapangan agar hasil kesimpulannya valid dan dapat dipertanggungjawabkan secara akademis.\n\n# 2. KONSEP UTAMA & TEORI PENDEKATAN\n* **Metode Penelitian Kuantitatif**: Berorientasi pada pembuktian teori, pengujian hubungan antar-variabel secara statistik, instrumen terstruktur (kuesioner tertutup/skala Likert), pengambilan sampel probabilitas (*random sampling*), serta analisis data objektif-numerik.\n* **Metode Penelitian Kualitatif**: Berorientasi pada pemahaman mendalam (*verstehen*), deskripsi interpretatif wacana atau makna sosial, instrumen fleksibel (wawancara mendalam, observasi partisipatif), serta teknik sampling non-probabilitas (*purposive/snowball sampling*).\n* **Operasionalisasi Variabel**: Proses menerjemahkan konsep teoretis yang abstrak (variabel bebas & terikat) menjadi indikator-indikator empiris terukur untuk memudahkan pembuatan instrumen kuesioner.\n\n# 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)\nSeorang peneliti sosiologi ingin meneliti pengaruh intensitas pergaulan kelompok teman sebaya (*peer group*) terhadap kelekatan hubungan antar-anggota keluarga siswa kelas XII di sebuah SMA di Jakarta. Agar riset kuantitatif ini valid, peneliti menerjemahkan konsep "intensitas pergaulan" menjadi indikator terukur (seperti frekuensi berkumpul dalam seminggu dan durasi interaksi) serta menggunakan skala Likert 1-5 untuk kuesioner tertutup.\n\n# 4. ANALISIS KRITIS & REFLEKSI\n**Pertanyaan Reflektif**: Mengapa pencampuran instrumen kualitatif (wawancara terbuka) ke dalam analisis korelasi statistik murni tanpa metodologi *Mixed Methods* yang jelas sering kali menghasilkan bias validitas? Jelaskan bagaimana integrasi triangulasi metode yang tepat dapat menyelesaikannya!`
-  });
+  const [generatedMaterials, setGeneratedMaterials] = useState<Record<string, string>>({});
+
+  // Automatically select the first Kisi-Kisi on load or keep selected one valid
+  useEffect(() => {
+    if (kisiList.length > 0) {
+      if (!activeMateriKisiId || !kisiList.some(k => k.id === activeMateriKisiId)) {
+        setActiveMateriKisiId(kisiList[0].id);
+      }
+    } else {
+      setActiveMateriKisiId(null);
+    }
+  }, [kisiList, activeMateriKisiId]);
+
+  const [isEditingMateri, setIsEditingMateri] = useState<boolean>(false);
+  const [editingMateriContent, setEditingMateriContent] = useState<string>('');
 
   const handlePdfUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2275,6 +2462,57 @@ export default function App() {
     } finally {
       setGeneratingMateriIds(prev => ({ ...prev, [kisi.id]: false }));
     }
+  };
+
+  const handleDeleteMateri = async (kisiId: string) => {
+    if (!confirm("Apakah Anda yakin ingin menghapus prompt untuk kisi-kisi ini?")) return;
+    try {
+      await deleteDoc(doc(db, 'materials', kisiId));
+      setIsEditingMateri(false);
+      alert("Prompt berhasil dihapus!");
+    } catch (err: any) {
+      console.error(err);
+      alert("Gagal menghapus prompt: " + (err.message || err));
+    }
+  };
+
+  const handleSaveMateri = async (kisiId: string, content: string) => {
+    try {
+      await setDoc(doc(db, 'materials', kisiId), {
+        content,
+        userId: currentUser?.uid,
+        updatedAt: new Date()
+      });
+      setIsEditingMateri(false);
+      alert("Prompt berhasil disimpan!");
+    } catch (err: any) {
+      console.error(err);
+      alert("Gagal menyimpan prompt: " + (err.message || err));
+    }
+  };
+
+  const handleUploadPromptFile = (e: React.ChangeEvent<HTMLInputElement>, kisiId: string) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const text = event.target?.result as string;
+      if (text) {
+        try {
+          await setDoc(doc(db, 'materials', kisiId), {
+            content: text,
+            userId: currentUser?.uid,
+            updatedAt: new Date()
+          });
+          alert("File Prompt berhasil diunggah!");
+        } catch (err: any) {
+          console.error(err);
+          alert("Gagal mengunggah file prompt: " + (err.message || err));
+        }
+      }
+    };
+    reader.readAsText(file);
   };
 
   const handlePrintMateri = (kisi: KisiKisiItem, content: string) => {
@@ -2665,11 +2903,8 @@ Kompetensi : [Kompetensi yang diuji]
 Sub Kompetensi : [Sub kompetensi spesifik]
 Bentuk Soal : [Jenis bentuk soal]
 
-Stimulus:
-[Paragraf stimulus, data/tabel, atau situasi kontekstual]
-
-Soal:
-[Pertanyaan utama atau instruksi pengerjaan]
+Soal (Menggabungkan Stimulus dan Pertanyaan Utama):
+[Paragraf stimulus, data/tabel, atau situasi kontekstual, diikuti langsung dengan pertanyaan utama atau instruksi pengerjaan secara menyatu dalam satu kesatuan teks]
 
 Pilihan Jawaban:
 A. [Pilihan A]
@@ -2931,11 +3166,8 @@ Kompetensi : [Kompetensi yang diuji]
 Sub Kompetensi : [Sub kompetensi spesifik]
 Bentuk Soal : [Jenis bentuk soal]
 
-Stimulus:
-[Paragraf stimulus, data/tabel, atau situasi kontekstual]
-
-Soal:
-[Pertanyaan utama atau instruksi pengerjaan]
+Soal (Menggabungkan Stimulus dan Pertanyaan Utama):
+[Paragraf stimulus, data/tabel, atau situasi kontekstual, diikuti langsung dengan pertanyaan utama atau instruksi pengerjaan secara menyatu dalam satu kesatuan teks]
 
 Pilihan Jawaban:
 A. [Pilihan A]
@@ -3037,6 +3269,12 @@ Hasilkan rancangan prompt instruksi lengkap, terstruktur, profesional, dan dalam
           statusText: `Merancang butir soal #${i + 1} s.d #${i + countForThisChunk} via AI...`
         }));
         
+        // Combine current database questions with newly generated ones in this loop
+        const currentExistingSoalStems = [
+          ...questions.map(q => q.soal),
+          ...generatedSoalList.map(q => q.soal)
+        ];
+
         let data;
         if (aiConfig.mode === 'client') {
           const systemInstruction = `Anda adalah ahli pembuat soal ujian nasional dan TKA (Tes Kemampuan Akademik) SMA di Indonesia. Anda sangat terampil menyusun soal tingkat tinggi (HOTS), bervariasi, mendalam, dan bebas dari bias. Patuhi instruksi bentuk soal dan parameter kognitif secara presisi.`;
@@ -3064,7 +3302,19 @@ Hasilkan rancangan prompt instruksi lengkap, terstruktur, profesional, dan dalam
               ? `Pilihan ganda kompleks model multiple choice multiple answers (MCMA): Ada lebih dari satu jawaban yang benar. Peserta diminta memilih semua jawaban benar. Kunci jawaban harus menyebutkan semua pilihan yang benar (misal: 'A, C'). Sediakan pilihan A sampai ${config.jumlahOpsi === 5 ? "E" : "D"}.`
               : "Pilihan ganda kompleks kategori: Menyajikan beberapa pernyataan (minimal 3-4 pernyataan) yang semuanya harus direspon, misalnya dengan pilihan 'Benar'/'Salah' atau 'Sesuai'/'Tidak Sesuai'. Kunci jawaban harus merinci status setiap pernyataan (misal: '1. Benar, 2. Salah, 3. Benar').";
 
-          const prompt = `Buatkan tepat sebanyak ${countForThisChunk} butir soal ujian TKA SMA yang berbeda untuk Mata Pelajaran ${config.mataPelajaran}.
+          // Construct constraint for existing questions to avoid duplicates in client-side generator
+          let clientExistingQuestionsConstraint = '';
+          const activeSlices = currentExistingSoalStems.filter(Boolean).slice(0, 30);
+          if (activeSlices.length > 0) {
+            clientExistingQuestionsConstraint = `\n\nHINDARI PENGULANGAN SOAL (SANGAT PENTING):\nJangan membuat soal yang sama, memiliki konsep atau contoh kasus/studi yang mirip, or menggunakan narasi stimulus yang mirip dengan soal-soal berikut:\n${activeSlices.map((text, idx) => `- Soal ${idx + 1}: ${text.substring(0, 150)}...`).join('\n')}\nPastikan butir soal yang Anda hasilkan saat ini benar-benar segar, baru, unik secara naratif, bervariasi, dan tidak mengulangi pertanyaan di atas.`;
+          }
+
+          let clientIndonesianLanguageCriteria = '';
+          if (config.mataPelajaran && (config.mataPelajaran.toLowerCase().includes('bahasa indonesia') || config.mataPelajaran.toLowerCase().includes('indonesia'))) {
+            clientIndonesianLanguageCriteria = `\n\nKAIDAH & KAIDAH MUATAN KHUSUS BAHASA INDONESIA (SANGAT PENTING):\n- Teks yang diujikan harus berupa Teks Informasi (Tunggal/Jamak yang berisi fakta, konsep, prosedur, metakognisi dari berbagai bidang pada skala lokal, nasional, global) ATAU Teks Fiksi (realisme/absurd dengan latar cerita konkret/abstrak, tokoh berkarakter bulat, konflik tunggal/jamak dengan penyelesaian terbuka, alur campuran, dan sudut pandang campuran).\n- Karakteristik Kosakata: Menggunakan kata khusus dan kata umum, kata berimbuhan kompleks, kata abstrak, makna denotatif, istilah teknis, atau konotatif konteks luas.\n- Karakteristik Kalimat: Setiap kalimat di dalam teks stimulus/soal harus berkisar antara 8-12 kata per kalimat, menggunakan kalimat kompleks berbagai pola serta kalimat inversi.\n- Karakteristik Wacana: Menggunakan konjungsi antarparagraf dengan makna 'pertentangan' dan 'sebab akibat', tanda baca pendukung makna yang tepat, dengan panjang teks berkisar antara 250-300 kata (kecuali jika bergenre puisi).`;
+          }
+
+          const prompt = `Buatkan tepat sebanyak ${countForThisChunk} butir soal ujian TKA SMA yang berbeda untuk Mata Pelajaran ${config.mataPelajaran}.${clientIndonesianLanguageCriteria}
           
 PENTING: Jumlah objek soal yang dihasilkan dalam array JSON HARUS tepat sebanyak ${countForThisChunk} butir soal, tidak kurang dan tidak lebih.
 Setiap butir soal harus unik, bervariasi, dan didasarkan pada kisi-kisi berikut.
@@ -3080,6 +3330,7 @@ INFORMASI MATRIKS ASESMEN KISI-KISI:
 - Konteks Nusantara: ${kisi.konteksNusantara || "Tidak ada khusus"}
 - Stimulus Tambahan: ${kisi.stimulusTambahan || "Tidak ada khusus"}
 - Jenis Soal: ${config.jenisSoal} (Soal Tunggal atau Soal Grup/Terhubung)
+${clientExistingQuestionsConstraint}
 
 PANDUAN EKSTRA:
 1. ${konteksStr} ${kisi.konteksNusantara ? `Integrasikan juga secara mendalam target Konteks Nusantara berikut ke dalam stimulus atau pokok soal agar bernuansa ke-Indonesia-an yang otentik: "${kisi.konteksNusantara}".` : ""}
@@ -3088,7 +3339,8 @@ PANDUAN EKSTRA:
 4. Kunci jawaban harus sangat akurat dan pembahasan harus lengkap, ilmiah, edukatif, dan terstruktur dengan rapi agar mudah dipahami siswa SMA. Tambahkan juga field 'kataKunci' yang berisi kata kunci atau konsep penting/topik utama yang digunakan/diuji dalam soal ini.
 5. JIKA soal membutuhkan visual pendukung (seperti grafik fungsi, diagram kartesius, bangun geometri, dsb.), Anda disarankan untuk membuat kode SVG inline yang valid (dimulai dengan '<svg' dan ditutup '</svg>' lengkap dengan viewBox, stroke, fill, teks label agar indah dan responsive) ATAU mencantumkan URL gambar Unsplash yang relevan pada field 'gambarUrl'. Jika tidak membutuhkan visual, isi 'gambarUrl' dengan string kosong "".
 6. Harap sesuaikan bahasa agar baku, formal, sesuai EBI (Ejaan Bahasa Indonesia), namun mudah dimengerti.
-7. Hasilkan tepat ${countForThisChunk} objek soal di dalam array hasil.`;
+7. Hasilkan tepat ${countForThisChunk} objek soal di dalam array hasil.
+8. SANGAT PENTING (MANDATORI): Gabungkan paragraf stimulus/pengantar/studi kasus (bila ada) langsung ke bagian awal field 'soal' (diikuti pertanyaan utama di bawahnya), dan kosongkan field 'stimulus' (isi dengan string kosong ""). Jangan memisahkannya agar struktur soal konsisten dengan prompt.`;
 
           const soalSchema = {
             type: "ARRAY",
@@ -3098,8 +3350,8 @@ PANDUAN EKSTRA:
                 kompetensi: { type: "STRING" },
                 subKompetensi: { type: "STRING" },
                 bentukSoal: { type: "STRING" },
-                stimulus: { type: "STRING", description: "Paragraf stimulus atau pengantar soal (bila ada)" },
-                soal: { type: "STRING", description: "Pertanyaan atau pokok soal utama" },
+                stimulus: { type: "STRING", description: "Sengaja dikosongkan karena stimulus digabungkan langsung ke dalam field 'soal' (isi dengan string kosong '')" },
+                soal: { type: "STRING", description: "Teks soal lengkap yang menggabungkan stimulus (paragraf stimulus/pengantar/teks bacaan/studi kasus jika ada) dan pertanyaan/pokok soal utama secara menyatu" },
                 opsi: { 
                   type: "ARRAY", 
                   items: { type: "STRING" }, 
@@ -3131,7 +3383,8 @@ PANDUAN EKSTRA:
               konteksLokal: config.konteksLokal,
               stimulusKonten: config.stimulusKonten,
               kualitasChecklist: config.kualitasChecklist,
-              noSoalStart: currentNoSoal
+              noSoalStart: currentNoSoal,
+              existingQuestions: currentExistingSoalStems
             })
           });
 
@@ -3332,6 +3585,9 @@ Ingat: HANYA berikan kode SVG murni. Jika Anda membungkusnya dengan blok markdow
     setIsGeneratingSoal(true);
     let successCount = 0;
     
+    // Accumulator for tracking all existing and newly generated questions to prevent duplication across iterations
+    const allExistingSoalTexts = [...questions.map(q => q.soal)];
+    
     const totalQuestionsTarget = kisiList.reduce((acc, k) => acc + (k.jumlahSoal || 1), 0);
     setSoalProgress({
       active: true,
@@ -3393,7 +3649,19 @@ Ingat: HANYA berikan kode SVG murni. Jika Anda membungkusnya dengan blok markdow
                 ? `Pilihan ganda kompleks model multiple choice multiple answers (MCMA): Ada lebih dari satu jawaban yang benar. Peserta diminta memilih semua jawaban benar. Kunci jawaban harus menyebutkan semua pilihan yang benar (misal: 'A, C'). Sediakan pilihan A sampai ${config.jumlahOpsi === 5 ? "E" : "D"}.`
                 : "Pilihan ganda kompleks kategori: Menyajikan beberapa pernyataan (minimal 3-4 pernyataan) yang semuanya harus direspon, misalnya dengan pilihan 'Benar'/'Salah' atau 'Sesuai'/'Tidak Sesuai'. Kunci jawaban harus merinci status setiap pernyataan (misal: '1. Benar, 2. Salah, 3. Benar').";
 
-            const prompt = `Buatkan tepat sebanyak ${countForThisChunk} butir soal ujian TKA SMA yang berbeda untuk Mata Pelajaran ${config.mataPelajaran}.
+            // Construct constraint for existing questions to avoid duplicates in client-side generator
+            let clientExistingQuestionsConstraint = '';
+            const activeSlices = allExistingSoalTexts.filter(Boolean).slice(0, 30);
+            if (activeSlices.length > 0) {
+              clientExistingQuestionsConstraint = `\n\nHINDARI PENGULANGAN SOAL (SANGAT PENTING):\nJangan membuat soal yang sama, memiliki konsep atau contoh kasus/studi yang mirip, atau menggunakan narasi stimulus yang mirip dengan soal-soal berikut:\n${activeSlices.map((text, idx) => `- Soal ${idx + 1}: ${text.substring(0, 150)}...`).join('\n')}\nPastikan butir soal yang Anda hasilkan saat ini benar-benar segar, baru, unik secara naratif, bervariasi, dan tidak mengulangi pertanyaan di atas.`;
+            }
+
+            let clientIndonesianLanguageCriteria = '';
+            if (config.mataPelajaran && (config.mataPelajaran.toLowerCase().includes('bahasa indonesia') || config.mataPelajaran.toLowerCase().includes('indonesia'))) {
+              clientIndonesianLanguageCriteria = `\n\nKAIDAH & KAIDAH MUATAN KHUSUS BAHASA INDONESIA (SANGAT PENTING):\n- Teks yang diujikan harus berupa Teks Informasi (Tunggal/Jamak yang berisi fakta, konsep, prosedur, metakognisi dari berbagai bidang pada skala lokal, nasional, global) ATAU Teks Fiksi (realisme/absurd dengan latar cerita konkret/abstrak, tokoh berkarakter bulat, konflik tunggal/jamak dengan penyelesaian terbuka, alur campuran, dan sudut pandang campuran).\n- Karakteristik Kosakata: Menggunakan kata khusus dan kata umum, kata berimbuhan kompleks, kata abstrak, makna denotatif, istilah teknis, atau konotatif konteks luas.\n- Karakteristik Kalimat: Setiap kalimat di dalam teks stimulus/soal harus berkisar antara 8-12 kata per kalimat, menggunakan kalimat kompleks berbagai pola serta kalimat inversi.\n- Karakteristik Wacana: Menggunakan konjungsi antarparagraf dengan makna 'pertentangan' dan 'sebab akibat', tanda baca pendukung makna yang tepat, dengan panjang teks berkisar antara 250-300 kata (kecuali jika bergenre puisi).`;
+            }
+
+            const prompt = `Buatkan tepat sebanyak ${countForThisChunk} butir soal ujian TKA SMA yang berbeda untuk Mata Pelajaran ${config.mataPelajaran}.${clientIndonesianLanguageCriteria}
             
 PENTING: Jumlah objek soal yang dihasilkan dalam array JSON HARUS tepat sebanyak ${countForThisChunk} butir soal, tidak kurang dan tidak lebih.
 Setiap butir soal harus unik, bervariasi, dan didasarkan pada kisi-kisi berikut.
@@ -3409,6 +3677,7 @@ INFORMASI MATRIKS ASESMEN KISI-KISI:
 - Konteks Nusantara: ${kisi.konteksNusantara || "Tidak ada khusus"}
 - Stimulus Tambahan: ${kisi.stimulusTambahan || "Tidak ada khusus"}
 - Jenis Soal: ${config.jenisSoal} (Soal Tunggal atau Soal Grup/Terhubung)
+${clientExistingQuestionsConstraint}
 
 PANDUAN EKSTRA:
 1. ${konteksStr} ${kisi.konteksNusantara ? `Integrasikan juga secara mendalam target Konteks Nusantara berikut ke dalam stimulus atau pokok soal agar bernuansa ke-Indonesia-an yang otentik: "${kisi.konteksNusantara}".` : ""}
@@ -3417,7 +3686,8 @@ PANDUAN EKSTRA:
 4. Kunci jawaban harus sangat akurat dan pembahasan harus lengkap, ilmiah, edukatif, dan terstruktur dengan rapi agar mudah dipahami siswa SMA. Tambahkan juga field 'kataKunci' yang berisi kata kunci atau konsep penting/topik utama yang digunakan/diuji dalam soal ini.
 5. JIKA soal membutuhkan visual pendukung (seperti grafik fungsi, diagram kartesius, bangun geometri, dsb.), Anda disarankan untuk membuat kode SVG inline yang valid (dimulai dengan '<svg' dan ditutup '</svg>' lengkap dengan viewBox, stroke, fill, teks label agar indah dan responsive) ATAU mencantumkan URL gambar Unsplash yang relevan pada field 'gambarUrl'. Jika tidak membutuhkan visual, isi 'gambarUrl' dengan string kosong "".
 6. Harap sesuaikan bahasa agar baku, formal, sesuai EBI (Ejaan Bahasa Indonesia), namun mudah dimengerti.
-7. Hasilkan tepat ${countForThisChunk} objek soal di dalam array hasil.`;
+7. Hasilkan tepat ${countForThisChunk} objek soal di dalam array hasil.
+8. SANGAT PENTING (MANDATORI): Gabungkan paragraf stimulus/pengantar/studi kasus (bila ada) langsung ke bagian awal field 'soal' (diikuti pertanyaan utama di bawahnya), dan kosongkan field 'stimulus' (isi dengan string kosong ""). Jangan memisahkannya agar struktur soal konsisten dengan prompt.`;
 
             const soalSchema = {
               type: "ARRAY",
@@ -3427,8 +3697,8 @@ PANDUAN EKSTRA:
                   kompetensi: { type: "STRING" },
                   subKompetensi: { type: "STRING" },
                   bentukSoal: { type: "STRING" },
-                  stimulus: { type: "STRING", description: "Paragraf stimulus atau pengantar soal (bila ada)" },
-                  soal: { type: "STRING", description: "Pertanyaan atau pokok soal utama" },
+                  stimulus: { type: "STRING", description: "Sengaja dikosongkan karena stimulus digabungkan langsung ke dalam field 'soal' (isi dengan string kosong '')" },
+                  soal: { type: "STRING", description: "Teks soal lengkap yang menggabungkan stimulus (paragraf stimulus/pengantar/teks bacaan/studi kasus jika ada) dan pertanyaan/pokok soal utama secara menyatu" },
                   opsi: { 
                     type: "ARRAY", 
                     items: { type: "STRING" }, 
@@ -3460,7 +3730,8 @@ PANDUAN EKSTRA:
                 konteksLokal: config.konteksLokal,
                 stimulusKonten: config.stimulusKonten,
                 kualitasChecklist: config.kualitasChecklist,
-                noSoalStart: currentNoSoal
+                noSoalStart: currentNoSoal,
+                existingQuestions: allExistingSoalTexts
               })
             });
 
@@ -3506,6 +3777,10 @@ PANDUAN EKSTRA:
               kataKunci: q.kataKunci || '',
               gambarUrl: q.gambarUrl || ''
             }));
+            
+            // Push newly generated questions' stems to accumulator to prevent any duplicates on subsequent iterations
+            allExistingSoalTexts.push(...mapped.map(m => m.soal));
+
             setQuestions(prev => [...prev, ...mapped]);
             successCount += mapped.length;
             currentNoSoal += mapped.length;
@@ -3543,7 +3818,10 @@ PANDUAN EKSTRA:
   };
 
   // Fungsi Impor Preset Pusmendik
-  const handleImportSinglePreset = async (preset: { elemenMateri: string, subElemenMateri: string, kompetensi: string, batasanCatatan: string }) => {
+  const handleImportSinglePreset = async (preset: { elemenMateri: string, subElemenMateri: string, kompetensi: string, batasanCatatan: string }, idx: number) => {
+    const presetId = `${preset.subElemenMateri}-${idx}`;
+    setImportingPresetIds(prev => ({ ...prev, [presetId]: true }));
+
     const presetSubjectMapped = selectedPresetSubject === 'PPKN' 
       ? 'Pendidikan Pancasila dan Kewarganegaraan'
       : selectedPresetSubject === 'Sejarah Tingkat Lanjut'
@@ -3552,12 +3830,10 @@ PANDUAN EKSTRA:
       ? 'Produk atau Projek Kreatif dan Kewirausahaan SMK dan MAK'
       : selectedPresetSubject;
 
-    if (!config.mataPelajaran) {
-      setConfig(prev => ({
-        ...prev,
-        mataPelajaran: presetSubjectMapped
-      }));
-    }
+    setConfig(prev => ({
+      ...prev,
+      mataPelajaran: presetSubjectMapped
+    }));
 
     try {
       const newItem: KisiKisiItem = {
@@ -3573,9 +3849,12 @@ PANDUAN EKSTRA:
         jumlahSoal: 5
       };
       await setDoc(doc(db, 'kisi_kisi', newItem.id), newItem);
+      alert(`Berhasil menambahkan kisi-kisi: "${preset.subElemenMateri}" ke daftar!`);
     } catch (err: any) {
       console.error("Gagal mengimpor preset:", err);
       alert(`Gagal mengimpor preset: ${err.message}`);
+    } finally {
+      setImportingPresetIds(prev => ({ ...prev, [presetId]: false }));
     }
   };
 
@@ -3624,12 +3903,10 @@ PANDUAN EKSTRA:
       : selectedPresetSubject;
 
     if (confirm(`Apakah Anda ingin menambahkan seluruh ${count} matriks standar Pusmendik ${selectedPresetSubject} ke daftar kisi-kisi saat ini?`)) {
-      if (!config.mataPelajaran) {
-        setConfig(prev => ({
-          ...prev,
-          mataPelajaran: presetSubjectMapped
-        }));
-      }
+      setConfig(prev => ({
+        ...prev,
+        mataPelajaran: presetSubjectMapped
+      }));
 
       try {
         const newItems: KisiKisiItem[] = activePresets.map((preset, idx) => ({
@@ -3666,12 +3943,10 @@ PANDUAN EKSTRA:
       ? 'Produk atau Projek Kreatif dan Kewirausahaan SMK dan MAK'
       : selectedPresetSubject;
 
-    if (!config.mataPelajaran) {
-      setConfig(prev => ({
-        ...prev,
-        mataPelajaran: presetSubjectMapped
-      }));
-    }
+    setConfig(prev => ({
+      ...prev,
+      mataPelajaran: presetSubjectMapped
+    }));
 
     setKisiForm({
       bentukSoal: 'pilihan_ganda_sederhana',
@@ -3783,7 +4058,20 @@ PANDUAN EKSTRA:
 
   const handleDeleteKisi = async (id: string) => {
     try {
+      // 1. Delete Kisi-Kisi itself
       await deleteDoc(doc(db, 'kisi_kisi', id));
+      
+      // 2. Delete associated material
+      await deleteDoc(doc(db, 'materials', id));
+      
+      // 3. Delete associated questions
+      const qQuestions = query(collection(db, 'questions'), where('kisiKisiId', '==', id));
+      const qSnapshot = await getDocs(qQuestions);
+      const batch = writeBatch(db);
+      qSnapshot.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      await batch.commit();
     } catch (err: any) {
       console.error("Gagal menghapus kisi-kisi:", err);
       alert(`Gagal menghapus: ${err.message}`);
@@ -3822,6 +4110,7 @@ PANDUAN EKSTRA:
 
     // Clean options (remove empty strings)
     const activeOptions = (questionForm.opsi || []).filter(o => o.trim() !== '');
+    setIsSavingQuestion(true);
 
     try {
       if (isEditingQuestion && editingQuestionId) {
@@ -3863,26 +4152,33 @@ PANDUAN EKSTRA:
         };
         await setDoc(doc(db, 'questions', newQ.id), newQ);
       }
+
+      // Reset Form
+      setQuestionForm({
+        kisiKisiId: '',
+        kompetensi: '',
+        subKompetensi: '',
+        bentukSoal: 'pilihan_ganda_sederhana',
+        soal: '',
+        stimulus: '',
+        opsi: ['', '', '', '', ''],
+        kunciJawaban: '',
+        pembahasan: '',
+        kataKunci: '',
+        gambarUrl: ''
+      });
+      setIsEditingQuestion(false);
+      alert('Berhasil menyimpan butir soal!');
     } catch (err: any) {
       console.error("Gagal menyimpan soal ke database:", err);
-      alert(`Gagal menyimpan ke database: ${err.message}`);
+      try {
+        handleFirestoreError(err, OperationType.WRITE, 'questions');
+      } catch (err2: any) {
+        alert(`Gagal menyimpan ke database: ${err.message || err}`);
+      }
+    } finally {
+      setIsSavingQuestion(false);
     }
-
-    // Reset Form
-    setQuestionForm({
-      kisiKisiId: '',
-      kompetensi: '',
-      subKompetensi: '',
-      bentukSoal: 'pilihan_ganda_sederhana',
-      soal: '',
-      stimulus: '',
-      opsi: ['', '', '', '', ''],
-      kunciJawaban: '',
-      pembahasan: '',
-      kataKunci: '',
-      gambarUrl: ''
-    });
-    setIsEditingQuestion(false);
   };
 
   const handleEditQuestion = (q: Question) => {
@@ -3979,17 +4275,6 @@ PANDUAN EKSTRA:
         }
       }
 
-      // Parse stimulus
-      let stimulusHtml = '';
-      if (q.stimulus && printConfig.showStimulus) {
-        stimulusHtml = `
-          <div class="stimulus-box">
-            <strong>Wacana / Stimulus:</strong><br/>
-            ${q.stimulus}
-          </div>
-        `;
-      }
-
       // Parse competency tag
       let competencyTagHtml = '';
       if (printConfig.showCompetencyTag) {
@@ -4015,15 +4300,28 @@ PANDUAN EKSTRA:
         `;
       }
 
+      // Combined Stimulus & Question Statement
+      const combinedQuestionTextHtml = `
+        ${q.stimulus && printConfig.showStimulus ? `
+          <div class="stimulus-combined-text" style="font-weight: normal; font-style: italic; margin-bottom: 8px; text-align: justify; line-height: 1.4;">
+            ${q.stimulus}
+          </div>
+        ` : ''}
+        <div class="question-statement-text" style="font-weight: bold;">
+          ${q.soal}
+        </div>
+      `;
+
       return `
         <div class="question-item">
           ${competencyTagHtml}
           <div class="question-body">
             ${!printConfig.showCompetencyTag ? `<span class="question-number">${q.noSoal}.</span>` : ''}
             <div class="question-content">
-              ${stimulusHtml}
               ${illustrationHtml}
-              <div class="question-text">${q.soal}</div>
+              <div class="question-text">
+                ${combinedQuestionTextHtml}
+              </div>
               <div class="options-container ${printConfig.layoutColumns === '2' ? 'single-col' : 'grid-cols-2'}">
                 ${optionsHtml}
               </div>
@@ -4223,15 +4521,21 @@ PANDUAN EKSTRA:
           
           /* Question items styling */
           .question-item {
-            display: inline-block;
+            display: block;
             width: 100%;
+            margin-bottom: 16px;
+            border-bottom: 1px solid #f3f4f6;
+            padding-bottom: 12px;
+            page-break-inside: auto; /* Allow natural page-break flow to prevent separating header and questions */
+            break-inside: auto;
+          }
+          /* If two-column is active, keep questions self-contained within columns */
+          .layout-columns-2 .question-item {
+            display: inline-block;
             -webkit-column-break-inside: avoid;
             page-break-inside: avoid;
             break-inside: avoid-column;
             break-inside: avoid;
-            margin-bottom: 16px;
-            border-bottom: 1px solid #f3f4f6;
-            padding-bottom: 12px;
           }
           .question-item:last-child {
             border-bottom: none;
@@ -4386,7 +4690,7 @@ PANDUAN EKSTRA:
                 .join('')
               }
               <h1 class="kop-school">${printConfig.schoolName}</h1>
-              <p class="kop-address">Jalan Pendidikan Raya No. 45 Nusantara - Telp/Fax: (021) 777-1234</p>
+              <p class="kop-address">${printConfig.schoolAddress}</p>
               <p class="kop-info">TAHUN PELAJARAN: ${printConfig.academicYear} | SEMESTER: ${printConfig.semester.toUpperCase()}</p>
             </div>
             ${rightLogoHtml}
@@ -4394,14 +4698,14 @@ PANDUAN EKSTRA:
         ` : `
           <div class="simple-title">
             <h2>LEMBAR SOAL UJIAN TKA SMA</h2>
-            <p><strong>Mata Pelajaran:</strong> ${config.mataPelajaran || 'TES KEMAMPUAN AKADEMIK'} | <strong>Muatan:</strong> ${config.muatan || 'SMA'}</p>
+            <p><strong>Mata Pelajaran:</strong> ${printConfig.subjectName || config.mataPelajaran || 'TES KEMAMPUAN AKADEMIK'} | <strong>Muatan:</strong> ${config.muatan || 'SMA'}</p>
           </div>
         `}
 
         ${printConfig.showHeader ? `
           <div class="exam-meta-title">
             <h2>${printConfig.examName}</h2>
-            <h1>MATA PELAJARAN: ${config.mataPelajaran || 'TES KEMAMPUAN AKADEMIK'}</h1>
+            <h1>MATA PELAJARAN: ${printConfig.subjectName || config.mataPelajaran || 'TES KEMAMPUAN AKADEMIK'}</h1>
             <div style="font-size: 8.5pt; margin-top: 4px; font-weight: bold;">
               <span>Fase/Muatan: ${config.muatan || 'SMA'}</span> &nbsp;|&nbsp; 
               <span>Alokasi Waktu: ${printConfig.timeAllocation}</span>
@@ -4570,7 +4874,7 @@ PANDUAN EKSTRA:
               }`}
             >
               <FileText className="h-4.5 w-4.5 text-purple-600" />
-              <span>4. Ringkasan Materi & Panduan</span>
+              <span>4. Prompt Slide & Infografis</span>
             </button>
             <button
               id="tab-btn-jadwal"
@@ -5096,15 +5400,10 @@ PANDUAN EKSTRA:
                   <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row gap-3">
                     <button
                       onClick={handleGenerateKisiViaAI}
-                      disabled={isGeneratingKisi || !isAdmin}
+                      disabled={isGeneratingKisi}
                       className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-slate-700 disabled:to-slate-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition flex items-center justify-center gap-2 text-sm"
                     >
-                      {!isAdmin ? (
-                        <>
-                          <Lock className="h-4.5 w-4.5 text-slate-300" />
-                          <span>Generate Kisi-Kisi (Hanya Admin)</span>
-                        </>
-                      ) : isGeneratingKisi ? (
+                      {isGeneratingKisi ? (
                         <>
                           <RefreshCw className="h-4.5 w-4.5 animate-spin text-white" />
                           <span>Menganalisis Kurikulum...</span>
@@ -5118,15 +5417,10 @@ PANDUAN EKSTRA:
                     </button>
                     <button
                       onClick={handleGenerateAllQuestions}
-                      disabled={isGeneratingSoal || kisiList.length === 0 || !isAdmin}
+                      disabled={isGeneratingSoal || kisiList.length === 0}
                       className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:from-slate-700 disabled:to-slate-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition flex items-center justify-center gap-2 text-sm"
                     >
-                      {!isAdmin ? (
-                        <>
-                          <Lock className="h-4.5 w-4.5 text-slate-300" />
-                          <span>Penyusunan Massal (Hanya Admin)</span>
-                        </>
-                      ) : isGeneratingSoal ? (
+                      {isGeneratingSoal ? (
                         <>
                           <RefreshCw className="h-4.5 w-4.5 animate-spin text-white" />
                           <span>Merancang Soal & Kunci...</span>
@@ -5218,103 +5512,103 @@ PANDUAN EKSTRA:
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <div className="bg-slate-900 border border-slate-800 p-1 rounded-xl flex flex-wrap gap-1">
                     <button
-                      onClick={() => setSelectedPresetSubject('Matematika')}
+                      onClick={() => handleSelectPresetSubject('Matematika')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Matematika' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       📐 Matematika
                     </button>
                     <button
-                      onClick={() => setSelectedPresetSubject('Bahasa Indonesia')}
+                      onClick={() => handleSelectPresetSubject('Bahasa Indonesia')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Bahasa Indonesia' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       🇮🇩 Bahasa Indonesia
                     </button>
                     <button
-                      onClick={() => setSelectedPresetSubject('Bahasa Inggris')}
+                      onClick={() => handleSelectPresetSubject('Bahasa Inggris')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Bahasa Inggris' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       🇬🇧 Bahasa Inggris
                     </button>
                     <button
-                      onClick={() => setSelectedPresetSubject('Matematika Tingkat Lanjut')}
+                      onClick={() => handleSelectPresetSubject('Matematika Tingkat Lanjut')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Matematika Tingkat Lanjut' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       🚀 Mat Lanjut
                     </button>
                     <button
-                      onClick={() => setSelectedPresetSubject('Bahasa Indonesia Tingkat Lanjut')}
+                      onClick={() => handleSelectPresetSubject('Bahasa Indonesia Tingkat Lanjut')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Bahasa Indonesia Tingkat Lanjut' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       ✍️ Indo Lanjut
                     </button>
                     <button
-                      onClick={() => setSelectedPresetSubject('Bahasa Inggris Tingkat Lanjut')}
+                      onClick={() => handleSelectPresetSubject('Bahasa Inggris Tingkat Lanjut')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Bahasa Inggris Tingkat Lanjut' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       🗣️ Inggris Lanjut
                     </button>
                     <button
-                      onClick={() => setSelectedPresetSubject('Fisika')}
+                      onClick={() => handleSelectPresetSubject('Fisika')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Fisika' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       ⚛️ Fisika
                     </button>
                     <button
-                      onClick={() => setSelectedPresetSubject('Kimia')}
+                      onClick={() => handleSelectPresetSubject('Kimia')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Kimia' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       🧪 Kimia
                     </button>
                     <button
-                      onClick={() => setSelectedPresetSubject('Biologi')}
+                      onClick={() => handleSelectPresetSubject('Biologi')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Biologi' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       🧬 Biologi
                     </button>
                     <button
-                      onClick={() => setSelectedPresetSubject('PPKN')}
+                      onClick={() => handleSelectPresetSubject('PPKN')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'PPKN' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       🗳️ PPKN
                     </button>
                     <button
-                      onClick={() => setSelectedPresetSubject('Ekonomi')}
+                      onClick={() => handleSelectPresetSubject('Ekonomi')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Ekonomi' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       💰 Ekonomi
                     </button>
                     <button
-                      onClick={() => setSelectedPresetSubject('Geografi')}
+                      onClick={() => handleSelectPresetSubject('Geografi')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Geografi' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       🌍 Geografi
                     </button>
                     <button
-                      onClick={() => setSelectedPresetSubject('Sosiologi')}
+                      onClick={() => handleSelectPresetSubject('Sosiologi')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Sosiologi' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       👥 Sosiologi
                     </button>
                     <button
-                      onClick={() => setSelectedPresetSubject('Sejarah Tingkat Lanjut')}
+                      onClick={() => handleSelectPresetSubject('Sejarah Tingkat Lanjut')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Sejarah Tingkat Lanjut' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       📜 Sejarah Tingkat Lanjut
                     </button>
                     <button
-                      onClick={() => setSelectedPresetSubject('Antropologi')}
+                      onClick={() => handleSelectPresetSubject('Antropologi')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Antropologi' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       🗿 Antropologi
                     </button>
                     <button
-                      onClick={() => setSelectedPresetSubject('Bahasa Jepang')}
+                      onClick={() => handleSelectPresetSubject('Bahasa Jepang')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Bahasa Jepang' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       🎌 Bahasa Jepang
                     </button>
                     <button
-                      onClick={() => setSelectedPresetSubject('Produk Kreatif dan Kewirausahaan')}
+                      onClick={() => handleSelectPresetSubject('Produk Kreatif dan Kewirausahaan')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Produk Kreatif dan Kewirausahaan' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                       💼 Kewirausahaan (PKK)
@@ -5419,10 +5713,18 @@ PANDUAN EKSTRA:
                     </div>
                     <div className="flex gap-2 mt-3.5 pt-3 border-t border-slate-800">
                       <button
-                        onClick={() => handleImportSinglePreset(preset)}
-                        className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1 px-2.5 rounded text-[10px] transition text-center"
+                        onClick={() => handleImportSinglePreset(preset, idx)}
+                        disabled={importingPresetIds[`${preset.subElemenMateri}-${idx}`]}
+                        className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold py-1.5 px-2.5 rounded text-[10px] transition text-center flex items-center justify-center gap-1"
                       >
-                        + Tambah Langsung
+                        {importingPresetIds[`${preset.subElemenMateri}-${idx}`] ? (
+                          <>
+                            <RefreshCw className="h-3 w-3 animate-spin" />
+                            <span>Menyimpan...</span>
+                          </>
+                        ) : (
+                          <span>+ Tambah Langsung</span>
+                        )}
                       </button>
                       <button
                         onClick={() => handleLoadPresetToForm(preset)}
@@ -5442,7 +5744,51 @@ PANDUAN EKSTRA:
                 <Plus className="h-4 w-4 text-blue-600" />
                 {isEditingKisi ? 'Edit Baris Kisi-Kisi' : 'Tambah Baris Kisi-Kisi Manually'}
               </h3>
-              <form onSubmit={handleSaveKisiForm} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <form onSubmit={handleSaveKisiForm} className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                <div className="md:col-span-1">
+                  <label className="block text-[11px] font-bold text-indigo-600 mb-1">Mata Pelajaran</label>
+                  <select
+                    value={config.mataPelajaran}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setConfig(prev => ({ ...prev, mataPelajaran: value }));
+                      // Also sync preset subject selection for Pusmendik recommendations
+                      if (value === 'Pendidikan Pancasila dan Kewarganegaraan') {
+                        setSelectedPresetSubject('PPKN');
+                      } else if (value === 'Sejarah') {
+                        setSelectedPresetSubject('Sejarah Tingkat Lanjut');
+                      } else if (value === 'Produk atau Projek Kreatif dan Kewirausahaan SMK dan MAK') {
+                        setSelectedPresetSubject('Produk Kreatif dan Kewirausahaan');
+                      } else if (value) {
+                        setSelectedPresetSubject(value as any);
+                      }
+                    }}
+                    className="w-full bg-indigo-50 border border-indigo-200 text-indigo-950 font-bold rounded-lg px-2 py-1.5 text-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  >
+                    <option value="Matematika">Matematika</option>
+                    <option value="Bahasa Indonesia">Bahasa Indonesia</option>
+                    <option value="Bahasa Inggris">Bahasa Inggris</option>
+                    <option value="Matematika Tingkat Lanjut">Matematika Tingkat Lanjut</option>
+                    <option value="Bahasa Indonesia Tingkat Lanjut">Bahasa Indonesia Tingkat Lanjut</option>
+                    <option value="Bahasa Inggris Tingkat Lanjut">Bahasa Inggris Tingkat Lanjut</option>
+                    <option value="Fisika">Fisika</option>
+                    <option value="Kimia">Kimia</option>
+                    <option value="Biologi">Biologi</option>
+                    <option value="Pendidikan Pancasila dan Kewarganegaraan">PPKN</option>
+                    <option value="Ekonomi">Ekonomi</option>
+                    <option value="Geografi">Geografi</option>
+                    <option value="Sosiologi">Sosiologi</option>
+                    <option value="Sejarah">Sejarah</option>
+                    <option value="Antropologi">Antropologi</option>
+                    <option value="Bahasa Prancis">Bahasa Prancis</option>
+                    <option value="Bahasa Jerman">Bahasa Jerman</option>
+                    <option value="Bahasa Jepang">Bahasa Jepang</option>
+                    <option value="Bahasa Mandarin">Bahasa Mandarin</option>
+                    <option value="Bahasa Korea">Bahasa Korea</option>
+                    <option value="Bahasa Arab">Bahasa Arab</option>
+                    <option value="Produk atau Projek Kreatif dan Kewirausahaan SMK dan MAK">Kewirausahaan (PKK)</option>
+                  </select>
+                </div>
                 <div className="md:col-span-1">
                   <label className="block text-[11px] font-bold text-slate-500 mb-1">Materi / Elemen</label>
                   <input
@@ -5505,7 +5851,7 @@ PANDUAN EKSTRA:
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:border-indigo-500"
                   />
                 </div>
-                <div>
+                <div className="md:col-span-2">
                   <label className="block text-[11px] font-bold text-slate-500 mb-1">Batasan / Catatan</label>
                   <input
                     type="text"
@@ -5537,7 +5883,7 @@ PANDUAN EKSTRA:
                     className="w-full bg-slate-50 border border-indigo-100 rounded-lg px-3 py-1.5 text-xs focus:border-indigo-500"
                   />
                 </div>
-                <div className="md:col-span-2">
+                <div className="md:col-span-3">
                   <label className="block text-[11px] font-bold text-indigo-600 mb-1">📖 Deskripsi Stimulus Tambahan Khusus (Opsional)</label>
                   <input
                     type="text"
@@ -5549,7 +5895,7 @@ PANDUAN EKSTRA:
                 </div>
 
                 {/* Konteks Nusantara, Stimulus & Checklist Checkboxes */}
-                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-slate-100 pt-3 mt-2">
+                <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-slate-100 pt-3 mt-2">
                   {/* KONTEKS LOKAL INDONESIA */}
                   <div>
                     <label className="block text-[11px] font-bold text-slate-500 mb-1.5">🎭 KONTEKS LOKAL INDONESIA</label>
@@ -5907,14 +6253,14 @@ PANDUAN EKSTRA:
 
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  onClick={() => exportQuestionsToExcel(questions, config.mataPelajaran)}
+                  onClick={() => exportQuestionsToExcel(questions, printConfig.subjectName || config.mataPelajaran, printConfig.examName, printConfig.showAnswerKey)}
                   className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-sm"
                 >
                   <FileSpreadsheet className="h-4.5 w-4.5" />
                   <span>Download Excel (.xls)</span>
                 </button>
                 <button
-                  onClick={() => exportQuestionsToWord(questions, config.mataPelajaran, printConfig.pageSize)}
+                  onClick={() => exportQuestionsToWord(questions, printConfig.subjectName || config.mataPelajaran, printConfig.pageSize, printConfig.examName, printConfig.showAnswerKey)}
                   className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-sm"
                 >
                   <FileText className="h-4.5 w-4.5" />
@@ -5931,7 +6277,7 @@ PANDUAN EKSTRA:
                 ) : (
                   <div className="bg-slate-100 text-slate-500 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border border-slate-200 cursor-not-allowed select-none">
                     <Lock className="h-4 w-4" />
-                    <span>Tambah Soal (Hanya Admin)</span>
+                    <span>Tambah Soal (Silakan Login)</span>
                   </div>
                 )}
               </div>
@@ -6073,7 +6419,7 @@ PANDUAN EKSTRA:
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1 flex justify-between items-center">
                       <span>Ilustrasi / Grafik / Infografis Pendukung (Opsional)</span>
-                      <span className="text-[10px] text-indigo-600 font-semibold font-sans">Mendukung Link Gambar (http://) atau Kode SVG Lengkap (&lt;svg&gt;)</span>
+                      <span className="text-[10px] text-indigo-600 font-semibold font-sans">Mendukung Link Gambar (http://), Kode SVG Lengkap (&lt;svg&gt;), atau Upload File</span>
                     </label>
                     <textarea
                       rows={2}
@@ -6082,6 +6428,223 @@ PANDUAN EKSTRA:
                       placeholder="Contoh: https://images.unsplash.com/photo-1543269865-cbf427effbad?w=500  ATAU kode <svg viewBox='0 0 400 150'>...</svg>"
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono"
                     />
+
+                    {/* Direct Image File Uploader & Clear Button */}
+                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-slate-250 select-none">
+                        <Upload className="h-3.5 w-3.5 text-slate-500" />
+                        <span>📁 Pilih/Upload Gambar dari Komputer</span>
+                        <input 
+                          type="file" 
+                          accept="image/*" 
+                          className="hidden" 
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                setQuestionForm(prev => ({
+                                  ...prev,
+                                  gambarUrl: reader.result as string
+                                }));
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }} 
+                        />
+                      </label>
+                      {questionForm.gambarUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setQuestionForm(prev => ({ ...prev, gambarUrl: '' }))}
+                          className="bg-rose-50 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 transition border border-rose-100"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Hapus Gambar
+                        </button>
+                      )}
+                      {questionForm.gambarUrl && !questionForm.gambarUrl.trim().toLowerCase().startsWith('<svg') && (
+                        <div className="h-8 w-8 rounded border border-slate-200 overflow-hidden flex items-center justify-center bg-slate-50">
+                          <img src={questionForm.gambarUrl} alt="Preview" className="h-full w-full object-cover" />
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Bank Prompt Super-AI Section */}
+                    <div className="mt-4 bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Sparkles className="h-4 w-4 text-indigo-600" />
+                        <span className="text-xs font-bold text-slate-700 uppercase tracking-wide">📋 Bank Prompt Siap Pakai (Stimulus, Gambar & Tabel)</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mb-3">
+                        Gunakan rekomendasi prompt super-efektif berikut untuk dimasukkan ke AI (seperti Nano Banana, Gemini, atau AI Studio) demi menghasilkan stimulus berkelas HOTS SMA.
+                      </p>
+
+                      {/* Tab buttons */}
+                      <div className="flex flex-wrap gap-1 border-b border-slate-200 pb-2 mb-3">
+                        {[
+                          { id: 'ilustrasi', label: '🖼️ Gambar/Ilustrasi', icon: Image },
+                          { id: 'tabel', label: '📊 Data/Tabel', icon: FileSpreadsheet },
+                          { id: 'grafik', label: '📈 Grafik/Diagram', icon: Sliders },
+                          { id: 'stimulus', label: '📝 Kasus Stimulus', icon: FileText }
+                        ].map((tab) => {
+                          const Icon = tab.icon;
+                          const isActive = activePromptTab === tab.id;
+                          return (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              onClick={() => setActivePromptTab(tab.id as any)}
+                              className={`px-3 py-1 text-xs font-bold rounded-lg transition flex items-center gap-1 ${
+                                isActive 
+                                  ? 'bg-indigo-600 text-white shadow-sm' 
+                                  : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200'
+                              }`}
+                            >
+                              <Icon className="h-3.5 w-3.5" />
+                              <span>{tab.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Active Tab Content */}
+                      <div className="space-y-3">
+                        {activePromptTab === 'ilustrasi' && (
+                          <div className="bg-white border border-slate-200 rounded-lg p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-bold text-indigo-700">Prompt Vektor Ilustrasi SVG Kreatif</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const text = `Buatkan sebuah ilustrasi ikonik atau diagram vektor sederhana dengan SVG mentah (raw SVG) bertema [Isi Topik, misal: pembelahan sel / simbol gotong royong sosiologis / piramida kasta sosial]. Gunakan paduan warna kekinian (indigo, teal, slate). Desain harus bersih, modern, rata tengah, dengan viewBox='0 0 400 150'. Hanya berikan kode SVG tanpa teks intro atau penjelasan apapun.`;
+                                  navigator.clipboard.writeText(text);
+                                  setCopiedPromptId('ilustrasi');
+                                  setTimeout(() => setCopiedPromptId(null), 2000);
+                                }}
+                                className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded-md transition font-bold flex items-center gap-1 border border-slate-200"
+                              >
+                                {copiedPromptId === 'ilustrasi' ? (
+                                  <>
+                                    <Check className="h-3 w-3 text-emerald-600" />
+                                    <span className="text-emerald-600">Tersalin!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="h-3 w-3 text-slate-500" />
+                                    <span>Salin Prompt</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                            <p className="text-[11px] text-slate-600 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-150 font-mono select-all">
+                              Buatkan sebuah ilustrasi ikonik atau diagram vektor sederhana dengan SVG mentah (raw SVG) bertema <span className="bg-yellow-100 px-1 font-bold text-slate-800 rounded">[Isi Topik, misal: pembelahan sel / simbol gotong royong sosiologis]</span>. Gunakan paduan warna kekinian (indigo, teal, slate). Desain harus bersih, modern, rata tengah, dengan viewBox='0 0 400 150'. Hanya berikan kode SVG tanpa teks intro atau penjelasan apapun.
+                            </p>
+                            <span className="text-[10px] text-slate-400 mt-2 block italic">💡 Cara pakai: Salin prompt di atas, ganti bagian kuning dengan topik Anda, paste ke AI, dan tempelkan kode SVG hasilnya langsung ke kolom input gambar di atas!</span>
+                          </div>
+                        )}
+
+                        {activePromptTab === 'tabel' && (
+                          <div className="bg-white border border-slate-200 rounded-lg p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-bold text-indigo-700">Prompt Pembuatan Tabel Data HTML</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const text = `Buatkan tabel data statistik/matriks dalam format HTML sederhana yang berisi data perbandingan [Isi Topik, misal: laju inflasi 5 negara / persentase kesenjangan sosial antar wilayah]. Tabel harus memiliki class Tailwind yang minimalis dan elegan, atau styling inline border abu-abu tipis (border-collapse: collapse). Baris header harus kontras dengan latar belakang soft-slate. Tuliskan HANYA kode HTML tabel di dalam blok kode \`\`\`html agar siap saya tempelkan sebagai stimulus.`;
+                                  navigator.clipboard.writeText(text);
+                                  setCopiedPromptId('tabel');
+                                  setTimeout(() => setCopiedPromptId(null), 2000);
+                                }}
+                                className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded-md transition font-bold flex items-center gap-1 border border-slate-200"
+                              >
+                                {copiedPromptId === 'tabel' ? (
+                                  <>
+                                    <Check className="h-3 w-3 text-emerald-600" />
+                                    <span className="text-emerald-600">Tersalin!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="h-3 w-3 text-slate-500" />
+                                    <span>Salin Prompt</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                            <p className="text-[11px] text-slate-600 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-150 font-mono select-all">
+                              Buatkan tabel data statistik/matriks dalam format HTML sederhana yang berisi data perbandingan <span className="bg-yellow-100 px-1 font-bold text-slate-800 rounded">[Isi Topik, misal: laju inflasi 5 negara / kesenjangan sosial]</span>. Tabel harus memiliki class Tailwind yang minimalis dan elegan, atau styling inline border abu-abu tipis (border-collapse: collapse). Baris header harus kontras dengan latar belakang soft-slate. Tuliskan HANYA kode HTML tabel di dalam blok kode ```html agar siap saya tempelkan sebagai stimulus.
+                            </p>
+                            <span className="text-[10px] text-slate-400 mt-2 block italic">💡 Cara pakai: Hasil dari AI berupa tabel HTML/Tailwind bisa langsung diletakkan di input Teks Stimulus di atas agar tampil rapi dan presisi di lembar soal!</span>
+                          </div>
+                        )}
+
+                        {activePromptTab === 'grafik' && (
+                          <div className="bg-white border border-slate-200 rounded-lg p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-bold text-indigo-700">Prompt Grafik / Kurva SVG Presisi</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const text = `Saya ingin membuat butir soal HOTS SMA. Tolong buatkan kode SVG mentah (raw code) untuk grafik/diagram [Isi Topik, misal: kurva permintaan ekonomi / grafik sosiogram / diagram jaring-jaring makanan]. SVG harus: 1. Berwarna modern, bersih, latar belakang transparan. 2. Memiliki sumbu X dan Y dengan label teks yang jelas. 3. Elemen garis/kurva dengan stroke tebal yang estetik. 4. Ukuran viewBox='0 0 500 200'. Tuliskan HANYA kode SVG-nya saja di dalam blok kode \`\`\`xml tanpa penjelasan tambahan.`;
+                                  navigator.clipboard.writeText(text);
+                                  setCopiedPromptId('grafik');
+                                  setTimeout(() => setCopiedPromptId(null), 2000);
+                                }}
+                                className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded-md transition font-bold flex items-center gap-1 border border-slate-200"
+                              >
+                                {copiedPromptId === 'grafik' ? (
+                                  <>
+                                    <Check className="h-3 w-3 text-emerald-600" />
+                                    <span className="text-emerald-600">Tersalin!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="h-3 w-3 text-slate-500" />
+                                    <span>Salin Prompt</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                            <p className="text-[11px] text-slate-600 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-150 font-mono select-all">
+                              Saya ingin membuat butir soal HOTS SMA. Tolong buatkan kode SVG mentah (raw code) untuk grafik/diagram <span className="bg-yellow-100 px-1 font-bold text-slate-800 rounded">[Isi Topik, misal: kurva permintaan ekonomi / diagram jaring makanan]</span>. SVG harus: 1. Berwarna modern, bersih, latar belakang transparan. 2. Memiliki sumbu X dan Y dengan label teks yang jelas. 3. Elemen garis/kurva dengan stroke tebal yang estetik. 4. Ukuran viewBox='0 0 500 200'. Tuliskan HANYA kode SVG-nya saja di dalam blok kode ```xml tanpa penjelasan tambahan.
+                            </p>
+                          </div>
+                        )}
+
+                        {activePromptTab === 'stimulus' && (
+                          <div className="bg-white border border-slate-200 rounded-lg p-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-xs font-bold text-indigo-700">Prompt Penulisan Stimulus HOTS Berkualitas</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const text = `Tuliskan sebuah teks stimulus berkualitas tinggi (HOTS) bertema [Isi Topik, misal: fenomena gentrifikasi perkotaan / perubahan iklim global]. Teks harus berupa studi kasus pendek atau berita ilmiah (150-200 kata), menyajikan konflik/dilema nyata, objektif, ilmiah, dan memicu kemampuan berpikir kritis siswa SMA. Akhiri dengan satu pertanyaan analisis mendalam.`;
+                                  navigator.clipboard.writeText(text);
+                                  setCopiedPromptId('stimulus');
+                                  setTimeout(() => setCopiedPromptId(null), 2000);
+                                }}
+                                className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded-md transition font-bold flex items-center gap-1 border border-slate-200"
+                              >
+                                {copiedPromptId === 'stimulus' ? (
+                                  <>
+                                    <Check className="h-3 w-3 text-emerald-600" />
+                                    <span className="text-emerald-600">Tersalin!</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="h-3 w-3 text-slate-500" />
+                                    <span>Salin Prompt</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                            <p className="text-[11px] text-slate-600 leading-relaxed bg-slate-50 p-2.5 rounded-lg border border-slate-150 font-mono select-all">
+                              Tuliskan sebuah teks stimulus berkualitas tinggi (HOTS) bertema <span className="bg-yellow-100 px-1 font-bold text-slate-800 rounded">[Isi Topik, misal: fenomena gentrifikasi perkotaan]</span>. Teks harus berupa studi kasus pendek atau berita ilmiah (150-200 kata), menyajikan konflik/dilema nyata, objektif, ilmiah, dan memicu kemampuan berpikir kritis siswa SMA. Akhiri dengan satu pertanyaan analisis mendalam.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
 
                     {/* AI Illustration / Graphic Generator Widget (Nana Banana) */}
                     <div className="mt-2.5 space-y-2">
@@ -6229,9 +6792,17 @@ PANDUAN EKSTRA:
                     </button>
                     <button
                       type="submit"
-                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-5 py-2 rounded-xl text-xs transition"
+                      disabled={isSavingQuestion}
+                      className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold px-5 py-2 rounded-xl text-xs transition flex items-center gap-1.5"
                     >
-                      Simpan Butir Soal
+                      {isSavingQuestion ? (
+                        <>
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                          <span>Menyimpan...</span>
+                        </>
+                      ) : (
+                        <span>Simpan Butir Soal</span>
+                      )}
                     </button>
                   </div>
                 </form>
@@ -6299,12 +6870,35 @@ PANDUAN EKSTRA:
                         />
                       </div>
                       <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Alamat Sekolah</label>
+                        <input
+                          type="text"
+                          value={printConfig.schoolAddress}
+                          onChange={(e) => setPrintConfig({ ...printConfig, schoolAddress: e.target.value })}
+                          className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                          placeholder="Jalan Pendidikan Raya No. 45 Nusantara - Telp/Fax: (021) 777-1234 - Website: www.sekolahkita.sch.id"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
                         <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Nama Ujian / Asesmen</label>
                         <input
                           type="text"
                           value={printConfig.examName}
                           onChange={(e) => setPrintConfig({ ...printConfig, examName: e.target.value })}
                           className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Mata Pelajaran</label>
+                        <input
+                          type="text"
+                          value={printConfig.subjectName || ''}
+                          onChange={(e) => setPrintConfig({ ...printConfig, subjectName: e.target.value })}
+                          className="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                          placeholder="Mata Pelajaran"
                         />
                       </div>
                     </div>
@@ -6575,7 +7169,7 @@ PANDUAN EKSTRA:
                         <span>Mulai Cetak / Simpan ke PDF</span>
                       </button>
                       <button
-                        onClick={() => exportQuestionsToWord(questions, config.mataPelajaran, printConfig.pageSize)}
+                        onClick={() => exportQuestionsToWord(questions, printConfig.subjectName || config.mataPelajaran, printConfig.pageSize, printConfig.examName, printConfig.showAnswerKey)}
                         className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition shadow-lg w-full sm:w-auto justify-center"
                       >
                         <FileText className="h-4 w-4" />
@@ -6593,72 +7187,6 @@ PANDUAN EKSTRA:
         {activeTab === 'materi' && (
           <div id="materi-panel" className="space-y-6 animate-fadeIn no-print">
             
-            {/* Panduan Mapel & PDF Upload Card */}
-            <div className="bg-gradient-to-r from-purple-900 to-indigo-900 text-white rounded-2xl p-6 shadow-md border border-purple-700/50 flex flex-col lg:flex-row items-center justify-between gap-6">
-              <div className="space-y-2 lg:max-w-2xl">
-                <div className="inline-flex items-center gap-2 bg-purple-800/80 border border-purple-600 px-3 py-1 rounded-full text-[10px] uppercase font-extrabold tracking-widest text-purple-200">
-                  <Sparkles className="h-3.5 w-3.5 text-yellow-300 animate-pulse" /> Kurikulum Merdeka Official
-                </div>
-                <h3 className="text-xl font-bold tracking-tight">Panduan Kurikulum & Peta Capaian Pembelajaran</h3>
-                <p className="text-xs text-purple-200 leading-relaxed">
-                  Untuk hasil penyusunan materi yang selaras dengan kebijakan KEMDIKDASMEN, silakan unduh <b>Panduan Mata Pelajaran</b> resmi terlebih dahulu, kemudian unggah dokumen PDF tersebut di samping agar dibaca & dikontekstualisasikan oleh AI dalam merancang Ringkasan Materi.
-                </p>
-                <div className="pt-2 flex flex-wrap gap-3">
-                  <a 
-                    href="https://kurikulum.kemendikdasmen.go.id/panduan-mapel" 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="bg-yellow-400 hover:bg-yellow-500 text-slate-950 px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition shadow-md hover:scale-[1.02] active:scale-[0.98]"
-                  >
-                    <Download className="h-4 w-4" />
-                    <span>Download Panduan di Situs Resmi</span>
-                  </a>
-                </div>
-              </div>
-
-              <div className="w-full lg:w-80 bg-white/10 backdrop-blur-sm border border-white/20 p-4 rounded-xl flex flex-col justify-center text-center relative">
-                <input 
-                  type="file" 
-                  accept="application/pdf" 
-                  onChange={handlePdfUpload}
-                  id="pdf-guide-uploader" 
-                  className="hidden" 
-                />
-                <label 
-                  htmlFor="pdf-guide-uploader" 
-                  className="cursor-pointer flex flex-col items-center justify-center p-3 border-2 border-dashed border-white/30 hover:border-white/60 rounded-lg transition"
-                >
-                  <Upload className="h-8 w-8 text-purple-200 mb-2" />
-                  <span className="text-xs font-bold text-white block">Unggah Dokumen Panduan (PDF)</span>
-                  <span className="text-[10px] text-purple-200 mt-1 block">Drag & drop atau klik file</span>
-                </label>
-                
-                {isUploadingPdf && (
-                  <div className="absolute inset-0 bg-slate-900/90 rounded-xl flex flex-col items-center justify-center p-3">
-                    <RefreshCw className="h-6 w-6 animate-spin text-yellow-400 mb-2" />
-                    <span className="text-xs font-semibold text-white">Menganalisis Panduan Resmi...</span>
-                  </div>
-                )}
-                
-                {uploadedPdf && (
-                  <div className="mt-3 bg-purple-950/50 border border-purple-600/40 p-2.5 rounded-lg text-left text-[11px] flex items-start gap-2">
-                    <CheckSquare className="h-4 w-4 text-emerald-400 mt-0.5 flex-shrink-0" />
-                    <div className="overflow-hidden">
-                      <span className="font-bold text-emerald-300 block truncate">{uploadedPdf.name}</span>
-                      <span className="text-[10px] text-purple-300 block">{(uploadedPdf.size / (1024 * 1024)).toFixed(2)} MB • Terbaca oleh AI</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {uploadedPdfStatus && (
-              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs py-2.5 px-4 rounded-xl flex items-center gap-2">
-                <CheckSquare className="h-4.5 w-4.5 text-emerald-600" />
-                <span>{uploadedPdfStatus}</span>
-              </div>
-            )}
-
             {/* Main Content Layout for Materi */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               
@@ -6700,9 +7228,8 @@ PANDUAN EKSTRA:
                           <div 
                             key={kisi.id}
                             onClick={() => {
-                              if (isCompiled) {
-                                setActiveMateriKisiId(kisi.id);
-                              }
+                              setActiveMateriKisiId(kisi.id);
+                              setIsEditingMateri(false);
                             }}
                             className={`p-3.5 rounded-xl border text-left cursor-pointer transition ${
                               isSelected 
@@ -6762,12 +7289,12 @@ PANDUAN EKSTRA:
                                 {isGenerating ? (
                                   <>
                                     <RefreshCw className="h-3 w-3 animate-spin" />
-                                    <span>Menyusun...</span>
+                                    <span>Merumuskan Prompt...</span>
                                   </>
                                 ) : (
                                   <>
                                     <Sparkles className="h-3 w-3" />
-                                    <span>{isCompiled ? 'Susun Ulang' : 'Susun Materi AI'}</span>
+                                    <span>{isCompiled ? 'Buat Ulang Prompt' : 'Buat Prompt AI'}</span>
                                   </>
                                 )}
                               </button>
@@ -6792,10 +7319,63 @@ PANDUAN EKSTRA:
                         <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-slate-400 space-y-3">
                           <FileText className="h-12 w-12 text-slate-300" />
                           <div>
-                            <h5 className="font-bold text-slate-700 text-sm">Pilih atau Susun Materi</h5>
+                            <h5 className="font-bold text-slate-700 text-sm">Pilih atau Buat Prompt Slide & Infografis</h5>
                             <p className="text-xs max-w-sm mt-1">
-                              Silakan klik tombol <b>"Susun Materi AI"</b> pada daftar di sebelah kiri untuk menghasilkan bahan ajar ringkas yang sistematis berdasarkan kompetensi target.
+                              Silakan klik salah satu <b>Kisi-Kisi Matriks</b> di sebelah kiri untuk melihat, merumuskan, mengedit, mengunggah, atau menghapus prompt untuk Slide Pembelajaran dan Infografis.
                             </p>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    if (isEditingMateri) {
+                      return (
+                        <div className="space-y-4 flex-1 flex flex-col justify-between">
+                          <div className="flex-1 flex flex-col space-y-3">
+                            <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+                              <div>
+                                <span className="bg-purple-100 text-purple-800 text-[9px] font-extrabold px-2 py-0.5 rounded-full">
+                                  MODE EDIT PROMPT {activeKisi.no}
+                                </span>
+                                <h3 className="font-extrabold text-slate-900 text-sm mt-1">
+                                  {activeKisi.elemenMateri}
+                                </h3>
+                              </div>
+                              <button
+                                onClick={() => setIsEditingMateri(false)}
+                                className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition"
+                              >
+                                <X className="h-5 w-5" />
+                              </button>
+                            </div>
+
+                            <div className="flex-1 flex flex-col">
+                              <label className="text-xs font-bold text-slate-700 mb-1 block">Isi Prompt:</label>
+                              <textarea
+                                value={editingMateriContent}
+                                onChange={(e) => setEditingMateriContent(e.target.value)}
+                                placeholder="Tulis atau paste prompt slide dan infografis di sini secara lengkap..."
+                                className="w-full flex-1 min-h-[300px] bg-slate-50 border border-slate-200 rounded-xl p-4 font-mono text-xs text-slate-800 focus:ring-2 focus:ring-purple-400 focus:border-purple-400 focus:outline-none shadow-inner resize-y"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">
+                            <button
+                              onClick={() => setIsEditingMateri(false)}
+                              className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                              <span>Batal</span>
+                            </button>
+
+                            <button
+                              onClick={() => handleSaveMateri(activeKisi.id, editingMateriContent)}
+                              className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
+                            >
+                              <Save className="h-3.5 w-3.5" />
+                              <span>Simpan Prompt</span>
+                            </button>
                           </div>
                         </div>
                       );
@@ -6809,7 +7389,7 @@ PANDUAN EKSTRA:
                             <div>
                               <div className="flex items-center gap-2">
                                 <span className="bg-purple-100 text-purple-800 text-[9px] font-extrabold px-2 py-0.5 rounded-full">
-                                  MODUL {activeKisi.no}
+                                  PROMPT {activeKisi.no}
                                 </span>
                                 <span className="text-[10px] text-slate-400 font-mono">
                                   {getLevelKognitifLabel(activeKisi.levelKognitif)}
@@ -6824,25 +7404,44 @@ PANDUAN EKSTRA:
                             </div>
 
                             <div className="flex flex-wrap gap-2">
-                              <button
-                                onClick={() => {
-                                  if (activeMateri) {
-                                    navigator.clipboard.writeText(activeMateri);
-                                    alert("Bahan ajar dalam format Markdown berhasil disalin ke clipboard!");
-                                  }
-                                }}
-                                className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
-                              >
-                                <Copy className="h-3.5 w-3.5" />
-                                <span>Salin</span>
-                              </button>
-
-                              {activeMateri && (
+                              {activeMateri ? (
                                 <>
+                                  <button
+                                    onClick={() => {
+                                      setIsEditingMateri(true);
+                                      setEditingMateriContent(activeMateri);
+                                    }}
+                                    className="bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+                                    title="Edit prompt secara manual"
+                                  >
+                                    <Edit className="h-3.5 w-3.5" />
+                                    <span>Edit</span>
+                                  </button>
+
+                                  <button
+                                    onClick={() => handleDeleteMateri(activeKisi.id)}
+                                    className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+                                    title="Hapus prompt"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    <span>Hapus</span>
+                                  </button>
+
+                                  <button
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(activeMateri);
+                                      alert("Mega-Prompt untuk NotebookLM & Gemini berhasil disalin ke clipboard! Anda dapat menempelkannya langsung ke NotebookLM atau Gemini AI untuk menghasilkan Slide/Infografis.");
+                                    }}
+                                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+                                  >
+                                    <Copy className="h-3.5 w-3.5" />
+                                    <span>Salin</span>
+                                  </button>
+
                                   <button
                                     onClick={() => exportMateriToWord(activeKisi, activeMateri, config.mataPelajaran, printConfig.pageSize)}
                                     className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
-                                    title="Unduh Materi sebagai file Word (.doc)"
+                                    title="Unduh Prompt sebagai file Word (.doc)"
                                   >
                                     <Download className="h-3.5 w-3.5" />
                                     <span>Word</span>
@@ -6851,12 +7450,30 @@ PANDUAN EKSTRA:
                                   <button
                                     onClick={() => handlePrintMateri(activeKisi, activeMateri)}
                                     className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
-                                    title="Cetak Materi atau simpan sebagai PDF"
+                                    title="Cetak Prompt"
                                   >
                                     <Printer className="h-3.5 w-3.5" />
-                                    <span>PDF / Cetak</span>
+                                    <span>Cetak</span>
                                   </button>
                                 </>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="file"
+                                    id={`prompt-file-${activeKisi.id}`}
+                                    accept=".txt,.md"
+                                    onChange={(e) => handleUploadPromptFile(e, activeKisi.id)}
+                                    className="hidden"
+                                  />
+                                  <label
+                                    htmlFor={`prompt-file-${activeKisi.id}`}
+                                    className="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                                    title="Unggah file teks (.txt / .md)"
+                                  >
+                                    <Upload className="h-3.5 w-3.5" />
+                                    <span>Unggah File</span>
+                                  </label>
+                                </div>
                               )}
                             </div>
                           </div>
@@ -6866,9 +7483,34 @@ PANDUAN EKSTRA:
                             {activeMateri ? (
                               <SimpleMarkdown content={activeMateri} />
                             ) : (
-                              <div className="text-center py-12 text-slate-400 space-y-3">
-                                <RefreshCw className="h-8 w-8 animate-spin mx-auto text-purple-400" />
-                                <p className="text-xs">Sedang menyusun materi akademik secara terstruktur...</p>
+                              <div className="text-center py-12 px-4 space-y-4">
+                                <FileText className="h-10 w-10 mx-auto text-slate-300" />
+                                <div className="max-w-md mx-auto space-y-1">
+                                  <p className="text-sm font-bold text-slate-700">Prompt Belum Tersedia</p>
+                                  <p className="text-xs text-slate-500">
+                                    Silakan pilih salah satu opsi di bawah ini untuk menyusun Mega-Prompt slide & infografis untuk kisi-kisi ini:
+                                  </p>
+                                </div>
+                                <div className="flex flex-col sm:flex-row justify-center items-center gap-2.5 pt-2">
+                                  <button
+                                    onClick={() => handleGenerateMateri(activeKisi)}
+                                    className="w-full sm:w-auto bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition shadow-sm"
+                                  >
+                                    <Sparkles className="h-3.5 w-3.5" />
+                                    <span>Buat dengan AI</span>
+                                  </button>
+
+                                  <button
+                                    onClick={() => {
+                                      setIsEditingMateri(true);
+                                      setEditingMateriContent('');
+                                    }}
+                                    className="w-full sm:w-auto bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-4 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition"
+                                  >
+                                    <Plus className="h-3.5 w-3.5" />
+                                    <span>Tulis Manual</span>
+                                  </button>
+                                </div>
                               </div>
                             )}
                           </div>
@@ -6878,7 +7520,7 @@ PANDUAN EKSTRA:
                         <div className="pt-4 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
                           <span className="flex items-center gap-1">
                             <Info className="h-3.5 w-3.5 text-indigo-500" />
-                            <span>Materi diselaraskan dengan Panduan Resmi KEMDIKDASMEN</span>
+                            <span>Prompt dioptimalkan khusus untuk di-copy paste ke NotebookLM dan Gemini AI</span>
                           </span>
                         </div>
                       </div>
@@ -7742,7 +8384,7 @@ PANDUAN EKSTRA:
                       ))
                     }
                     <h3 className="text-sm sm:text-base font-black uppercase tracking-wider">{printConfig.schoolName}</h3>
-                    <p className="text-[9px] text-slate-600 italic">Jalan Pendidikan Raya No. 45 Nusantara - Telp/Fax: (021) 777-1234 - Website: www.sekolahkita.sch.id</p>
+                    <p className="text-[9px] text-slate-600 italic">{printConfig.schoolAddress}</p>
                     <div className="border-t border-slate-400 mt-1 pt-1 flex justify-center gap-4 text-[9px] font-bold text-slate-700">
                       <span>TAHUN PELAJARAN: {printConfig.academicYear}</span>
                       <span>SEMESTER: {printConfig.semester.toUpperCase()}</span>
@@ -7766,7 +8408,7 @@ PANDUAN EKSTRA:
               {!printConfig.showHeader && (
                 <div className="border-b-2 border-slate-900 pb-4 text-center mb-4">
                   <h3 className="text-lg font-bold uppercase tracking-wide">LEMBAR SOAL UJIAN TKA SMA</h3>
-                  <p className="text-xl font-extrabold text-slate-900">{config.mataPelajaran || 'TES KEMAMPUAN AKADEMIK'}</p>
+                  <p className="text-xl font-extrabold text-slate-900">{printConfig.subjectName || config.mataPelajaran || 'TES KEMAMPUAN AKADEMIK'}</p>
                   <div className="mt-2 text-xs text-slate-600 flex justify-center gap-6">
                     <span><b>Tingkat/Kurikulum:</b> {config.muatan}</span>
                     <span><b>Tanggal:</b> {new Date().toLocaleDateString('id-ID')}</span>
@@ -7778,7 +8420,7 @@ PANDUAN EKSTRA:
               {printConfig.showHeader && (
                 <div className="text-center space-y-0.5 mb-5">
                   <h2 className="text-sm font-extrabold tracking-wide uppercase">{printConfig.examName}</h2>
-                  <h1 className="text-base font-black text-slate-900 uppercase">MATA PELAJARAN: {config.mataPelajaran || 'TES KEMAMPUAN AKADEMIK'}</h1>
+                  <h1 className="text-base font-black text-slate-900 uppercase">MATA PELAJARAN: {printConfig.subjectName || config.mataPelajaran || 'TES KEMAMPUAN AKADEMIK'}</h1>
                   <div className="text-[10px] text-slate-600 flex justify-center gap-4 font-semibold">
                     <span>Fase/Muatan: {config.muatan || 'SMA'}</span>
                     <span>Alokasi Waktu: {printConfig.timeAllocation}</span>
@@ -7928,10 +8570,7 @@ PANDUAN EKSTRA:
                           
                           {/* Stimulus Box */}
                           {q.stimulus && printConfig.showStimulus && (
-                            <div className="border-l-4 border-indigo-600 bg-slate-50/80 p-3 rounded-r-xl italic text-slate-700 leading-relaxed font-sans text-xs">
-                              <div className="font-bold not-italic text-[10px] text-indigo-800 mb-1 uppercase tracking-wide">
-                                Wacana / Stimulus:
-                              </div>
+                            <div className="text-slate-700 leading-relaxed font-normal italic text-xs sm:text-sm text-justify mb-2">
                               {q.stimulus}
                             </div>
                           )}

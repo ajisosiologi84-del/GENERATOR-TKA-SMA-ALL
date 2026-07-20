@@ -225,7 +225,7 @@ export function exportKisiToWord(items: KisiKisiItem[], mataPelajaran: string, p
 /**
  * Export Questions (Pembuat Soal) to Word (.doc)
  */
-export function exportQuestionsToWord(questions: Question[], mataPelajaran: string, pageSize: string = 'A4') {
+export function exportQuestionsToWord(questions: Question[], mataPelajaran: string, pageSize: string = 'A4', examName: string = 'Ujian_TKA_SMA', showAnswerKey: boolean = false) {
   const content = questions
     .map((q) => {
       const optionsHtml = q.opsi
@@ -270,6 +270,7 @@ export function exportQuestionsToWord(questions: Question[], mataPelajaran: stri
 
         ${optionsHtml ? `<div style="margin: 10px 0;">${optionsHtml}</div>` : ''}
 
+        ${showAnswerKey ? `
         <p style="margin: 10px 0 5px 0; color: #15803d; font-weight: bold; font-size: 11pt;">Kunci Jawaban: <span style="background-color: #dcfce7; padding: 2px 8px; border-radius: 4px;">${q.kunciJawaban}</span></p>
         
         ${q.kataKunci ? `<p style="margin: 5px 0; font-size: 10.5pt; color: #4338ca;"><b>Kata Kunci / Konsep:</b> <span style="background-color: #e0e7ff; padding: 2px 8px; border-radius: 4px; color: #1e1b4b;">${q.kataKunci}</span></p>` : ''}
@@ -278,6 +279,7 @@ export function exportQuestionsToWord(questions: Question[], mataPelajaran: stri
           <b style="color: #4b5563;">Pembahasan:</b><br/>
           <p style="margin: 5px 0 0 0; line-height: 1.4; color: #374151;">${q.pembahasan.replace(/\n/g, '<br/>')}</p>
         </div>
+        ` : ''}
         <hr style="border: 0; border-top: 1px solid #dddddd; margin-top: 20px; margin-bottom: 20px;"/>
       </div>
     `;
@@ -299,7 +301,7 @@ export function exportQuestionsToWord(questions: Question[], mataPelajaran: stri
       </style>
     </head>
     <body>
-      <h2>SOAL TES KEMAMPUAN AKADEMIK (TKA) SMA</h2>
+      <h2>${examName.toUpperCase()}</h2>
       <div class="meta-header">
         <b>Mata Pelajaran:</b> ${mataPelajaran}<br/>
         <b>Jumlah Soal:</b> ${questions.length} butir<br/>
@@ -315,7 +317,9 @@ export function exportQuestionsToWord(questions: Question[], mataPelajaran: stri
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `Soal_TKA_${mataPelajaran.replace(/\s+/g, '_')}.doc`;
+  const safeSubject = mataPelajaran.replace(/[^a-zA-Z0-9]/g, '_').replace(/__+/g, '_');
+  const safeExam = examName.replace(/[^a-zA-Z0-9]/g, '_').replace(/__+/g, '_');
+  a.download = `${safeSubject}_${safeExam}.doc`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -325,7 +329,7 @@ export function exportQuestionsToWord(questions: Question[], mataPelajaran: stri
 /**
  * Export Questions (Pembuat Soal) to Excel (.xls)
  */
-export function exportQuestionsToExcel(questions: Question[], mataPelajaran: string) {
+export function exportQuestionsToExcel(questions: Question[], mataPelajaran: string, examName: string = 'Ujian_TKA_SMA', showAnswerKey: boolean = false) {
   const tableRows = questions
     .map(
       (q) => `
@@ -336,10 +340,16 @@ export function exportQuestionsToExcel(questions: Question[], mataPelajaran: str
       <td style="border: 1px solid #cccccc; padding: 8px; vertical-align: top;">${q.subKompetensi}</td>
       <td style="border: 1px solid #cccccc; padding: 8px; vertical-align: top;">${q.stimulus || '-'}</td>
       <td style="border: 1px solid #cccccc; padding: 8px; vertical-align: top;">${q.soal}</td>
-      <td style="border: 1px solid #cccccc; padding: 8px; vertical-align: top;">${q.opsi.join(' | ')}</td>
+      <td style="border: 1px solid #cccccc; padding: 8px; vertical-align: top;">${q.opsi[0] || ''}</td>
+      <td style="border: 1px solid #cccccc; padding: 8px; vertical-align: top;">${q.opsi[1] || ''}</td>
+      <td style="border: 1px solid #cccccc; padding: 8px; vertical-align: top;">${q.opsi[2] || ''}</td>
+      <td style="border: 1px solid #cccccc; padding: 8px; vertical-align: top;">${q.opsi[3] || ''}</td>
+      <td style="border: 1px solid #cccccc; padding: 8px; vertical-align: top;">${q.opsi[4] || ''}</td>
+      ${showAnswerKey ? `
       <td style="border: 1px solid #cccccc; padding: 8px; font-weight: bold; text-align: center; color: #16a34a; vertical-align: top;">${q.kunciJawaban}</td>
       <td style="border: 1px solid #cccccc; padding: 8px; vertical-align: top; font-weight: 500; color: #4338ca; vertical-align: top;">${q.kataKunci || '-'}</td>
       <td style="border: 1px solid #cccccc; padding: 8px; vertical-align: top; font-size: 9pt; color: #555555;">${q.pembahasan}</td>
+      ` : ''}
     </tr>
   `
     )
@@ -369,7 +379,7 @@ export function exportQuestionsToExcel(questions: Question[], mataPelajaran: str
       </style>
     </head>
     <body>
-      <h2>DAFTAR SOAL TES KEMAMPUAN AKADEMIK (TKA) SMA</h2>
+      <h2>${examName.toUpperCase()}</h2>
       <p><b>Mata Pelajaran:</b> ${mataPelajaran}</p>
       <p><b>Jumlah Soal:</b> ${questions.length} butir</p>
       <p><b>Tanggal Pembuatan:</b> ${new Date().toLocaleDateString('id-ID')}</p>
@@ -383,10 +393,16 @@ export function exportQuestionsToExcel(questions: Question[], mataPelajaran: str
             <th style="border: 1px solid #cccccc; padding: 10px;">Sub Kompetensi</th>
             <th style="border: 1px solid #cccccc; padding: 10px; width: 250px;">Stimulus</th>
             <th style="border: 1px solid #cccccc; padding: 10px; width: 300px;">Pertanyaan/Soal</th>
-            <th style="border: 1px solid #cccccc; padding: 10px; width: 250px;">Pilihan Jawaban (dipisah |)</th>
+            <th style="border: 1px solid #cccccc; padding: 10px; width: 150px;">Pilihan A</th>
+            <th style="border: 1px solid #cccccc; padding: 10px; width: 150px;">Pilihan B</th>
+            <th style="border: 1px solid #cccccc; padding: 10px; width: 150px;">Pilihan C</th>
+            <th style="border: 1px solid #cccccc; padding: 10px; width: 150px;">Pilihan D</th>
+            <th style="border: 1px solid #cccccc; padding: 10px; width: 150px;">Pilihan E</th>
+            ${showAnswerKey ? `
             <th style="border: 1px solid #cccccc; padding: 10px; width: 100px;">Kunci Jawaban</th>
             <th style="border: 1px solid #cccccc; padding: 10px; width: 150px;">Kata Kunci / Konsep</th>
             <th style="border: 1px solid #cccccc; padding: 10px; width: 350px;">Pembahasan</th>
+            ` : ''}
           </tr>
         </thead>
         <tbody>
@@ -401,7 +417,9 @@ export function exportQuestionsToExcel(questions: Question[], mataPelajaran: str
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `Soal_TKA_${mataPelajaran.replace(/\s+/g, '_')}.xls`;
+  const safeSubject = mataPelajaran.replace(/[^a-zA-Z0-9]/g, '_').replace(/__+/g, '_');
+  const safeExam = examName.replace(/[^a-zA-Z0-9]/g, '_').replace(/__+/g, '_');
+  a.download = `${safeSubject}_${safeExam}.xls`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

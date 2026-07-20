@@ -49,10 +49,12 @@ async function generateContentWithFallbackAndRetry(
 ): Promise<any> {
   // Ordered by preferred + high availability
   const modelsToTry = [
-    "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
     "gemini-2.5-flash",
-    "gemini-flash-latest"
+    "gemini-3.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-2.5-pro",
+    "gemini-1.5-pro"
   ];
 
   const now = Date.now();
@@ -97,15 +99,19 @@ async function generateContentWithFallbackAndRetry(
       lastError = error;
       console.error(`Model ${model} failed with error:`, error);
 
-      // Check if this error is a rate limit / quota exceeded error (429)
-      const isQuotaError = 
+      // Check if this error is a rate limit / quota exceeded error (429) or high demand / service unavailable (503)
+      const errorString = typeof error === 'string' ? error : (error?.message || JSON.stringify(error) || '');
+      const isQuotaOrDemandError = 
         error?.status === 429 || 
         error?.statusCode === 429 || 
-        (error?.message && /quota|limit|429|exhausted/i.test(error.message)) ||
-        (typeof error === 'string' && /quota|limit|429|exhausted/i.test(error));
+        error?.status === 503 ||
+        error?.statusCode === 503 ||
+        error?.code === 429 ||
+        error?.code === 503 ||
+        /quota|limit|429|exhausted|503|demand|unavailable/i.test(errorString);
       
-      if (isQuotaError) {
-        console.warn(`Model ${model} returned a quota limit error. Cool-off applied.`);
+      if (isQuotaOrDemandError) {
+        console.warn(`Model ${model} returned a quota limit or high demand error. Cool-off applied.`);
         coolOffModels.set(model, Date.now());
       }
       // Immediately proceed to the next model in the list
@@ -225,6 +231,7 @@ apiRouter.post("/generate-soal", async (req, res) => {
       stimulusKonten = [],
       kualitasChecklist = [],
       noSoalStart = 1,
+      existingQuestions = [],
     } = req.body;
 
     if (!kisi) {
@@ -263,7 +270,34 @@ Patuhi instruksi bentuk soal dan parameter kognitif yang ditentukan pengguna sec
 
     const countRequired = Number(req.body.count) || Number(kisi.jumlahSoal) || 1;
 
-    const prompt = `Buatkan tepat sebanyak ${countRequired} butir soal ujian TKA SMA yang berbeda untuk Mata Pelajaran ${mataPelajaran}.
+    // Construct constraint for existing questions to avoid duplicates
+    let existingQuestionsConstraint = '';
+    if (Array.isArray(existingQuestions) && existingQuestions.length > 0) {
+      const sanitizedList = existingQuestions
+        .filter(item => typeof item === 'string' && item.trim().length > 0)
+        .slice(0, 30);
+      if (sanitizedList.length > 0) {
+        existingQuestionsConstraint = `
+
+HINDARI PENGULANGAN SOAL (SANGAT PENTING):
+Jangan membuat soal yang sama, memiliki konsep atau contoh kasus/studi yang mirip, atau menggunakan narasi stimulus yang mirip dengan soal-soal berikut:
+${sanitizedList.map((text: string, idx: number) => `- Soal ${idx + 1}: ${text.substring(0, 150)}...`).join('\n')}
+Pastikan butir soal yang Anda hasilkan saat ini benar-benar segar, baru, unik secara naratif, bervariasi, dan tidak mengulangi pertanyaan di atas.`;
+      }
+    }
+
+    let indonesianLanguageCriteria = '';
+    if (mataPelajaran && (mataPelajaran.toLowerCase().includes('bahasa indonesia') || mataPelajaran.toLowerCase().includes('indonesia'))) {
+      indonesianLanguageCriteria = `
+
+KAIDAH & KAIDAH MUATAN KHUSUS BAHASA INDONESIA (SANGAT PENTING):
+- Teks yang diujikan harus berupa Teks Informasi (Tunggal/Jamak yang berisi fakta, konsep, prosedur, metakognisi dari berbagai bidang pada skala lokal, nasional, global) ATAU Teks Fiksi (realisme/absurd dengan latar cerita konkret/abstrak, tokoh berkarakter bulat, konflik tunggal/jamak dengan penyelesaian terbuka, alur campuran, dan sudut pandang campuran).
+- Karakteristik Kosakata: Menggunakan kata khusus dan kata umum, kata berimbuhan kompleks, kata abstrak, makna denotatif, istilah teknis, atau konotatif konteks luas.
+- Karakteristik Kalimat: Setiap kalimat di dalam teks stimulus/soal harus berkisar antara 8-12 kata per kalimat, menggunakan kalimat kompleks berbagai pola serta kalimat inversi.
+- Karakteristik Wacana: Menggunakan konjungsi antarparagraf dengan makna 'pertentangan' dan 'sebab akibat', tanda baca pendukung makna yang tepat, dengan panjang teks berkisar antara 250-300 kata (kecuali jika bergenre puisi).`;
+    }
+
+    const prompt = `Buatkan tepat sebanyak ${countRequired} butir soal ujian TKA SMA yang berbeda untuk Mata Pelajaran ${mataPelajaran}.${indonesianLanguageCriteria}
     
 PENTING: Jumlah objek soal yang dihasilkan dalam array JSON HARUS tepat sebanyak ${countRequired} butir soal, tidak kurang dan tidak lebih.
 Setiap butir soal harus unik, bervariasi, dan didasarkan pada kisi-kisi berikut.
@@ -279,15 +313,17 @@ INFORMASI MATRIKS ASESMEN KISI-KISI:
 - Konteks Nusantara: ${kisi.konteksNusantara || "Tidak ada khusus"}
 - Stimulus Tambahan: ${kisi.stimulusTambahan || "Tidak ada khusus"}
 - Jenis Soal: ${jenisSoal} (Soal Tunggal atau Soal Grup/Terhubung)
+${existingQuestionsConstraint}
 
 PANDUAN EKSTRA:
 1. ${konteksStr} ${kisi.konteksNusantara ? `Integrasikan juga secara mendalam target Konteks Nusantara berikut ke dalam stimulus atau pokok soal agar bernuansa ke-Indonesia-an yang otentik: "${kisi.konteksNusantara}".` : ""}
 2. ${stimulusStr} ${kisi.stimulusTambahan ? `Gunakan secara aktif target Stimulus Tambahan berikut untuk merancang stimulus/skenario pendukung yang kaya dan berbobot: "${kisi.stimulusTambahan}".` : ""}
 3. ${checklistStr}
 4. Kunci jawaban harus sangat akurat dan pembahasan harus lengkap, ilmiah, edukatif, dan terstruktur dengan rapi agar mudah dipahami siswa SMA. Tambahkan juga field 'kataKunci' yang berisi kata kunci atau konsep penting/topik utama yang digunakan/diuji dalam soal ini (misal: 'Sistem Persamaan Linear', 'Gaya Gravitasi', 'Asimilasi Sosial').
-5. JIKA soal membutuhkan visual pendukung (seperti grafik fungsi, diagram kartesius, bangun geometri, siklus biologi, diagram sirkuit, kurva ekonomi, dsb.), Anda disarankan untuk membuat kode SVG inline yang valid (dimulai dengan '<svg' dan ditutup '</svg>' lengkap dengan viewBox, stroke, fill, teks label agar indah dan responsive) ATAU mencantumkan URL gambar Unsplash yang relevan pada field 'gambarUrl'. Jika tidak membutuhkan visual, isi 'gambarUrl' dengan string kosong "".
+5. JIKA soal membutuhkan visual pendukung (seperti grafik fungsi, diagram kartesius, bangun geometri, siklus biologi, diagram sirkuit, kurva ekonomi, dsb.), Anda disarankan untuk membuat kode SVG inline yang valid (dimulai dengan '<svg' and ditutup '</svg>' lengkap dengan viewBox, stroke, fill, teks label agar indah dan responsive) ATAU mencantumkan URL gambar Unsplash yang relevan pada field 'gambarUrl'. Jika tidak membutuhkan visual, isi 'gambarUrl' dengan string kosong "".
 6. Harap sesuaikan bahasa agar baku, formal, sesuai EBI (Ejaan Bahasa Indonesia), namun mudah dimengerti.
-7. Hasilkan tepat ${countRequired} objek soal di dalam array hasil.`;
+7. Hasilkan tepat ${countRequired} objek soal di dalam array hasil.
+8. SANGAT PENTING (MANDATORI): Gabungkan paragraf stimulus/pengantar/studi kasus (bila ada) langsung ke bagian awal field 'soal' (diikuti pertanyaan utama di bawahnya), dan kosongkan field 'stimulus' (isi dengan string kosong ""). Jangan memisahkannya agar struktur soal konsisten dengan prompt.`;
 
     const response = await generateContentWithFallbackAndRetry(ai, {
       contents: prompt,
@@ -302,8 +338,8 @@ PANDUAN EKSTRA:
               kompetensi: { type: Type.STRING },
               subKompetensi: { type: Type.STRING },
               bentukSoal: { type: Type.STRING },
-              stimulus: { type: Type.STRING, description: "Paragraf stimulus atau pengantar soal (bila ada)" },
-              soal: { type: Type.STRING, description: "Pertanyaan atau pokok soal utama" },
+              stimulus: { type: Type.STRING, description: "Sengaja dikosongkan karena stimulus digabungkan langsung ke dalam field 'soal' (isi dengan string kosong '')" },
+              soal: { type: Type.STRING, description: "Teks soal lengkap yang menggabungkan stimulus (paragraf stimulus/pengantar/teks bacaan/studi kasus jika ada) dan pertanyaan/pokok soal utama secara menyatu" },
               opsi: { 
                 type: Type.ARRAY, 
                 items: { type: Type.STRING }, 
@@ -432,28 +468,27 @@ Tulis draf prompt tersebut langsung dalam format Markdown yang elegan, berwibawa
   }
 });
 
-// Endpoint 5: Generate Systematic Learning Material from Kisi-Kisi Row
+// Endpoint 5: Generate Systematic Learning Material from Kisi-Kisi Row (Optimized as Mega-Prompt for NotebookLM & Gemini AI)
 apiRouter.post("/generate-materi", async (req, res) => {
   try {
-    const { kisi, mataPelajaran, guidanceText } = req.body;
+    const { kisi, mataPelajaran } = req.body;
     if (!kisi) {
       return res.status(400).json({ error: "Data kisi-kisi harus disediakan." });
     }
 
     const ai = getGeminiClient();
-    const systemInstruction = `Anda adalah ahli kurikulum nasional Kemendikbudristek dan penyusun modul bahan ajar profesional tingkat SMA.
-Tugas Anda adalah menyusun MODUL AJAR PEMBELAJARAN (LEARNING MODULE) YANG SANGAT DETAIL, MENDALAM, KOMPREHENSIF, DAN SISTEMATIS. Modul ini harus setara dengan satu bab penuh buku teks pelajaran berkualitas tinggi.
-Hindari ringkasan pendek atau penjelasan permukaan. Tuliskan penjelasan teoretis secara panjang lebar, mendalam, akademis, terstruktur, serta kaya akan literasi sosiologis/ilmiah.
+    const systemInstruction = `Anda adalah ahli prompt engineering pendidikan dan desainer instruksional kelas dunia.
+Tugas Anda adalah merumuskan sebuah MEGA-PROMPT yang sangat detail, komprehensif, terstruktur rapi, dan siap saji (copy-pasteable) untuk digunakan oleh guru/pengajar di NOTEBOOK LM atau GEMINI AI guna menghasilkan INFOGRAFIS PEMBELAJARAN atau SLIDE PRESENTASI INTERAKTIF yang berkualitas tinggi, estetis, dan mendalam.
 
-Gunakan struktur modul yang baku sebagai berikut:
-1. PENDAHULUAN & DEFINISI UTAMA secara komprehensif (bahas etimologi, definisi menurut minimal 2 tokoh/ahli sosiologi/ilmu terkait, serta signifikansi materi dalam kehidupan sosial). Uraikan secara rinci.
-2. KONSEP KUNCI, DIMENSI, DAN TEORI PENDEKATAN secara mendetail. Berikan sub-bab penjelasan untuk setiap dimensi, jelaskan mekanisme sosialnya, klasifikasinya, serta tabel/pembagian konseptual jika relevan.
-3. STUDI KASUS KONTEKSTUAL INDONESIA secara mendalam. Tuliskan narasi studi kasus riil atau fenomena sosial aktual di Indonesia yang sedang hangat, kemudian berikan pembahasan dan analisis kritis sosiologis yang komprehensif terhadap kasus tersebut.
-4. LEMBAR AKTIVITAS REFLEKTIF & ANALISIS HOTS (Higher Order Thinking Skills). Tuliskan instruksi aktivitas siswa, pertanyaan reflektif tingkat tinggi (analisis, evaluasi, dan kreasi) untuk mengukur pemahaman konsep siswa secara mandiri.
+Mega-prompt yang Anda susun harus secara utuh menggabungkan dan mendetailkan seluruh materi pokok berdasarkan parameter kisi-kisi matriks yang diberikan. Di dalam mega-prompt tersebut, Anda harus:
+1. Mendefinisikan peran AI penerima prompt (sebagai desainer infografis & slide presentasi edukasi profesional).
+2. Menguraikan seluruh materi pokok secara sangat detail, panjang lebar, akademis, dan terperinci (cantumkan definisi tokoh/ahli, teori pendekatan sosiologis/ilmiah, klasifikasi/dimensi, serta analogi yang memudahkan pemahaman siswa) agar NotebookLM atau Gemini AI memiliki bahan konten yang sangat kaya tanpa perlu mencari dari luar.
+3. Memberikan panduan visual dan struktur slide/infografis (misalnya outline slide per slide dari Slide 1 s.d. Slide 10, atau pembagian seksi infografis yang menarik, beserta saran visual, tabel, diagram, dan studi kasus lokal Indonesia).
+4. Menyertakan instruksi aktivitas reflektif, studi kasus interaktif, atau kuis singkat untuk disisipkan di dalam slide/infografis.
 
-Seluruh materi harus ditulis dalam Bahasa Indonesia yang formal, akademis, mengalir secara teoretis, dan diformat menggunakan Markdown yang sangat rapi dan tertata.`;
+Format keluaran Anda harus langsung berupa teks MEGA-PROMPT utuh siap pakai yang rapi, menggunakan Markdown yang sangat estetis (seperti menggunakan blockquotes, penomoran, tabel, atau pembatas yang jelas) sehingga pengguna tinggal menyalin (copy) seluruh teks tersebut dan menempelkannya (paste) ke NotebookLM atau Gemini AI.`;
 
-    const userPrompt = `Buatlah Modul Ajar Pembelajaran yang sangat lengkap, rinci, dan mendalam untuk unit berikut:
+    const userPrompt = `Buatkan MEGA-PROMPT siap pakai untuk menyusun Slide Presentasi dan Infografis Pembelajaran tingkat SMA Kelas XII yang sangat detail dan kaya konten untuk unit berikut:
 Mata Pelajaran: ${mataPelajaran || "Sosiologi"}
 Topik / Elemen Materi: ${kisi.elemenMateri}
 Sub-elemen / Sub-materi: ${kisi.subElemenMateri}
@@ -461,10 +496,7 @@ Target Kompetensi Siswa: ${kisi.kompetensi}
 Level Kognitif: ${kisi.levelKognitif === 'level_1' ? 'Pemahaman & Pengetahuan (Knowing - C1/C2)' : kisi.levelKognitif === 'level_2' ? 'Penerapan/Aplikasi (Applying - C3)' : 'Penalaran/Analisis Tinggi (Reasoning/HOTS - C4/C5/C6)'}
 Batasan & Catatan Kurikulum: ${kisi.batasanCatatan || "Tidak ada batasan khusus"}
 
-${guidanceText ? `INTEGRASIKAN SECARA SEAMLESS PANDUAN RESMI KURIKULUM BERIKUT:
-"${guidanceText}"` : ""}
-
-Ingat, buat modul ini SANGAT DETAIL dan kaya teks penjelasan ilmiah agar layak dijadikan pegangan belajar utama siswa maupun panduan mengajar guru. Sajikan langsung dalam format Markdown lengkap tanpa teks pengantar lainnya.`;
+Sediakan di dalam prompt tersebut uraian materi yang sangat kaya, komprehensif, dan detail terkait topik ini (termasuk definisi tokoh, teori, dimensi sosiologis/ilmiah, serta studi kasus nyata sosiologis/kontekstual Indonesia yang sedang hangat) agar konten presentasi/infografisnya memiliki bobot akademis tinggi dan tidak superfisial. Sajikan langsung dalam bentuk MEGA-PROMPT utuh siap salin dalam format Markdown lengkap tanpa teks pengantar atau penutup dari Anda.`;
 
     const response = await generateContentWithFallbackAndRetry(ai, {
       contents: userPrompt,
