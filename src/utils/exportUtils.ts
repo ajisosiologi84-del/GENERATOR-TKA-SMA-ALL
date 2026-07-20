@@ -1,4 +1,4 @@
-import { KisiKisiItem, Question } from '../types';
+import { KisiKisiItem, Question, JadwalItem } from '../types';
 
 /**
  * Format string helper for bentuk soal
@@ -673,4 +673,153 @@ export function exportAllMateriToWord(items: any[], materials: Record<string, st
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Export Jadwal Rencana Pembelajaran to Excel (.xls)
+ */
+export function exportJadwalToExcel(items: JadwalItem[], mataPelajaran: string) {
+  const tableRows = items
+    .map(
+      (item) => `
+    <tr>
+      <td style="border: 1px solid #cccccc; padding: 8px; text-align: center; font-weight: bold; background-color: #f8fafc;">${item.bulan}</td>
+      <td style="border: 1px solid #cccccc; padding: 8px; text-align: center;">Minggu ke-${item.mingguKe}</td>
+      <td style="border: 1px solid #cccccc; padding: 8px; font-weight: 500;">${item.elemenMateri}</td>
+      <td style="border: 1px solid #cccccc; padding: 8px; color: #475569;">${item.subElemenMateri}</td>
+      <td style="border: 1px solid #cccccc; padding: 8px; font-style: italic;">${item.kompetensi}</td>
+    </tr>
+  `
+    )
+    .join('');
+
+  const htmlContent = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+    <head>
+      <!--[if gte mso 9]>
+      <xml>
+        <x:ExcelWorkbook>
+          <x:ExcelWorksheets>
+            <x:ExcelWorksheet>
+              <x:Name>Jadwal Pembelajaran</x:Name>
+              <x:WorksheetOptions>
+                <x:DisplayGridlines/>
+              </x:WorksheetOptions>
+            </x:ExcelWorksheet>
+          </x:ExcelWorksheets>
+        </x:ExcelWorkbook>
+      </xml>
+      <![endif]-->
+      <meta charset="utf-8">
+      <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        th { background-color: #4f46e5; color: white; font-weight: bold; }
+      </style>
+    </head>
+    <body>
+      <h2>TABEL JADWAL RENCANA PEMBELAJARAN TKA KELAS XII</h2>
+      <p><b>Mata Pelajaran:</b> ${mataPelajaran}</p>
+      <p><b>Periode Pembelajaran:</b> Juli, Agustus, Oktober</p>
+      <p><b>Tanggal Ekspor:</b> ${new Date().toLocaleDateString('id-ID')}</p>
+      <br/>
+      <table style="border-collapse: collapse; border: 1px solid #cccccc; width: 100%;">
+        <thead>
+          <tr style="background-color: #4f46e5; color: white;">
+            <th style="border: 1px solid #cccccc; padding: 10px; width: 120px;">Bulan</th>
+            <th style="border: 1px solid #cccccc; padding: 10px; width: 120px;">Minggu Ke-</th>
+            <th style="border: 1px solid #cccccc; padding: 10px; width: 220px;">Elemen / Materi</th>
+            <th style="border: 1px solid #cccccc; padding: 10px; width: 280px;">Sub-elemen / Submateri</th>
+            <th style="border: 1px solid #cccccc; padding: 10px; width: 350px;">Kompetensi yang Diuji</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tableRows}
+        </tbody>
+      </table>
+    </body>
+    </html>
+  `;
+
+  const blob = new Blob([htmlContent], { type: 'application/vnd.ms-excel' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Jadwal_Pembelajaran_TKA_Kelas_XII_${mataPelajaran.replace(/\s+/g, '_')}.xls`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Export Jadwal Rencana Pembelajaran to Word (.doc)
+ */
+export function exportJadwalToWord(items: JadwalItem[], mataPelajaran: string, pageSize: string = 'A4') {
+  const tableRows = items
+    .map(
+      (item) => `
+    <tr>
+      <td style="border: 1px solid #000000; padding: 8px; text-align: center; font-weight: bold; background-color: #f1f5f9;">${item.bulan}</td>
+      <td style="border: 1px solid #000000; padding: 8px; text-align: center;">Minggu ke-${item.mingguKe}</td>
+      <td style="border: 1px solid #000000; padding: 8px; font-weight: bold;">${item.elemenMateri}</td>
+      <td style="border: 1px solid #000000; padding: 8px;">${item.subElemenMateri}</td>
+      <td style="border: 1px solid #000000; padding: 8px; font-style: italic;">${item.kompetensi}</td>
+    </tr>
+  `
+    )
+    .join('');
+
+  const htmlContent = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+    <head>
+      <meta charset="utf-8">
+      <style>
+        @page {
+          size: ${pageSize === 'F4' ? '21.5cm 33cm' : '21cm 29.7cm'};
+          margin: 1.5cm 1.5cm 1.5cm 1.5cm;
+        }
+        body { font-family: 'Calibri', 'Arial', sans-serif; line-height: 1.4; }
+        h2 { color: #4f46e5; text-align: center; margin-bottom: 5px; }
+        .meta { font-size: 11pt; margin-bottom: 20px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 15px; }
+        th { background-color: #e2e8f0; font-weight: bold; border: 1px solid #000000; padding: 8px; text-align: center; }
+        td { border: 1px solid #000000; padding: 8px; font-size: 10pt; }
+      </style>
+    </head>
+    <body>
+      <h2>TABEL JADWAL RENCANA PEMBELAJARAN TKA KELAS XII</h2>
+      <div class="meta">
+        <b>Mata Pelajaran:</b> ${mataPelajaran}<br/>
+        <b>Periode Pembelajaran:</b> Juli, Agustus, Oktober<br/>
+        <b>Tanggal Pembuatan:</b> ${new Date().toLocaleDateString('id-ID')}<br/>
+      </div>
+      
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 15%;">Bulan</th>
+            <th style="width: 15%;">Minggu Ke-</th>
+            <th style="width: 20%;">Elemen / Materi</th>
+            <th style="width: 25%;">Sub-elemen / Submateri</th>
+            <th style="width: 25%;">Kompetensi yang Diuji</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tableRows}
+        </tbody>
+      </table>
+    </body>
+    </html>
+  `;
+
+  const blob = new Blob([htmlContent], { type: 'application/msword' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Jadwal_Pembelajaran_TKA_Kelas_XII_${mataPelajaran.replace(/\s+/g, '_')}.doc`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 

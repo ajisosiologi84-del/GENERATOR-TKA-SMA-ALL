@@ -32,9 +32,10 @@ import {
   Users,
   UserPlus,
   Shield,
-  User
+  User,
+  Calendar
 } from 'lucide-react';
-import { KisiKisiItem, Question, GeneratorConfig, BentukSoal, LevelKognitif, JumlahOpsi, JenisSoal } from './types';
+import { KisiKisiItem, Question, GeneratorConfig, BentukSoal, LevelKognitif, JumlahOpsi, JenisSoal, JadwalItem } from './types';
 import { auth, db, createNewUserByAdmin } from './lib/firebase';
 import { 
   onAuthStateChanged, 
@@ -62,7 +63,9 @@ import {
   getLevelKognitifLabel,
   exportMateriToWord,
   exportAllMateriToWord,
-  markdownToHtmlForWord
+  markdownToHtmlForWord,
+  exportJadwalToExcel,
+  exportJadwalToWord
 } from './utils/exportUtils';
 
 enum OperationType {
@@ -1405,9 +1408,108 @@ const PUSMENDIK_PKK_PRESETS = [
   }
 ];
 
+const DEFAULT_JADWAL_LIST: JadwalItem[] = [
+  {
+    id: 'jadwal-1',
+    bulan: 'Juli',
+    mingguKe: 1,
+    elemenMateri: 'Sosiologi sebagai Ilmu',
+    subElemenMateri: 'Pengertian dan perkembangan sosiologi dan manfaat sosiologi dalam kehidupan masyarakat.',
+    kompetensi: 'Mendeskripsikan dan menganalisis pengertian dan perkembangan serta manfaat sosiologi sebagai ilmu pengetahuan.'
+  },
+  {
+    id: 'jadwal-2',
+    bulan: 'Juli',
+    mingguKe: 2,
+    elemenMateri: 'Sosiologi sebagai Ilmu',
+    subElemenMateri: 'Objek kajian sosiologi, fungsi dan manfaat sosiologi bagi masyarakat.',
+    kompetensi: 'Menganalisis objek kajian sosiologi serta fungsinya dalam memecahkan masalah sosial.'
+  },
+  {
+    id: 'jadwal-3',
+    bulan: 'Juli',
+    mingguKe: 3,
+    elemenMateri: 'Hubungan dan Gejala Sosial',
+    subElemenMateri: 'Konsep dan bentuk hubungan sosial',
+    kompetensi: 'Mengidentifikasi dan menganalisis konsep dan bentuk hubungan sosial yang terjadi di masyarakat'
+  },
+  {
+    id: 'jadwal-4',
+    bulan: 'Juli',
+    mingguKe: 4,
+    elemenMateri: 'Hubungan dan Gejala Sosial',
+    subElemenMateri: 'Pembentukan kepribadian, kelompok dan lembaga sosial.',
+    kompetensi: 'Mengidentifikasi berbagai lembaga sosial dan perannya di masyarakat.'
+  },
+  {
+    id: 'jadwal-5',
+    bulan: 'Agustus',
+    mingguKe: 1,
+    elemenMateri: 'Hubungan dan Gejala Sosial',
+    subElemenMateri: 'Ragam gejala sosial.',
+    kompetensi: 'Menjelaskan ragam gejala sosial di lingkungan sekitar.'
+  },
+  {
+    id: 'jadwal-6',
+    bulan: 'Agustus',
+    mingguKe: 2,
+    elemenMateri: 'Hubungan dan Gejala Sosial',
+    subElemenMateri: 'Masyarakat multikultural.',
+    kompetensi: 'Menganalisis dinamika masyarakat multikultural.'
+  },
+  {
+    id: 'jadwal-7',
+    bulan: 'Agustus',
+    mingguKe: 3,
+    elemenMateri: 'Penelitian Sosial',
+    subElemenMateri: 'Langkah penelitian sosial dan metode penelitian.',
+    kompetensi: 'Menjelaskan dan menganalisis berbagai langkah dan metode penelitian sosial.'
+  },
+  {
+    id: 'jadwal-8',
+    bulan: 'Agustus',
+    mingguKe: 4,
+    elemenMateri: 'Kelompok Sosial, Kesetaraan, and Konflik Sosial',
+    subElemenMateri: 'Konsep Kelompok Sosial dan dinamika Kelompok Sosial.',
+    kompetensi: 'Mengidentifikasi, menjelaskan, dan menganalisis berbagai kelompok sosial dengan dinamikanya.'
+  },
+  {
+    id: 'jadwal-9',
+    bulan: 'Oktober',
+    mingguKe: 1,
+    elemenMateri: 'Kelompok Sosial, Kesetaraan, and Konflik Sosial',
+    subElemenMateri: 'Ketidaksetaraan sosial dan upaya mewujudkan kesetaraan sosial.',
+    kompetensi: 'Memahami faktor yang memengaruhi ketidaksetaraan sosial dan menganalisis upaya mewujudkan kesetaraan sosial.'
+  },
+  {
+    id: 'jadwal-10',
+    bulan: 'Oktober',
+    mingguKe: 2,
+    elemenMateri: 'Kelompok Sosial, Kesetaraan, and Konflik Sosial',
+    subElemenMateri: 'Konflik sosial dan penanganan konflik.',
+    kompetensi: 'Mendeskripsikan berbagai konsep konflik sosial dan menganalisis berbagai upaya penanganan konflik.'
+  },
+  {
+    id: 'jadwal-11',
+    bulan: 'Oktober',
+    mingguKe: 3,
+    elemenMateri: 'Perubahan Sosial dan Globalisasi',
+    subElemenMateri: 'Bentuk-bentuk perubahan sosial dan dampaknya.',
+    kompetensi: 'Mengidentifikasi bentuk-bentuk perubahan sosial dan menganalisis dampak perubahan sosial.'
+  },
+  {
+    id: 'jadwal-12',
+    bulan: 'Oktober',
+    mingguKe: 4,
+    elemenMateri: 'Perubahan Sosial dan Globalisasi',
+    subElemenMateri: 'Globalisasi dan dampak globalisasi.',
+    kompetensi: 'Menjelaskan dan menganalisis pengaruh globalisasi dan dampaknya.'
+  }
+];
+
 export default function App() {
-  // Navigation Tabs: 'config' (Generator & Prompt), 'kisi' (Matriks Asesmen), 'soal' (Pembuat Soal), 'materi' (Ringkasan Materi & Panduan), 'users' (Manajemen Pengguna)
-  const [activeTab, setActiveTab] = useState<'config' | 'kisi' | 'soal' | 'materi' | 'users'>('config');
+  // Navigation Tabs: 'config' (Generator & Prompt), 'kisi' (Matriks Asesmen), 'soal' (Pembuat Soal), 'materi' (Ringkasan Materi & Panduan), 'jadwal' (Jadwal Pembelajaran), 'users' (Manajemen Pengguna)
+  const [activeTab, setActiveTab] = useState<'config' | 'kisi' | 'soal' | 'materi' | 'jadwal' | 'users'>('config');
 
   // User Management State (for Admin)
   const [usersList, setUsersList] = useState<any[]>([]);
@@ -1552,6 +1654,166 @@ export default function App() {
   // Synced collection states
   const [kisiList, setKisiList] = useState<KisiKisiItem[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
+
+  // Jadwal Rencana Pembelajaran State & Handlers
+  const [jadwalList, setJadwalList] = useState<JadwalItem[]>([]);
+
+  // Sync selectedJadwalPresetSubject with config.mataPelajaran
+  useEffect(() => {
+    if (!config.mataPelajaran) return;
+    const mp = config.mataPelajaran;
+    if (mp === 'Pendidikan Pancasila dan Kewarganegaraan') {
+      setSelectedJadwalPresetSubject('PPKN');
+    } else if (mp === 'Sejarah') {
+      setSelectedJadwalPresetSubject('Sejarah Tingkat Lanjut');
+    } else if (mp === 'Produk atau Projek Kreatif dan Kewirausahaan SMK dan MAK') {
+      setSelectedJadwalPresetSubject('Produk Kreatif dan Kewirausahaan');
+    } else {
+      const validSubjects = [
+        'Matematika', 'Bahasa Indonesia', 'Bahasa Inggris', 
+        'Matematika Tingkat Lanjut', 'Bahasa Indonesia Tingkat Lanjut', 'Bahasa Inggris Tingkat Lanjut', 
+        'Fisika', 'Kimia', 'Biologi', 'Ekonomi', 'Geografi', 'Sosiologi', 'Antropologi', 'Bahasa Jepang'
+      ];
+      if (validSubjects.includes(mp)) {
+        setSelectedJadwalPresetSubject(mp as any);
+      }
+    }
+  }, [config.mataPelajaran]);
+
+  // Form State for Adding / Editing Jadwal
+  const [isAddingJadwal, setIsAddingJadwal] = useState(false);
+  const [newJadwal, setNewJadwal] = useState<Omit<JadwalItem, 'id'>>({
+    bulan: 'Juli',
+    mingguKe: 1,
+    elemenMateri: '',
+    subElemenMateri: '',
+    kompetensi: ''
+  });
+
+  const [editingJadwalId, setEditingJadwalId] = useState<string | null>(null);
+  const [editingJadwalData, setEditingJadwalData] = useState<JadwalItem | null>(null);
+
+  // Custom confirmation modals states
+  const [jadwalToDelete, setJadwalToDelete] = useState<JadwalItem | null>(null);
+  const [showClearJadwalConfirm, setShowClearJadwalConfirm] = useState(false);
+  const [showImportPresetsConfirm, setShowImportPresetsConfirm] = useState<{ count: number; subject: string; presets: any[] } | null>(null);
+
+  // State for preset subject selection in the Jadwal UI
+  const [selectedJadwalPresetSubject, setSelectedJadwalPresetSubject] = useState<'Matematika' | 'Bahasa Indonesia' | 'Bahasa Inggris' | 'Matematika Tingkat Lanjut' | 'Bahasa Indonesia Tingkat Lanjut' | 'Bahasa Inggris Tingkat Lanjut' | 'Fisika' | 'Kimia' | 'Biologi' | 'PPKN' | 'Ekonomi' | 'Geografi' | 'Sosiologi' | 'Sejarah Tingkat Lanjut' | 'Antropologi' | 'Bahasa Jepang' | 'Produk Kreatif dan Kewirausahaan'>('Sosiologi');
+
+  // Handle importing all presets into the schedule distributed sequentially across months
+  const handleImportAllJadwalPresets = () => {
+    const activePresets = selectedJadwalPresetSubject === 'Matematika' 
+      ? PUSMENDIK_MATEMATIKA_PRESETS 
+      : selectedJadwalPresetSubject === 'Bahasa Indonesia' 
+      ? PUSMENDIK_BAHASA_INDONESIA_PRESETS 
+      : selectedJadwalPresetSubject === 'Bahasa Inggris'
+      ? PUSMENDIK_BAHASA_INGGRIS_PRESETS
+      : selectedJadwalPresetSubject === 'Matematika Tingkat Lanjut'
+      ? PUSMENDIK_MATEMATIKA_TL_PRESETS
+      : selectedJadwalPresetSubject === 'Bahasa Indonesia Tingkat Lanjut'
+      ? PUSMENDIK_BAHASA_INDONESIA_TL_PRESETS
+      : selectedJadwalPresetSubject === 'Bahasa Inggris Tingkat Lanjut'
+      ? PUSMENDIK_BAHASA_INGGRIS_TL_PRESETS
+      : selectedJadwalPresetSubject === 'Fisika'
+      ? PUSMENDIK_FISIKA_PRESETS
+      : selectedJadwalPresetSubject === 'Kimia'
+      ? PUSMENDIK_KIMIA_PRESETS
+      : selectedJadwalPresetSubject === 'Biologi'
+      ? PUSMENDIK_BIOLOGI_PRESETS
+      : selectedJadwalPresetSubject === 'PPKN'
+      ? PUSMENDIK_PPKN_PRESETS
+      : selectedJadwalPresetSubject === 'Ekonomi'
+      ? PUSMENDIK_EKONOMI_PRESETS
+      : selectedJadwalPresetSubject === 'Geografi'
+      ? PUSMENDIK_GEOGRAFI_PRESETS
+      : selectedJadwalPresetSubject === 'Sosiologi'
+      ? PUSMENDIK_SOSIOLOGI_PRESETS
+      : selectedJadwalPresetSubject === 'Sejarah Tingkat Lanjut'
+      ? PUSMENDIK_SEJARAH_TL_PRESETS
+      : selectedJadwalPresetSubject === 'Antropologi'
+      ? PUSMENDIK_ANTROPOLOGI_PRESETS
+      : selectedJadwalPresetSubject === 'Bahasa Jepang'
+      ? PUSMENDIK_BAHASA_JEPANG_PRESETS
+      : PUSMENDIK_PKK_PRESETS;
+
+    const count = activePresets.length;
+    setShowImportPresetsConfirm({
+      count,
+      subject: selectedJadwalPresetSubject,
+      presets: activePresets
+    });
+  };
+
+  const executeImportAllJadwalPresets = (presets: any[]) => {
+    const months: ('Juli' | 'Agustus' | 'Oktober')[] = ['Juli', 'Agustus', 'Oktober'];
+    const newItems: JadwalItem[] = presets.map((preset, index) => {
+      const slotIndex = index;
+      const monthIndex = Math.min(2, Math.floor(slotIndex / 4));
+      const weekNum = (slotIndex % 4) + 1;
+      return {
+        id: `jadwal-preset-${Date.now()}-${index}`,
+        bulan: months[monthIndex],
+        mingguKe: weekNum,
+        elemenMateri: preset.elemenMateri,
+        subElemenMateri: preset.subElemenMateri,
+        kompetensi: preset.kompetensi
+      };
+    });
+
+    setJadwalList(prev => [...prev, ...newItems]);
+    setShowImportPresetsConfirm(null);
+  };
+
+  const handleAddJadwal = (e: React.FormEvent) => {
+    e.preventDefault();
+    const item: JadwalItem = {
+      ...newJadwal,
+      id: `jadwal-${Date.now()}`
+    };
+    setJadwalList(prev => [...prev, item]);
+    setNewJadwal({
+      bulan: 'Juli',
+      mingguKe: 1,
+      elemenMateri: '',
+      subElemenMateri: '',
+      kompetensi: ''
+    });
+    setIsAddingJadwal(false);
+  };
+
+  const handleStartEditJadwal = (item: JadwalItem) => {
+    setEditingJadwalId(item.id);
+    setEditingJadwalData({ ...item });
+  };
+
+  const handleSaveEditJadwal = () => {
+    if (!editingJadwalData) return;
+    setJadwalList(prev => prev.map(item => item.id === editingJadwalData.id ? editingJadwalData : item));
+    setEditingJadwalId(null);
+    setEditingJadwalData(null);
+  };
+
+  const handleDeleteJadwal = (id: string) => {
+    const itemToDelete = jadwalList.find(item => item.id === id);
+    if (!itemToDelete) return;
+    setJadwalToDelete(itemToDelete);
+  };
+
+  const executeDeleteJadwal = () => {
+    if (!jadwalToDelete) return;
+    setJadwalList(prev => prev.filter(item => item.id !== jadwalToDelete.id));
+    setJadwalToDelete(null);
+  };
+
+  const handleResetJadwal = () => {
+    setShowClearJadwalConfirm(true);
+  };
+
+  const executeClearJadwal = () => {
+    setJadwalList([]);
+    setShowClearJadwalConfirm(false);
+  };
 
   // Auth changed hook
   useEffect(() => {
@@ -1704,9 +1966,20 @@ export default function App() {
   const [aiConfig, setAiConfig] = useState(() => {
     const savedKey = localStorage.getItem('gemini_api_key') || '';
     const savedMode = localStorage.getItem('gemini_api_mode') || 'server';
+    let savedModel = localStorage.getItem('gemini_api_model') || 'gemini-3.5-flash';
+    // Upgrade deprecated or invalid models automatically
+    if (
+      savedModel === 'gemini-1.5-flash' || 
+      savedModel === 'gemini-2.0-flash' || 
+      savedModel === 'gemini-2.5-flash'
+    ) {
+      savedModel = 'gemini-3.5-flash';
+      localStorage.setItem('gemini_api_model', 'gemini-3.5-flash');
+    }
     return {
       mode: savedMode as 'server' | 'client',
-      apiKey: savedKey
+      apiKey: savedKey,
+      model: savedModel
     };
   });
   const [showApiKey, setShowApiKey] = useState(false);
@@ -1725,56 +1998,85 @@ export default function App() {
       throw new Error("Kunci API Gemini belum diatur! Silakan masukkan kunci API terlebih dahulu di Tab 1 (Pengaturan Koneksi AI) atau beralih ke mode Server.");
     }
 
-    const model = "gemini-2.5-flash";
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${aiConfig.apiKey}`;
-
-    const requestBody: any = {
-      contents: [
-        {
-          parts: [{ text: promptText }]
-        }
-      ],
-      generationConfig: {
-        temperature: 0.7,
-      }
-    };
-
-    if (systemInstruction) {
-      requestBody.systemInstruction = {
-        parts: [{ text: systemInstruction }]
-      };
+    const preferredModel = aiConfig.model || "gemini-3.5-flash";
+    
+    // Fallback list of models in case the preferred model is not available for this API Key
+    const modelsToTry = [preferredModel];
+    if (preferredModel !== "gemini-3.5-flash") {
+      modelsToTry.push("gemini-3.5-flash");
+    }
+    if (preferredModel !== "gemini-3.1-flash-lite") {
+      modelsToTry.push("gemini-3.1-flash-lite");
+    }
+    if (preferredModel !== "gemini-flash-latest") {
+      modelsToTry.push("gemini-flash-latest");
     }
 
-    if (responseSchema) {
-      requestBody.generationConfig.responseMimeType = "application/json";
-      requestBody.generationConfig.responseSchema = responseSchema;
-    }
+    let preferredModelError: any = null;
+    let lastError: any = null;
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody)
-    });
-
-    if (!res.ok) {
-      let errorText = '';
+    for (const model of modelsToTry) {
       try {
-        const errObj = await res.json();
-        errorText = errObj.error?.message || JSON.stringify(errObj);
-      } catch {
-        errorText = await res.text();
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${aiConfig.apiKey}`;
+
+        const requestBody: any = {
+          contents: [
+            {
+              parts: [{ text: promptText }]
+            }
+          ],
+          generationConfig: {
+            temperature: 0.7,
+          }
+        };
+
+        if (systemInstruction) {
+          requestBody.systemInstruction = {
+            parts: [{ text: systemInstruction }]
+          };
+        }
+
+        if (responseSchema) {
+          requestBody.generationConfig.responseMimeType = "application/json";
+          requestBody.generationConfig.responseSchema = responseSchema;
+        }
+
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!res.ok) {
+          let errorText = '';
+          try {
+            const errObj = await res.json();
+            errorText = errObj.error?.message || JSON.stringify(errObj);
+          } catch {
+            errorText = await res.text();
+          }
+          throw new Error(`Google API Error: ${errorText || res.statusText}`);
+        }
+
+        const result = await res.json();
+        const candidateText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!candidateText) {
+          throw new Error("Tidak ada respon yang dihasilkan oleh model Gemini.");
+        }
+        return candidateText;
+      } catch (err: any) {
+        console.warn(`Direct call with model ${model} failed, trying fallback...`, err);
+        if (model === preferredModel) {
+          preferredModelError = err;
+        }
+        lastError = err;
+        // Continue to the next fallback model
       }
-      throw new Error(`Google API Error: ${errorText || res.statusText}`);
     }
 
-    const result = await res.json();
-    const candidateText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!candidateText) {
-      throw new Error("Tidak ada respon yang dihasilkan oleh model Gemini.");
-    }
-    return candidateText;
+    throw preferredModelError || lastError || new Error("Gagal memanggil API Gemini melalui model pilihan maupun fallback.");
   };
 
   // Prompt Generator outputs
@@ -4270,6 +4572,18 @@ PANDUAN EKSTRA:
               <FileText className="h-4.5 w-4.5 text-purple-600" />
               <span>4. Ringkasan Materi & Panduan</span>
             </button>
+            <button
+              id="tab-btn-jadwal"
+              onClick={() => setActiveTab('jadwal')}
+              className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-bold transition-all relative whitespace-nowrap ${
+                activeTab === 'jadwal'
+                  ? 'bg-rose-50 text-rose-800 shadow-sm border border-rose-100'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <Calendar className="h-4.5 w-4.5 text-rose-600" />
+              <span>5. Jadwal Pembelajaran XII</span>
+            </button>
             {userRole === 'admin' && (
               <button
                 id="tab-btn-users"
@@ -4281,7 +4595,7 @@ PANDUAN EKSTRA:
                 }`}
               >
                 <Users className="h-4.5 w-4.5 text-amber-600" />
-                <span>5. Manajemen Pengguna (Admin)</span>
+                <span>6. Manajemen Pengguna (Admin)</span>
                 {usersList.length > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 bg-amber-600 text-white text-[10px] h-5 px-1.5 rounded-full flex items-center justify-center font-bold">
                     {usersList.length}
@@ -4574,41 +4888,66 @@ PANDUAN EKSTRA:
                   </div>
 
                   {aiConfig.mode === 'client' && (
-                    <div className="space-y-2 p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl animate-fadeIn">
-                      <div className="flex justify-between items-center">
-                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide">
-                          Kunci API Gemini Anda (Direct API)
-                        </label>
-                        <a
-                          href="https://aistudio.google.com/"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[10px] text-indigo-600 hover:underline font-bold"
-                        >
-                          Dapatkan API Key Gratis ↗
-                        </a>
+                    <div className="space-y-3 p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl animate-fadeIn text-left">
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wide">
+                            Kunci API Gemini Anda (Direct API)
+                          </label>
+                          <a
+                            href="https://aistudio.google.com/"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[10px] text-indigo-600 hover:underline font-bold"
+                          >
+                            Dapatkan API Key Gratis ↗
+                          </a>
+                        </div>
+                        <div className="relative">
+                          <input
+                            type={showApiKey ? "text" : "password"}
+                            value={aiConfig.apiKey}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setAiConfig(prev => ({ ...prev, apiKey: val }));
+                              localStorage.setItem('gemini_api_key', val);
+                            }}
+                            placeholder="AIzaSy..."
+                            className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg pl-3 pr-10 py-1.5 text-xs font-mono"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowApiKey(!showApiKey)}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                          >
+                            {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
                       </div>
-                      <div className="relative">
-                        <input
-                          type={showApiKey ? "text" : "password"}
-                          value={aiConfig.apiKey}
+
+                      <div className="space-y-1.5">
+                        <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wide">
+                          Pilih Model Gemini
+                        </label>
+                        <select
+                          value={aiConfig.model}
                           onChange={(e) => {
                             const val = e.target.value;
-                            setAiConfig(prev => ({ ...prev, apiKey: val }));
-                            localStorage.setItem('gemini_api_key', val);
+                            setAiConfig(prev => ({ ...prev, model: val }));
+                            localStorage.setItem('gemini_api_model', val);
                           }}
-                          placeholder="AIzaSy..."
-                          className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg pl-3 pr-10 py-1.5 text-xs font-mono"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowApiKey(!showApiKey)}
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                          className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:outline-none"
                         >
-                          {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </button>
+                          <option value="gemini-3.5-flash">gemini-3.5-flash (Utama - Sangat Cerdas, Cepat & Stabil)</option>
+                          <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Hemat Kuota & Kecepatan Tinggi)</option>
+                          <option value="gemini-flash-latest">gemini-flash-latest (Selalu Stabil & Terupdate)</option>
+                        </select>
+                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                          💡 <b>Sistem Fallback Otomatis:</b> Jika model utama tidak dapat diakses, sistem akan otomatis mencoba model alternatif yang stabil agar pembuatan soal tidak terputus.
+                        </p>
                       </div>
-                      <p className="text-[10px] text-slate-500">
+
+                      <p className="text-[10px] text-slate-500 pt-1 border-t border-indigo-100">
                         🔒 Kunci API disimpan secara lokal di browser Anda dan <b>tidak pernah</b> dikirimkan ke server eksternal mana pun selain Google API langsung.
                       </p>
                     </div>
@@ -6553,6 +6892,609 @@ PANDUAN EKSTRA:
           </div>
         )}
 
+        {/* Tab 5: Jadwal Rencana Pembelajaran TKA XII */}
+        {activeTab === 'jadwal' && (
+          <div id="jadwal-panel" className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-fadeIn">
+            
+            {/* Left Main Section: Schedule Table and Form */}
+            <div className="lg:col-span-8 space-y-6">
+              
+              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-6">
+                
+                {/* Title & Actions */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                      <Calendar className="h-5 w-5 text-indigo-600" />
+                      <span>Jadwal Rencana Pembelajaran TKA Kelas XII</span>
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Distribusi materi mingguan khusus bulan <b>Juli, Agustus, dan Oktober</b>.
+                    </p>
+                  </div>
+                  
+                  {/* Export and Action buttons */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={handleResetJadwal}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 text-slate-600 hover:text-red-600 hover:bg-red-50 hover:border-red-100 rounded-xl text-xs font-bold transition"
+                      title="Kosongkan seluruh rencana pembelajaran"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-slate-400 group-hover:text-red-500" />
+                      <span>Kosongkan Jadwal</span>
+                    </button>
+                    
+                    <button
+                      onClick={() => exportJadwalToExcel(jadwalList, selectedJadwalPresetSubject)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-xl text-xs font-bold transition"
+                    >
+                      <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />
+                      <span>Excel</span>
+                    </button>
+                    
+                    <button
+                      onClick={() => exportJadwalToWord(jadwalList, selectedJadwalPresetSubject, printConfig.pageSize)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-xl text-xs font-bold transition"
+                    >
+                      <FileText className="h-3.5 w-3.5 text-blue-600" />
+                      <span>Word</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        const printWindow = window.open('', '_blank');
+                        if (!printWindow) return;
+                        
+                        const tableRowsHtml = jadwalList.map(item => `
+                          <tr>
+                            <td style="border: 1px solid black; padding: 8px; text-align: center; font-weight: bold;">${item.bulan}</td>
+                            <td style="border: 1px solid black; padding: 8px; text-align: center;">Minggu ke-${item.mingguKe}</td>
+                            <td style="border: 1px solid black; padding: 8px; font-weight: bold;">${item.elemenMateri}</td>
+                            <td style="border: 1px solid black; padding: 8px;">${item.subElemenMateri}</td>
+                            <td style="border: 1px solid black; padding: 8px; font-style: italic;">${item.kompetensi}</td>
+                          </tr>
+                        `).join('');
+
+                        const html = `
+                          <html>
+                          <head>
+                            <title>Cetak Jadwal Pembelajaran TKA XII</title>
+                            <style>
+                              body { font-family: Arial, sans-serif; margin: 30px; }
+                              h2 { text-align: center; color: #1e3a8a; }
+                              table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                              th { border: 1px solid black; padding: 10px; background-color: #f1f5f9; }
+                              td { border: 1px solid black; padding: 8px; }
+                            </style>
+                          </head>
+                          <body>
+                            <h2>TABEL JADWAL RENCANA PEMBELAJARAN TKA KELAS XII (Juli, Agustus, Oktober)</h2>
+                            <p><b>Mata Pelajaran:</b> ${selectedJadwalPresetSubject}</p>
+                            <p><b>Periode Pembelajaran:</b> Juli, Agustus, Oktober</p>
+                            <p><b>Tanggal Cetak:</b> ${new Date().toLocaleDateString('id-ID')}</p>
+                            <table>
+                              <thead>
+                                <tr>
+                                  <th>Bulan</th>
+                                  <th>Minggu Ke-</th>
+                                  <th>Elemen / Materi</th>
+                                  <th>Sub-elemen / Submateri</th>
+                                  <th>Kompetensi yang Diuji</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                ${tableRowsHtml}
+                              </tbody>
+                            </table>
+                            <script>
+                              window.onload = function() { window.print(); }
+                            </script>
+                          </body>
+                          </html>
+                        `;
+                        printWindow.document.write(html);
+                        printWindow.document.close();
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 rounded-xl text-xs font-bold transition"
+                    >
+                      <Printer className="h-3.5 w-3.5" />
+                      <span>Cetak</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Info Box */}
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-800 flex gap-2.5">
+                  <Info className="h-4 w-4 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold block">💡 Petunjuk Penyusunan:</span>
+                    <span className="leading-relaxed text-slate-750">
+                      Anda bisa menambah, mengedit secara langsung di baris tabel, atau menghapus rencana pembelajaran mingguan. Gunakan panel <b>"Rujukan Pusmendik Sosiologi"</b> di sebelah kanan untuk langsung menyalin elemen, submateri, dan kompetensi rujukan ke dalam baris tabel dengan sekali klik.
+                    </span>
+                  </div>
+                </div>
+
+                {/* Inline form to Add New Row */}
+                {isAddingJadwal ? (
+                  <form onSubmit={handleAddJadwal} className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4">
+                    <h3 className="text-xs font-extrabold text-slate-700">Tambah Baris Rencana Pembelajaran Baru</h3>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">Bulan</label>
+                        <select
+                          value={newJadwal.bulan}
+                          onChange={(e) => setNewJadwal(prev => ({ ...prev, bulan: e.target.value as any }))}
+                          className="w-full bg-white border border-slate-200 focus:ring-1 focus:ring-indigo-500 rounded-lg p-2 text-xs text-slate-700 outline-none"
+                        >
+                          <option value="Juli">Juli</option>
+                          <option value="Agustus">Agustus</option>
+                          <option value="Oktober">Oktober</option>
+                        </select>
+                      </div>
+                      
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">Minggu Ke-</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="5"
+                          value={newJadwal.mingguKe}
+                          onChange={(e) => setNewJadwal(prev => ({ ...prev, mingguKe: parseInt(e.target.value) || 1 }))}
+                          className="w-full bg-white border border-slate-200 focus:ring-1 focus:ring-indigo-500 rounded-lg p-2 text-xs text-slate-700 outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">Elemen / Materi Pokok</label>
+                        <input
+                          type="text"
+                          value={newJadwal.elemenMateri}
+                          onChange={(e) => setNewJadwal(prev => ({ ...prev, elemenMateri: e.target.value }))}
+                          placeholder="Contoh: Sosiologi sebagai Ilmu"
+                          className="w-full bg-white border border-slate-200 focus:ring-1 focus:ring-indigo-500 rounded-lg p-2 text-xs text-slate-700 outline-none"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">Sub-elemen / Submateri</label>
+                        <textarea
+                          value={newJadwal.subElemenMateri}
+                          onChange={(e) => setNewJadwal(prev => ({ ...prev, subElemenMateri: e.target.value }))}
+                          placeholder="Masukkan rincian materi"
+                          className="w-full bg-white border border-slate-200 focus:ring-1 focus:ring-indigo-500 rounded-lg p-2 text-xs text-slate-700 outline-none h-16 resize-none"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">Kompetensi yang Diuji</label>
+                        <textarea
+                          value={newJadwal.kompetensi}
+                          onChange={(e) => setNewJadwal(prev => ({ ...prev, kompetensi: e.target.value }))}
+                          placeholder="Masukkan kompetensi rujukan"
+                          className="w-full bg-white border border-slate-200 focus:ring-1 focus:ring-indigo-500 rounded-lg p-2 text-xs text-slate-700 outline-none h-16 resize-none"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingJadwal(false)}
+                        className="px-3.5 py-1.5 border border-slate-200 text-slate-600 hover:bg-slate-100 rounded-lg font-bold"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold"
+                      >
+                        Simpan Rencana
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <button
+                    onClick={() => setIsAddingJadwal(true)}
+                    className="w-full py-2.5 border-2 border-dashed border-slate-200 hover:border-indigo-400 text-slate-500 hover:text-indigo-600 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>Tambah Baris Rencana Pembelajaran Baru</span>
+                  </button>
+                )}
+
+                {/* Main Table */}
+                <div className="overflow-x-auto border border-slate-150 rounded-xl">
+                  <table className="w-full border-collapse text-left text-xs text-slate-600">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-800 font-extrabold">
+                        <th className="px-4 py-3 font-bold text-slate-700 w-28">Bulan</th>
+                        <th className="px-4 py-3 font-bold text-slate-700 w-24">Minggu Ke-</th>
+                        <th className="px-4 py-3 font-bold text-slate-700 w-44">Elemen / Materi</th>
+                        <th className="px-4 py-3 font-bold text-slate-700">Sub-elemen / Submateri</th>
+                        <th className="px-4 py-3 font-bold text-slate-700">Kompetensi yang Diuji</th>
+                        <th className="px-4 py-3 font-bold text-slate-700 text-center w-28">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {jadwalList.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="text-center py-10 px-6 bg-slate-50/50">
+                            <div className="max-w-md mx-auto space-y-3 py-4">
+                              <div className="inline-flex items-center justify-center h-12 w-12 rounded-full bg-indigo-50 text-indigo-600 mb-1">
+                                <Sparkles className="h-6 w-6 animate-pulse" />
+                              </div>
+                              <h3 className="text-xs font-extrabold text-slate-800 uppercase tracking-wide">Jadwal Rencana Pembelajaran Kosong</h3>
+                              <p className="text-[11px] text-slate-500 leading-relaxed">
+                                Anda wajib memilih <strong>Rekomendasi Matriks Asesmen</strong> sesuai dengan Mata Pelajaran Anda pada panel rujukan kanan, lalu gunakan tombol <strong>"Impor Semua Rencana"</strong> atau klik tombol <strong>"⚡ Impor"</strong> untuk menyusun jadwal secara otomatis.
+                              </p>
+                              <div className="pt-1.5 text-indigo-600 font-extrabold text-[10px] uppercase tracking-wider flex items-center justify-center gap-1">
+                                <span>👉 Silakan Pilih Pelajaran & Impor di Panel Sebelah Kanan!</span>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : (
+                        jadwalList.map((item) => {
+                          const isEditing = editingJadwalId === item.id;
+                          
+                          if (isEditing && editingJadwalData) {
+                            return (
+                              <tr key={item.id} className="bg-indigo-50/40">
+                                <td className="px-3 py-2">
+                                  <select
+                                    value={editingJadwalData.bulan}
+                                    onChange={(e) => setEditingJadwalData(prev => prev ? ({ ...prev, bulan: e.target.value as any }) : null)}
+                                    className="w-full bg-white border border-slate-200 focus:ring-1 focus:ring-indigo-500 rounded p-1 text-xs outline-none font-bold"
+                                  >
+                                    <option value="Juli">Juli</option>
+                                    <option value="Agustus">Agustus</option>
+                                    <option value="Oktober">Oktober</option>
+                                  </select>
+                                </td>
+                                <td className="px-3 py-2">
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max="5"
+                                    value={editingJadwalData.mingguKe}
+                                    onChange={(e) => setEditingJadwalData(prev => prev ? ({ ...prev, mingguKe: parseInt(e.target.value) || 1 }) : null)}
+                                    className="w-full bg-white border border-slate-200 focus:ring-1 focus:ring-indigo-500 rounded p-1 text-xs outline-none text-center font-bold"
+                                  />
+                                </td>
+                                <td className="px-3 py-2">
+                                  <input
+                                    type="text"
+                                    value={editingJadwalData.elemenMateri}
+                                    onChange={(e) => setEditingJadwalData(prev => prev ? ({ ...prev, elemenMateri: e.target.value }) : null)}
+                                    className="w-full bg-white border border-slate-200 focus:ring-1 focus:ring-indigo-500 rounded p-1 text-xs outline-none font-bold text-indigo-900"
+                                  />
+                                </td>
+                                <td className="px-3 py-2">
+                                  <textarea
+                                    value={editingJadwalData.subElemenMateri}
+                                    onChange={(e) => setEditingJadwalData(prev => prev ? ({ ...prev, subElemenMateri: e.target.value }) : null)}
+                                    className="w-full bg-white border border-slate-200 focus:ring-1 focus:ring-indigo-500 rounded p-1 text-xs outline-none h-16 resize-none text-slate-700"
+                                  />
+                                </td>
+                                <td className="px-3 py-2">
+                                  <textarea
+                                    value={editingJadwalData.kompetensi}
+                                    onChange={(e) => setEditingJadwalData(prev => prev ? ({ ...prev, kompetensi: e.target.value }) : null)}
+                                    className="w-full bg-white border border-slate-200 focus:ring-1 focus:ring-indigo-500 rounded p-1 text-xs outline-none h-16 resize-none italic text-slate-600"
+                                  />
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                  <div className="flex flex-col sm:flex-row items-center justify-center gap-1">
+                                    <button
+                                      onClick={handleSaveEditJadwal}
+                                      className="w-full px-2 py-1 bg-indigo-600 text-white rounded text-[10px] font-bold hover:bg-indigo-700 transition"
+                                    >
+                                      Simpan
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        setEditingJadwalId(null);
+                                        setEditingJadwalData(null);
+                                      }}
+                                      className="w-full px-2 py-1 border border-slate-200 text-slate-500 bg-white rounded text-[10px] font-bold hover:bg-slate-100 transition"
+                                    >
+                                      Batal
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          }
+
+                          return (
+                            <tr key={item.id} className="hover:bg-slate-50/50 transition">
+                              <td className="px-4 py-3.5 font-bold text-slate-900">{item.bulan}</td>
+                              <td className="px-4 py-3.5 text-center">
+                                <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-full text-[10px] font-extrabold">
+                                  Minggu {item.mingguKe}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3.5 font-bold text-indigo-900">{item.elemenMateri}</td>
+                              <td className="px-4 py-3.5 text-slate-700 leading-relaxed max-w-xs">{item.subElemenMateri}</td>
+                              <td className="px-4 py-3.5 text-slate-600 leading-relaxed italic max-w-sm">{item.kompetensi}</td>
+                              <td className="px-4 py-3.5 text-center">
+                                <div className="flex items-center justify-center gap-2">
+                                  <button
+                                    onClick={() => handleStartEditJadwal(item)}
+                                    className="text-indigo-600 hover:text-indigo-900 font-bold text-[11px] hover:underline"
+                                  >
+                                    Edit
+                                  </button>
+                                  <span className="text-slate-200">|</span>
+                                  <button
+                                    onClick={() => handleDeleteJadwal(item.id)}
+                                    className="text-red-500 hover:text-red-700 font-bold text-[11px] hover:underline"
+                                  >
+                                    Hapus
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+              </div>
+
+            </div>
+
+            {/* Right Side Panel: Rekomendasi Matriks Asesmen (Pusmendik) */}
+            <div className="lg:col-span-4 space-y-6">
+              
+              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 space-y-4 sticky top-16">
+                
+                <div className="pb-3 border-b border-slate-100 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
+                      <Sparkles className="h-4 w-4 text-indigo-600 animate-pulse" />
+                      <span>Rekomendasi Matriks Asesmen</span>
+                    </h3>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      Pusmendik standard for {selectedJadwalPresetSubject}
+                    </p>
+                  </div>
+                  <span className="bg-indigo-100 text-indigo-700 text-[10px] font-extrabold px-2 py-0.5 rounded-full">
+                    {(selectedJadwalPresetSubject === 'Matematika' 
+                      ? PUSMENDIK_MATEMATIKA_PRESETS 
+                      : selectedJadwalPresetSubject === 'Bahasa Indonesia' 
+                      ? PUSMENDIK_BAHASA_INDONESIA_PRESETS 
+                      : selectedJadwalPresetSubject === 'Bahasa Inggris'
+                      ? PUSMENDIK_BAHASA_INGGRIS_PRESETS
+                      : selectedJadwalPresetSubject === 'Matematika Tingkat Lanjut'
+                      ? PUSMENDIK_MATEMATIKA_TL_PRESETS
+                      : selectedJadwalPresetSubject === 'Bahasa Indonesia Tingkat Lanjut'
+                      ? PUSMENDIK_BAHASA_INDONESIA_TL_PRESETS
+                      : selectedJadwalPresetSubject === 'Bahasa Inggris Tingkat Lanjut'
+                      ? PUSMENDIK_BAHASA_INGGRIS_TL_PRESETS
+                      : selectedJadwalPresetSubject === 'Fisika'
+                      ? PUSMENDIK_FISIKA_PRESETS
+                      : selectedJadwalPresetSubject === 'Kimia'
+                      ? PUSMENDIK_KIMIA_PRESETS
+                      : selectedJadwalPresetSubject === 'Biologi'
+                      ? PUSMENDIK_BIOLOGI_PRESETS
+                      : selectedJadwalPresetSubject === 'PPKN'
+                      ? PUSMENDIK_PPKN_PRESETS
+                      : selectedJadwalPresetSubject === 'Ekonomi'
+                      ? PUSMENDIK_EKONOMI_PRESETS
+                      : selectedJadwalPresetSubject === 'Geografi'
+                      ? PUSMENDIK_GEOGRAFI_PRESETS
+                      : selectedJadwalPresetSubject === 'Sosiologi'
+                      ? PUSMENDIK_SOSIOLOGI_PRESETS
+                      : selectedJadwalPresetSubject === 'Sejarah Tingkat Lanjut'
+                      ? PUSMENDIK_SEJARAH_TL_PRESETS
+                      : selectedJadwalPresetSubject === 'Antropologi'
+                      ? PUSMENDIK_ANTROPOLOGI_PRESETS
+                      : selectedJadwalPresetSubject === 'Bahasa Jepang'
+                      ? PUSMENDIK_BAHASA_JEPANG_PRESETS
+                      : PUSMENDIK_PKK_PRESETS
+                    ).length} Rujukan
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Pilih mata pelajaran di bawah ini, lalu salin per materi atau impor sekaligus untuk menyusun jadwal secara otomatis.
+                </p>
+
+                {/* Subject Buttons Grid */}
+                <div className="space-y-1.5">
+                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Pilih Pelajaran:</label>
+                  <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto p-1.5 bg-slate-50 border border-slate-100 rounded-xl">
+                    {[
+                      { id: 'Matematika', label: '📐 Matematika' },
+                      { id: 'Bahasa Indonesia', label: '🇮🇩 B. Indonesia' },
+                      { id: 'Bahasa Inggris', label: '🇬🇧 B. Inggris' },
+                      { id: 'Matematika Tingkat Lanjut', label: '🚀 Mat Lanjut' },
+                      { id: 'Bahasa Indonesia Tingkat Lanjut', label: '✍️ Indo Lanjut' },
+                      { id: 'Bahasa Inggris Tingkat Lanjut', label: '🗣️ Inggris Lanjut' },
+                      { id: 'Fisika', label: '⚛️ Fisika' },
+                      { id: 'Kimia', label: '🧪 Kimia' },
+                      { id: 'Biologi', label: '🧬 Biologi' },
+                      { id: 'PPKN', label: '🗳️ PPKN' },
+                      { id: 'Ekonomi', label: '💰 Ekonomi' },
+                      { id: 'Geografi', label: '🌍 Geografi' },
+                      { id: 'Sosiologi', label: '👥 Sosiologi' },
+                      { id: 'Sejarah Tingkat Lanjut', label: '📜 Sejarah Lanjut' },
+                      { id: 'Antropologi', label: '🗿 Antropologi' },
+                      { id: 'Bahasa Jepang', label: '🎌 B. Jepang' },
+                      { id: 'Produk Kreatif dan Kewirausahaan', label: '💼 Kewirausahaan' }
+                    ].map((subj) => (
+                      <button
+                        key={subj.id}
+                        onClick={() => setSelectedJadwalPresetSubject(subj.id as any)}
+                        className={`px-2 py-1.5 rounded-lg text-[10px] font-bold text-left transition truncate ${
+                          selectedJadwalPresetSubject === subj.id
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+                        }`}
+                      >
+                        {subj.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Import All Button */}
+                <button
+                  onClick={handleImportAllJadwalPresets}
+                  className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition shadow-sm"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Impor Semua {(selectedJadwalPresetSubject === 'Matematika' 
+                    ? PUSMENDIK_MATEMATIKA_PRESETS 
+                    : selectedJadwalPresetSubject === 'Bahasa Indonesia' 
+                    ? PUSMENDIK_BAHASA_INDONESIA_PRESETS 
+                    : selectedJadwalPresetSubject === 'Bahasa Inggris'
+                    ? PUSMENDIK_BAHASA_INGGRIS_PRESETS
+                    : selectedJadwalPresetSubject === 'Matematika Tingkat Lanjut'
+                    ? PUSMENDIK_MATEMATIKA_TL_PRESETS
+                    : selectedJadwalPresetSubject === 'Bahasa Indonesia Tingkat Lanjut'
+                    ? PUSMENDIK_BAHASA_INDONESIA_TL_PRESETS
+                    : selectedJadwalPresetSubject === 'Bahasa Inggris Tingkat Lanjut'
+                    ? PUSMENDIK_BAHASA_INGGRIS_TL_PRESETS
+                    : selectedJadwalPresetSubject === 'Fisika'
+                    ? PUSMENDIK_FISIKA_PRESETS
+                    : selectedJadwalPresetSubject === 'Kimia'
+                    ? PUSMENDIK_KIMIA_PRESETS
+                    : selectedJadwalPresetSubject === 'Biologi'
+                    ? PUSMENDIK_BIOLOGI_PRESETS
+                    : selectedJadwalPresetSubject === 'PPKN'
+                    ? PUSMENDIK_PPKN_PRESETS
+                    : selectedJadwalPresetSubject === 'Ekonomi'
+                    ? PUSMENDIK_EKONOMI_PRESETS
+                    : selectedJadwalPresetSubject === 'Geografi'
+                    ? PUSMENDIK_GEOGRAFI_PRESETS
+                    : selectedJadwalPresetSubject === 'Sosiologi'
+                    ? PUSMENDIK_SOSIOLOGI_PRESETS
+                    : selectedJadwalPresetSubject === 'Sejarah Tingkat Lanjut'
+                    ? PUSMENDIK_SEJARAH_TL_PRESETS
+                    : selectedJadwalPresetSubject === 'Antropologi'
+                    ? PUSMENDIK_ANTROPOLOGI_PRESETS
+                    : selectedJadwalPresetSubject === 'Bahasa Jepang'
+                    ? PUSMENDIK_BAHASA_JEPANG_PRESETS
+                    : PUSMENDIK_PKK_PRESETS
+                  ).length} Rencana</span>
+                </button>
+
+                {/* List of references */}
+                <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+                  {(selectedJadwalPresetSubject === 'Matematika' 
+                    ? PUSMENDIK_MATEMATIKA_PRESETS 
+                    : selectedJadwalPresetSubject === 'Bahasa Indonesia' 
+                    ? PUSMENDIK_BAHASA_INDONESIA_PRESETS 
+                    : selectedJadwalPresetSubject === 'Bahasa Inggris'
+                    ? PUSMENDIK_BAHASA_INGGRIS_PRESETS
+                    : selectedJadwalPresetSubject === 'Matematika Tingkat Lanjut'
+                    ? PUSMENDIK_MATEMATIKA_TL_PRESETS
+                    : selectedJadwalPresetSubject === 'Bahasa Indonesia Tingkat Lanjut'
+                    ? PUSMENDIK_BAHASA_INDONESIA_TL_PRESETS
+                    : selectedJadwalPresetSubject === 'Bahasa Inggris Tingkat Lanjut'
+                    ? PUSMENDIK_BAHASA_INGGRIS_TL_PRESETS
+                    : selectedJadwalPresetSubject === 'Fisika'
+                    ? PUSMENDIK_FISIKA_PRESETS
+                    : selectedJadwalPresetSubject === 'Kimia'
+                    ? PUSMENDIK_KIMIA_PRESETS
+                    : selectedJadwalPresetSubject === 'Biologi'
+                    ? PUSMENDIK_BIOLOGI_PRESETS
+                    : selectedJadwalPresetSubject === 'PPKN'
+                    ? PUSMENDIK_PPKN_PRESETS
+                    : selectedJadwalPresetSubject === 'Ekonomi'
+                    ? PUSMENDIK_EKONOMI_PRESETS
+                    : selectedJadwalPresetSubject === 'Geografi'
+                    ? PUSMENDIK_GEOGRAFI_PRESETS
+                    : selectedJadwalPresetSubject === 'Sosiologi'
+                    ? PUSMENDIK_SOSIOLOGI_PRESETS
+                    : selectedJadwalPresetSubject === 'Sejarah Tingkat Lanjut'
+                    ? PUSMENDIK_SEJARAH_TL_PRESETS
+                    : selectedJadwalPresetSubject === 'Antropologi'
+                    ? PUSMENDIK_ANTROPOLOGI_PRESETS
+                    : selectedJadwalPresetSubject === 'Bahasa Jepang'
+                    ? PUSMENDIK_BAHASA_JEPANG_PRESETS
+                    : PUSMENDIK_PKK_PRESETS
+                  ).map((preset, idx) => (
+                    <div 
+                      key={idx}
+                      className="p-3 bg-slate-50 hover:bg-indigo-50/50 border border-slate-200 hover:border-indigo-200 rounded-xl transition text-[11px] space-y-2"
+                    >
+                      <div className="flex justify-between items-start gap-1">
+                        <span className="font-extrabold text-indigo-950 block">
+                          {preset.elemenMateri}
+                        </span>
+                        
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => {
+                              // Auto-fill into new row form
+                              setNewJadwal({
+                                bulan: 'Juli',
+                                mingguKe: 1,
+                                elemenMateri: preset.elemenMateri,
+                                subElemenMateri: preset.subElemenMateri,
+                                kompetensi: preset.kompetensi
+                              });
+                              setIsAddingJadwal(true);
+                              
+                              // Scroll smoothly to form
+                              const element = document.getElementById('jadwal-panel');
+                              if (element) {
+                                element.scrollIntoView({ behavior: 'smooth' });
+                              }
+                            }}
+                            className="bg-slate-200 text-slate-800 font-bold px-1.5 py-0.5 rounded text-[10px] hover:bg-slate-300 transition shrink-0"
+                            title="Salin ke Form Tambah Baru"
+                          >
+                            + Form
+                          </button>
+                          
+                          <button
+                            onClick={() => {
+                              // Direct append to list
+                              const item: JadwalItem = {
+                                id: `jadwal-preset-${Date.now()}-${idx}`,
+                                bulan: 'Juli',
+                                mingguKe: 1,
+                                elemenMateri: preset.elemenMateri,
+                                subElemenMateri: preset.subElemenMateri,
+                                kompetensi: preset.kompetensi
+                              };
+                              setJadwalList(prev => [...prev, item]);
+                            }}
+                            className="bg-indigo-600 text-white font-bold px-1.5 py-0.5 rounded text-[10px] hover:bg-indigo-700 transition shrink-0"
+                            title="Impor langsung ke baris jadwal"
+                          >
+                            ⚡ Impor
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1 text-slate-600 leading-relaxed">
+                        <p><b>Sub-materi:</b> {preset.subElemenMateri}</p>
+                        <p className="italic text-slate-500"><b>Kompetensi:</b> {preset.kompetensi}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              
+              </div>
+
+            </div>
+
+          </div>
+        )}
+
         {/* Tab 5: Manajemen Pengguna */}
         {activeTab === 'users' && userRole === 'admin' && (
           <div id="users-panel" className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-fadeIn no-print">
@@ -7423,6 +8365,158 @@ PANDUAN EKSTRA:
                   className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition"
                 >
                   Ya, Keluar
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Custom Confirmation Modal: Delete Single Jadwal */}
+        {jadwalToDelete && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[999] flex items-center justify-center p-4 no-print"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-white border border-slate-200 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl p-6 relative"
+            >
+              <div className="flex items-center gap-3.5 mb-4 text-red-600">
+                <div className="h-10 w-10 rounded-2xl bg-red-50 flex items-center justify-center">
+                  <Trash2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-950">Hapus Rencana Belajar?</h3>
+                  <p className="text-xs text-slate-500">Konfirmasi pembatalan baris jadwal</p>
+                </div>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 text-xs space-y-2 mb-6">
+                <div className="flex justify-between border-b border-slate-100 pb-2">
+                  <span className="text-slate-500 font-medium">Bulan / Periode:</span>
+                  <span className="text-slate-900 font-extrabold">{jadwalToDelete.bulan}</span>
+                </div>
+                <div className="flex justify-between border-b border-slate-100 pb-2">
+                  <span className="text-slate-500 font-medium">Minggu Ke:</span>
+                  <span className="text-slate-900 font-extrabold">Minggu {jadwalToDelete.mingguKe}</span>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-slate-500 font-medium block">Elemen / Materi:</span>
+                  <p className="text-indigo-950 font-bold leading-relaxed">{jadwalToDelete.elemenMateri}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  onClick={() => setJadwalToDelete(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={executeDeleteJadwal}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                >
+                  Ya, Hapus Rencana
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Custom Confirmation Modal: Clear All Jadwal */}
+        {showClearJadwalConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[999] flex items-center justify-center p-4 no-print"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-white border border-slate-200 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl p-6 relative"
+            >
+              <div className="flex items-center gap-3.5 mb-4 text-red-600">
+                <div className="h-10 w-10 rounded-2xl bg-red-50 flex items-center justify-center">
+                  <Trash2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-950">Kosongkan Semua Jadwal?</h3>
+                  <p className="text-xs text-slate-500">Konfirmasi pembersihan penuh tabel</p>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-600 leading-relaxed mb-6">
+                Apakah Anda yakin ingin menghapus <strong>seluruh rencana pembelajaran</strong> yang ada pada tabel? 
+                Seluruh baris jadwal Anda saat ini akan dibersihkan secara permanen. Anda dapat memulihkannya lagi dengan mengimpor rekomendasi matriks asesmen yang sesuai di panel sebelah kanan.
+              </p>
+
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  onClick={() => setShowClearJadwalConfirm(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={executeClearJadwal}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-750 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                >
+                  Ya, Kosongkan Semua
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Custom Confirmation Modal: Import All Presets */}
+        {showImportPresetsConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[999] flex items-center justify-center p-4 no-print"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              className="bg-white border border-slate-200 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl p-6 relative"
+            >
+              <div className="flex items-center gap-3.5 mb-4 text-indigo-600">
+                <div className="h-10 w-10 rounded-2xl bg-indigo-50 flex items-center justify-center">
+                  <Sparkles className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-950">Impor Semua Rencana?</h3>
+                  <p className="text-xs text-slate-500">Mata Pelajaran: {showImportPresetsConfirm.subject}</p>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-600 leading-relaxed mb-6">
+                Apakah Anda yakin ingin mengimpor sekaligus seluruh <strong>{showImportPresetsConfirm.count} rencana pembelajaran</strong> standar Pusmendik <strong>{showImportPresetsConfirm.subject}</strong> ke tabel jadwal Anda?
+                <br /><br />
+                Sistem akan secara otomatis mendistribusikannya secara merata ke minggu-minggu pada bulan <strong>Juli, Agustus, dan Oktober</strong>.
+              </p>
+
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  onClick={() => setShowImportPresetsConfirm(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={() => executeImportAllJadwalPresets(showImportPresetsConfirm.presets)}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                >
+                  Ya, Impor Semua
                 </button>
               </div>
             </motion.div>

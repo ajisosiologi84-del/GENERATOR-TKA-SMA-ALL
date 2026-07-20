@@ -58,3 +58,13 @@ export interface GeneratorConfig {
   stimulusKonten: string[]; // selected stimulus modes
   kualitasChecklist: string[]; // selected quality checklist
 }
+
+export interface JadwalItem {
+  id: string;
+  bulan: 'Juli' | 'Agustus' | 'Oktober';
+  mingguKe: number;
+  elemenMateri: string;
+  subElemenMateri: string;
+  kompetensi: string;
+}
+
