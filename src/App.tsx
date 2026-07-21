@@ -2144,6 +2144,7 @@ export default function App() {
     };
   });
   const [showApiKey, setShowApiKey] = useState(false);
+  const [showApiKeySaved, setShowApiKeySaved] = useState(false);
 
   const handleSetAiMode = (mode: 'server' | 'client') => {
     setAiConfig(prev => ({ ...prev, mode }));
@@ -5225,26 +5226,54 @@ PANDUAN EKSTRA:
                             Dapatkan API Key Gratis ↗
                           </a>
                         </div>
-                        <div className="relative">
-                          <input
-                            type={showApiKey ? "text" : "password"}
-                            value={aiConfig.apiKey}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setAiConfig(prev => ({ ...prev, apiKey: val }));
-                              localStorage.setItem('gemini_api_key', val);
-                            }}
-                            placeholder="AIzaSy..."
-                            className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg pl-3 pr-10 py-1.5 text-xs font-mono"
-                          />
+                        <div className="flex gap-2">
+                          <div className="relative flex-1">
+                            <input
+                              type={showApiKey ? "text" : "password"}
+                              value={aiConfig.apiKey}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setAiConfig(prev => ({ ...prev, apiKey: val }));
+                                localStorage.setItem('gemini_api_key', val);
+                              }}
+                              placeholder="AIzaSy..."
+                              className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg pl-3 pr-10 py-1.5 text-xs font-mono"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowApiKey(!showApiKey)}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                            >
+                              {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                          </div>
                           <button
                             type="button"
-                            onClick={() => setShowApiKey(!showApiKey)}
-                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                            onClick={() => {
+                              localStorage.setItem('gemini_api_key', aiConfig.apiKey);
+                              setShowApiKeySaved(true);
+                              setTimeout(() => setShowApiKeySaved(false), 3000);
+                            }}
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold px-3.5 py-1.5 rounded-lg flex items-center gap-1 transition shadow-sm hover:shadow active:scale-95 flex-shrink-0"
                           >
-                            {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            <Save className="h-3.5 w-3.5" />
+                            <span>SIMPAN</span>
                           </button>
                         </div>
+
+                        <AnimatePresence>
+                          {showApiKeySaved && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0, y: -4 }}
+                              animate={{ opacity: 1, height: 'auto', y: 0 }}
+                              exit={{ opacity: 0, height: 0, y: -4 }}
+                              className="flex items-center gap-1.5 text-[10.5px] font-bold text-emerald-600 mt-1 bg-emerald-50 border border-emerald-200/50 py-1 px-2.5 rounded-lg overflow-hidden"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                              <span>Kunci API berhasil disimpan secara aman di browser!</span>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
 
                       <div className="space-y-1.5">
@@ -8577,22 +8606,24 @@ PANDUAN EKSTRA:
                                   </button>
                                 </div>
                               ) : currentUser ? (
-                                <>
+                                <div className="flex gap-1.5 items-center">
                                   <button
                                     onClick={() => handleEditQuestion(q)}
-                                    className="text-slate-600 hover:text-indigo-600 p-1 hover:bg-slate-200 rounded transition"
-                                    title="Edit soal"
+                                    className="flex items-center gap-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs"
+                                    title="Ubah Butir Soal"
                                   >
-                                    <Sliders className="h-3 w-3" />
+                                    <Edit className="h-3 w-3" />
+                                    <span>Ubah Butir Soal</span>
                                   </button>
                                   <button
                                     onClick={() => setDeletingQuestionId(q.id)}
-                                    className="text-slate-600 hover:text-red-600 p-1 hover:bg-slate-200 rounded transition"
-                                    title="Hapus soal"
+                                    className="flex items-center gap-1 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs"
+                                    title="Hapus Soal"
                                   >
                                     <Trash2 className="h-3 w-3" />
+                                    <span>Hapus</span>
                                   </button>
-                                </>
+                                </div>
                               ) : null}
                             </div>
                           </div>
@@ -8622,22 +8653,24 @@ PANDUAN EKSTRA:
                                 </button>
                               </div>
                             ) : currentUser ? (
-                              <>
+                              <div className="flex gap-1.5 items-center">
                                 <button
                                   onClick={() => handleEditQuestion(q)}
-                                  className="text-slate-400 hover:text-indigo-600 p-0.5 hover:bg-slate-100 rounded transition"
-                                  title="Edit soal"
+                                  className="flex items-center gap-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs"
+                                  title="Ubah Butir Soal"
                                 >
-                                  <Sliders className="h-3 w-3" />
+                                  <Edit className="h-3 w-3" />
+                                  <span>Ubah Butir Soal</span>
                                 </button>
                                 <button
                                   onClick={() => setDeletingQuestionId(q.id)}
-                                  className="text-slate-400 hover:text-red-600 p-0.5 hover:bg-slate-100 rounded transition"
-                                  title="Hapus soal"
+                                  className="flex items-center gap-1 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs"
+                                  title="Hapus Soal"
                                 >
                                   <Trash2 className="h-3 w-3" />
+                                  <span>Hapus</span>
                                 </button>
-                              </>
+                              </div>
                             ) : null}
                           </div>
                         </div>
