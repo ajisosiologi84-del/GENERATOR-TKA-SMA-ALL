@@ -1702,6 +1702,7 @@ export default function App() {
   // Custom confirmation modals states
   const [jadwalToDelete, setJadwalToDelete] = useState<JadwalItem | null>(null);
   const [showClearJadwalConfirm, setShowClearJadwalConfirm] = useState(false);
+  const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
   const [showImportPresetsConfirm, setShowImportPresetsConfirm] = useState<{ count: number; subject: string; presets: any[] } | null>(null);
 
   // State for preset subject selection in the Jadwal UI
@@ -4303,6 +4304,26 @@ PANDUAN EKSTRA:
     } catch (err: any) {
       console.error("Gagal menghapus soal:", err);
       alert(`Gagal menghapus: ${err.message}`);
+    }
+  };
+
+  const handleDeleteAllQuestions = async () => {
+    try {
+      if (questions.length === 0) {
+        alert("Tidak ada soal untuk dihapus.");
+        return;
+      }
+      const batch = writeBatch(db);
+      questions.forEach((q) => {
+        batch.delete(doc(db, 'questions', q.id));
+      });
+      await batch.commit();
+      setShowDeleteAllConfirm(false);
+      alert("Semua butir soal berhasil dihapus.");
+    } catch (err: any) {
+      setShowDeleteAllConfirm(false);
+      console.error("Gagal menghapus semua soal:", err);
+      handleFirestoreError(err, OperationType.DELETE, 'questions');
     }
   };
 
@@ -7310,6 +7331,52 @@ PANDUAN EKSTRA:
                         <FileText className="h-4 w-4" />
                         <span>Unduh / Cetak Versi Word (DOC)</span>
                       </button>
+                    </div>
+                  </div>
+
+                  {/* Full-width System/Reset Data section */}
+                  <div className="lg:col-span-12 border-t border-slate-800/80 pt-4 mt-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div className="space-y-1">
+                      <span className="text-[11px] font-bold text-rose-400 uppercase tracking-widest block border-l-2 border-rose-500 pl-2">
+                        Utilitas & Manajemen Data
+                      </span>
+                      <p className="text-[11px] text-slate-400">
+                        Hapus semua butir soal TKA SMA yang tersimpan untuk memudahkan Anda melakukan request pembuatan paket soal yang baru dari awal.
+                      </p>
+                    </div>
+                    <div className="flex-shrink-0">
+                      {!showDeleteAllConfirm ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowDeleteAllConfirm(true)}
+                          className="bg-rose-950/40 hover:bg-rose-900/40 text-rose-400 hover:text-rose-300 border border-rose-800/60 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 transition w-full sm:w-auto justify-center cursor-pointer"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          <span>Hapus Semua Soal</span>
+                        </button>
+                      ) : (
+                        <div className="flex flex-col sm:flex-row items-center gap-3 bg-rose-950/20 border border-rose-900/50 p-2.5 rounded-xl">
+                          <span className="text-xs font-medium text-rose-300 px-2 text-center sm:text-left">
+                            Yakin ingin menghapus {questions.length} soal?
+                          </span>
+                          <div className="flex items-center gap-2 w-full sm:w-auto">
+                            <button
+                              type="button"
+                              onClick={handleDeleteAllQuestions}
+                              className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs transition flex-1 sm:flex-none cursor-pointer"
+                            >
+                              Ya, Hapus Semua
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setShowDeleteAllConfirm(false)}
+                              className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold px-3 py-1.5 rounded-lg text-xs transition flex-1 sm:flex-none cursor-pointer"
+                            >
+                              Batal
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </motion.div>
