@@ -54,6 +54,7 @@ import {
   onSnapshot, 
   writeBatch,
   deleteDoc,
+  updateDoc,
   query,
   where
 } from 'firebase/firestore';
@@ -1521,6 +1522,7 @@ export default function App() {
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState<'admin' | 'user'>('user');
+  const [newUserMataPelajaran, setNewUserMataPelajaran] = useState<string>('Sosiologi');
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [userError, setUserError] = useState<string | null>(null);
   const [userSuccess, setUserSuccess] = useState<string | null>(null);
@@ -1819,135 +1821,195 @@ export default function App() {
     setShowClearJadwalConfirm(false);
   };
 
-  const seedDefaultData = async (userId: string) => {
+  const getPresetsForSubject = (subject: string) => {
+    switch (subject) {
+      case 'Matematika':
+        return PUSMENDIK_MATEMATIKA_PRESETS;
+      case 'Bahasa Indonesia':
+        return PUSMENDIK_BAHASA_INDONESIA_PRESETS;
+      case 'Bahasa Inggris':
+        return PUSMENDIK_BAHASA_INGGRIS_PRESETS;
+      case 'Matematika Tingkat Lanjut':
+        return PUSMENDIK_MATEMATIKA_TL_PRESETS;
+      case 'Bahasa Indonesia Tingkat Lanjut':
+        return PUSMENDIK_BAHASA_INDONESIA_TL_PRESETS;
+      case 'Bahasa Inggris Tingkat Lanjut':
+        return PUSMENDIK_BAHASA_INGGRIS_TL_PRESETS;
+      case 'Fisika':
+        return PUSMENDIK_FISIKA_PRESETS;
+      case 'Kimia':
+        return PUSMENDIK_KIMIA_PRESETS;
+      case 'Biologi':
+        return PUSMENDIK_BIOLOGI_PRESETS;
+      case 'PPKN':
+      case 'Pendidikan Pancasila dan Kewarganegaraan':
+        return PUSMENDIK_PPKN_PRESETS;
+      case 'Ekonomi':
+        return PUSMENDIK_EKONOMI_PRESETS;
+      case 'Geografi':
+        return PUSMENDIK_GEOGRAFI_PRESETS;
+      case 'Sosiologi':
+        return PUSMENDIK_SOSIOLOGI_PRESETS;
+      case 'Sejarah':
+      case 'Sejarah Tingkat Lanjut':
+        return PUSMENDIK_SEJARAH_TL_PRESETS;
+      case 'Antropologi':
+        return PUSMENDIK_ANTROPOLOGI_PRESETS;
+      case 'Bahasa Jepang':
+        return PUSMENDIK_BAHASA_JEPANG_PRESETS;
+      default:
+        return PUSMENDIK_PKK_PRESETS;
+    }
+  };
+
+  const seedDefaultData = async (userId: string, targetSubject: string = 'Sosiologi') => {
     try {
       const batch = writeBatch(db);
       
-      const defaultKisiList: KisiKisiItem[] = [
-        {
-          id: `kisi-sosiologi-ref-1-${userId}`,
+      let defaultKisiList: KisiKisiItem[] = [];
+      if (targetSubject === 'Sosiologi') {
+        defaultKisiList = [
+          {
+            id: `kisi-sosiologi-ref-1-${userId}`,
+            userId: userId,
+            no: 1,
+            bentukSoal: "pilihan_ganda_sederhana",
+            levelKognitif: "level_1",
+            elemenMateri: "Sosiologi sebagai Ilmu",
+            subElemenMateri: "Pengertian dan perkembangan sosiologi dan manfaat sosiologi dalam kehidupan masyarakat.",
+            kompetensi: "Mendeskripsikan dan menganalisis pengertian dan perkembangan serta manfaat sosiologi sebagai ilmu pengetahuan.",
+            batasanCatatan: "Sejarah sosiologi, objek kajian sosiologi, fungsi dan manfaat sosiologi bagi masyarakat.",
+            jumlahSoal: 1
+          },
+          {
+            id: `kisi-sosiologi-ref-2-${userId}`,
+            userId: userId,
+            no: 2,
+            bentukSoal: "kategori",
+            levelKognitif: "level_2",
+            elemenMateri: "Hubungan dan Gejala Sosial",
+            subElemenMateri: "Ragam gejala sosial.",
+            kompetensi: "Menjelaskan ragam gejala sosial di lingkungan sekitar.",
+            batasanCatatan: "Perilaku menyimpang, masalah sosial, sosiologi perkotaan/pedesaan, dan dampaknya bagi keteraturan sosial.",
+            jumlahSoal: 1
+          },
+          {
+            id: `kisi-sosiologi-ref-3-${userId}`,
+            userId: userId,
+            no: 3,
+            bentukSoal: "mcma",
+            levelKognitif: "level_3",
+            elemenMateri: "Penelitian Sosial",
+            subElemenMateri: "Langkah penelitian sosial dan metode penelitian.",
+            kompetensi: "Menjelaskan dan menganalisis berbagai langkah dan metode penelitian sosial.",
+            batasanCatatan: "Rancangan penelitian, jenis penelitian (kualitatif/kuantitatif), teknik sampling, pengumpulan data, dan penyusunan laporan.",
+            jumlahSoal: 1
+          }
+        ];
+      } else {
+        const presets = getPresetsForSubject(targetSubject).slice(0, 3);
+        defaultKisiList = presets.map((preset, idx) => ({
+          id: `kisi-${targetSubject.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-ref-${idx + 1}-${userId}`,
           userId: userId,
-          no: 1,
-          bentukSoal: "pilihan_ganda_sederhana",
-          levelKognitif: "level_1",
-          elemenMateri: "Sosiologi sebagai Ilmu",
-          subElemenMateri: "Pengertian dan perkembangan sosiologi dan manfaat sosiologi dalam kehidupan masyarakat.",
-          kompetensi: "Mendeskripsikan dan menganalisis pengertian dan perkembangan serta manfaat sosiologi sebagai ilmu pengetahuan.",
-          batasanCatatan: "Sejarah sosiologi, objek kajian sosiologi, fungsi dan manfaat sosiologi bagi masyarakat.",
+          no: idx + 1,
+          bentukSoal: idx === 0 ? "pilihan_ganda_sederhana" : idx === 1 ? "kategori" : "mcma",
+          levelKognitif: idx === 0 ? "level_1" : idx === 1 ? "level_2" : "level_3",
+          elemenMateri: preset.elemenMateri,
+          subElemenMateri: preset.subElemenMateri,
+          kompetensi: preset.kompetensi,
+          batasanCatatan: preset.batasanCatatan,
           jumlahSoal: 1
-        },
-        {
-          id: `kisi-sosiologi-ref-2-${userId}`,
-          userId: userId,
-          no: 2,
-          bentukSoal: "kategori",
-          levelKognitif: "level_2",
-          elemenMateri: "Hubungan dan Gejala Sosial",
-          subElemenMateri: "Ragam gejala sosial.",
-          kompetensi: "Menjelaskan ragam gejala sosial di lingkungan sekitar.",
-          batasanCatatan: "Perilaku menyimpang, masalah sosial, sosiologi perkotaan/pedesaan, dan dampaknya bagi keteraturan sosial.",
-          jumlahSoal: 1
-        },
-        {
-          id: `kisi-sosiologi-ref-3-${userId}`,
-          userId: userId,
-          no: 3,
-          bentukSoal: "mcma",
-          levelKognitif: "level_3",
-          elemenMateri: "Penelitian Sosial",
-          subElemenMateri: "Langkah penelitian sosial dan metode penelitian.",
-          kompetensi: "Menjelaskan dan menganalisis berbagai langkah dan metode penelitian sosial.",
-          batasanCatatan: "Rancangan penelitian, jenis penelitian (kualitatif/kuantitatif), teknik sampling, pengumpulan data, dan penyusunan laporan.",
-          jumlahSoal: 1
-        }
-      ];
+        }));
+      }
 
       defaultKisiList.forEach((item) => {
         batch.set(doc(db, 'kisi_kisi', item.id), item);
       });
 
-      const defaultQuestions: Question[] = [
-        {
-          id: `question-sosiologi-ref-1-${userId}`,
-          userId: userId,
-          noSoal: 1,
-          kisiKisiId: `kisi-sosiologi-ref-1-${userId}`,
-          kompetensi: "Mendeskripsikan dan menganalisis pengertian dan perkembangan serta manfaat sosiologi sebagai ilmu pengetahuan.",
-          subKompetensi: "Mengidentifikasi objek kajian sosiologi di era masyarakat digital.",
-          bentukSoal: "pilihan_ganda_sederhana",
-          stimulus: "Sosiologi merupakan ilmu pengetahuan murni yang membatasi diri pada apa yang nyata-nyata terjadi saat ini (das sein) dan bukan membicarakan apa yang seharusnya terjadi (das sollen). Di tengah era disrupsi teknologi digital saat ini, berbagai fenomena interaksi sosial baru bermunculan, mulai dari maraknya penggunaan media sosial, kecanduan gawai, hingga pola komunikasi virtual di kalangan remaja yang menggeser norma-norma konvensional di masyarakat.",
-          soal: "Berdasarkan ilustrasi di atas, objek kajian sosiologi yang paling tepat ditunjukkan oleh pernyataan...",
-          opsi: [
-            "A. Dampak radiasi gelombang elektromagnetik gawai terhadap kesehatan mata dan fisik remaja secara klinis.",
-            "B. Kecanduan teknologi yang mengubah pola interaksi, cara berpikir, dan perilaku sosial di kalangan remaja dalam kehidupan sehari-hari.",
-            "C. Kerusakan jaringan infrastruktur internet nasional akibat dari maraknya serangan keamanan siber (cyber attack).",
-            "D. Penurunan nilai tukar mata uang asing yang memengaruhi harga jual gawai di pasar lokal secara signifikan.",
-            "E. Perancangan algoritma kecerdasan buatan pada aplikasi media sosial untuk meningkatkan efisiensi komputasi."
-          ],
-          kunciJawaban: "B",
-          pembahasan: "Objek kajian sosiologi berpusat pada masyarakat dan segala fenomena interaksi sosial serta gejala sosial yang terjadi di dalamnya. Dampak sosial kemajuan teknologi (kecanduan gawai yang mengubah pola interaksi, cara berpikir, dan perilaku sosial remaja) merupakan gejala sosial nyata yang menjadi objek kajian sosiologi (das sein). Pilihan lainnya berada di luar ranah kajian sosiologi, seperti kesehatan fisik/klinis (A), teknik informatika/cyber (C & E), dan ekonomi makro (D).",
-          kataKunci: "Objek Kajian Sosiologi, Gejala Sosial, Disrupsi Teknologi"
-        },
-        {
-          id: `question-sosiologi-ref-2-${userId}`,
-          userId: userId,
-          noSoal: 2,
-          kisiKisiId: `kisi-sosiologi-ref-2-${userId}`,
-          kompetensi: "Menjelaskan ragam gejala sosial di lingkungan sekitar.",
-          subKompetensi: "Menerapkan konsep sosialisasi dan ragam gejala sosial terkait pembatasan screen-time pada anak.",
-          bentukSoal: "kategori",
-          stimulus: "Perhatikan anjuran durasi aman layar (screen-time) bagi anak-anak berikut ini!\nMenurut rekomendasi para ahli evaluasi perkembangan anak, anak usia 0 sampai 1,5 tahun disarankan sama sekali tidak terpapar layar gawai (0 jam). Anak usia 1,5 sampai 2 tahun diperbolehkan mengakses program yang berkualitas tinggi maksimal selama 1 jam dengan pendampingan ketat oleh orang tua. Anak usia 2 sampai 5 tahun juga dibatasi maksimal 1 jam per hari dengan pendampingan, sementara anak di atas 5 tahun harus memiliki batas waktu penggunaan gawai yang konsisten dan seimbang demi menjaga kesehatan fisik dan mental mereka.",
-          soal: "Evaluasilah kesesuaian pernyataan terkait gejala penggunaan gawai pada anak berdasarkan anjuran tersebut! Tentukan SESUAI atau TIDAK SESUAI untuk setiap pernyataan berikut.",
-          opsi: [
-            "Pernyataan 1: Penggunaan gawai pada anak usia dini perlu diawasi ketat oleh orang tua agar proses sosialisasi primer anak tidak terhambat secara negatif.",
-            "Pernyataan 2: Anak berusia 1 tahun diperbolehkan bermain gawai sendiri tanpa pendampingan asalkan kontennya edukatif dengan batas waktu maksimal 1 jam per hari.",
-            "Pola asuh yang terlalu longgar terhadap akses teknologi digital dapat mengganggu pembentukan karakter dan kepribadian sosial anak.",
-            "Pembatasan waktu layar secara konsisten bagi anak usia di atas 5 tahun dapat mengurangi risiko deviasi sosial berupa kecanduan gawai."
-          ],
-          kunciJawaban: "SESUAI, TIDAK SESUAI, SESUAI, SESUAI",
-          pembahasan: "- Pernyataan 1 [SESUAI]: Sesuai dengan anjuran dalam stimulus bahwa pendampingan orang tua sangat krusial dalam masa sosialisasi primer anak usia dini.\n- Pernyataan 2 [TIDAK SESUAI]: Anak usia 1 tahun (berada di rentang 0-1,5 tahun) direkomendasikan sama sekali tidak terpapar layar (0 jam), serta tidak boleh dilepas bermain gawai sendiri.\n- Pernyataan 3 [SESUAI]: Sesuai dengan konsep sosiologi bahwa pengawasan/pendampingan penting untuk mencegah dampak negatif pembentukan kepribadian akibat paparan gawai yang bebas.\n- Pernyataan 4 [SESUAI]: Pembatasan waktu layar secara konsisten dan seimbang bagi anak di atas 5 tahun membantu mencegah risiko penyimpangan berupa kecanduan gawai.",
-          kataKunci: "Sosialisasi, Pola Asuh, Gejala Sosial, Screen-Time"
-        },
-        {
-          id: `question-sosiologi-ref-3-${userId}`,
-          userId: userId,
-          noSoal: 3,
-          kisiKisiId: `kisi-sosiologi-ref-3-${userId}`,
-          kompetensi: "Menjelaskan dan menganalisis berbagai langkah dan metode penelitian sosial.",
-          subKompetensi: "Menganalisis rancangan metode penelitian sosial kuantitatif dan menyempurnakannya secara metodologis.",
-          bentukSoal: "mcma",
-          stimulus: "Seorang peneliti sosiologi SMA ingin meneliti pengaruh intensitas pergaulan kelompok teman sebaya (peer group) terhadap kelekatan hubungan antar-anggota keluarga di kalangan siswa kelas XII. Peneliti tersebut merumuskan masalah: 'Apakah terdapat hubungan antara pergaulan sebaya dengan kelekatan hubungan keluarga?' Peneliti menyusun instrumen pengumpulan data berupa daftar pertanyaan terbuka sebanyak 10 butir untuk wawancara mendalam. Namun, pada saat yang sama, ia juga berencana menganalisis kekuatan hubungan antar-variabel tersebut secara kuantitatif melalui uji korelasi statistik menggunakan aplikasi pengolah data.",
-          soal: "Berdasarkan rancangan penelitian di atas, manakah rekomendasi metodologis yang paling tepat dan logis untuk menyempurnakan penelitian tersebut agar valid? (Pilihlah semua jawaban yang benar! Jawaban benar lebih dari satu)",
-          opsi: [
-            "A. Peneliti perlu mengubah daftar pertanyaan terbuka menjadi kuesioner tertutup berskala Likert agar data kuantitatif yang diperoleh dapat diolah dengan uji korelasi statistik secara valid.",
-            "B. Peneliti harus menentukan teknik sampling (seperti simple random sampling atau stratified random sampling) dan ukuran sampel yang representatif terlebih dahulu sebelum menyebarkan instrumen.",
-            "C. Peneliti sebaiknya menghapus rumusan masalah utama karena analisis statistik kuantitatif tidak memerlukan perumusan masalah yang detail terkait interaksi sosial.",
-            "D. Peneliti wajib menggunakan metode observasi partisipatif penuh (peneliti tinggal bersama keluarga responden selama minimal satu tahun penuh) untuk mempercepat proses kuantifikasi.",
-            "E. Peneliti perlu melakukan operasionalisasi konsep variabel bebas (intensitas pergaulan sebaya) dan variabel terikat (kelekatan hubungan keluarga) untuk mempermudah penyusunan indikator instrumen kuesioner."
-          ],
-          kunciJawaban: "A, B, E",
-          pembahasan: "Penelitian ini memiliki kontradiksi metodologis: ingin menguji hubungan kuantitatif (korelasi statistik) tetapi instrumennya adalah pertanyaan terbuka (kualitatif). Maka rekomendasi penyempurnaan yang logis:\n1. [A BENAR] Pertanyaan terbuka harus diubah menjadi tertutup (seperti skala Likert) agar datanya berbentuk angka dan dapat diproses secara statistik.\n2. [B BENAR] Penentuan teknik sampling probabilitas dan jumlah sampel representatif sangat penting untuk penelitian kuantitatif agar hasil uji hubungan bisa digeneralisasi.\n3. [E BENAR] Operasionalisasi konsep variabel sangat krusial dalam kuantitatif untuk menerjemahkan teori sosiologi ke dalam indikator kuesioner yang valid.\nOpsi C salah karena rumusan masalah adalah fondasi utama penelitian. Opsi D tidak tepat karena observasi partisipatif penuh adalah metode khas kualitatif (etnografi) yang sangat lama dan bertolak belakang dengan kebutuhan pengujian korelasi kuantitatif cepat.",
-          kataKunci: "Metodologi Penelitian, Penelitian Kuantitatif, Teknik Sampling, Validitas"
-        }
-      ];
+      if (targetSubject === 'Sosiologi') {
+        const defaultQuestions: Question[] = [
+          {
+            id: `question-sosiologi-ref-1-${userId}`,
+            userId: userId,
+            noSoal: 1,
+            kisiKisiId: `kisi-sosiologi-ref-1-${userId}`,
+            kompetensi: "Mendeskripsikan dan menganalisis pengertian dan perkembangan serta manfaat sosiologi sebagai ilmu pengetahuan.",
+            subKompetensi: "Mengidentifikasi objek kajian sosiologi di era masyarakat digital.",
+            bentukSoal: "pilihan_ganda_sederhana",
+            stimulus: "Sosiologi merupakan ilmu pengetahuan murni yang membatasi diri pada apa yang nyata-nyata terjadi saat ini (das sein) dan bukan membicarakan apa yang seharusnya terjadi (das sollen). Di tengah era disrupsi teknologi digital saat ini, berbagai fenomena interaksi sosial baru bermunculan, mulai dari maraknya penggunaan media sosial, kecanduan gawai, hingga pola komunikasi virtual di kalangan remaja yang menggeser norma-norma konvensional di masyarakat.",
+            soal: "Berdasarkan ilustrasi di atas, objek kajian sosiologi yang paling tepat ditunjukkan oleh pernyataan...",
+            opsi: [
+              "A. Dampak radiasi gelombang elektromagnetik gawai terhadap kesehatan mata dan fisik remaja secara klinis.",
+              "B. Kecanduan teknologi yang mengubah pola interaksi, cara berpikir, dan perilaku sosial di kalangan remaja dalam kehidupan sehari-hari.",
+              "C. Kerusakan jaringan infrastruktur internet nasional akibat dari maraknya serangan keamanan siber (cyber attack).",
+              "D. Penurunan nilai tukar mata uang asing yang memengaruhi harga jual gawai di pasar lokal secara signifikan.",
+              "E. Perancangan algoritma kecerdasan buatan pada aplikasi media sosial untuk meningkatkan efisiensi komputasi."
+            ],
+            kunciJawaban: "B",
+            pembahasan: "Objek kajian sosiologi berpusat pada masyarakat and segala fenomena interaksi sosial serta gejala sosial yang terjadi di dalamnya. Dampak sosial kemajuan teknologi (kecanduan gawai yang mengubah pola interaksi, cara berpikir, dan perilaku sosial remaja) merupakan gejala sosial nyata yang menjadi objek kajian sosiologi (das sein). Pilihan lainnya berada di luar ranah kajian sosiologi, seperti kesehatan fisik/klinis (A), teknik informatika/cyber (C & E), dan ekonomi makro (D).",
+            kataKunci: "Objek Kajian Sosiologi, Gejala Sosial, Disrupsi Teknologi"
+          },
+          {
+            id: `question-sosiologi-ref-2-${userId}`,
+            userId: userId,
+            noSoal: 2,
+            kisiKisiId: `kisi-sosiologi-ref-2-${userId}`,
+            kompetensi: "Menjelaskan ragam gejala sosial di lingkungan sekitar.",
+            subKompetensi: "Menerapkan konsep sosialisasi dan ragam gejala sosial terkait pembatasan screen-time pada anak.",
+            bentukSoal: "kategori",
+            stimulus: "Perhatikan anjuran durasi aman layar (screen-time) bagi anak-anak berikut ini!\nMenurut rekomendasi para ahli evaluasi perkembangan anak, anak usia 0 sampai 1,5 tahun disarankan sama sekali tidak terpapar layar gawai (0 jam). Anak usia 1,5 sampai 2 tahun diperbolehkan mengakses program yang berkualitas tinggi maksimal selama 1 jam dengan pendampingan ketat oleh orang tua. Anak usia 2 sampai 5 tahun juga dibatasi maksimal 1 jam per hari dengan pendampingan, sementara anak di atas 5 tahun harus memiliki batas waktu penggunaan gawai yang konsisten dan seimbang demi menjaga kesehatan fisik dan mental mereka.",
+            soal: "Evaluasilah kesesuaian pernyataan terkait gejala penggunaan gawai pada anak berdasarkan anjuran tersebut! Tentukan SESUAI atau TIDAK SESUAI untuk setiap pernyataan berikut.",
+            opsi: [
+              "Pernyataan 1: Penggunaan gawai pada anak usia dini perlu diawasi ketat oleh orang tua agar proses sosialisasi primer anak tidak terhambat secara negatif.",
+              "Pernyataan 2: Anak berusia 1 tahun diperbolehkan bermain gawai sendiri tanpa pendampingan asalkan kontennya edukatif dengan batas waktu maksimal 1 jam per hari.",
+              "Pola asuh yang terlalu longgar terhadap akses teknologi digital dapat mengganggu pembentukan karakter dan kepribadian sosial anak.",
+              "Pembatasan waktu layar secara konsisten bagi anak usia di atas 5 tahun dapat mengurangi risiko deviasi sosial berupa kecanduan gawai."
+            ],
+            kunciJawaban: "SESUAI, TIDAK SESUAI, SESUAI, SESUAI",
+            pembahasan: "- Pernyataan 1 [SESUAI]: Sesuai dengan anjuran dalam stimulus bahwa pendampingan orang tua sangat krusial dalam masa sosialisasi primer anak usia dini.\n- Pernyataan 2 [TIDAK SESUAI]: Anak usia 1 tahun (berada di rentang 0-1,5 tahun) direkomendasikan sama sekali tidak terpapar layar (0 jam), serta tidak boleh dilepas bermain gawai sendiri.\n- Pernyataan 3 [SESUAI]: Sesuai dengan konsep sosiologi bahwa pengawasan/pendampingan penting untuk mencegah dampak negatif pembentukan kepribadian akibat paparan gawai yang bebas.\n- Pernyataan 4 [SESUAI]: Pembatasan waktu layar secara konsisten dan seimbang bagi anak di atas 5 tahun membantu mencegah risiko penyimpangan berupa kecanduan gawai.",
+            kataKunci: "Sosialisasi, Pola Asuh, Gejala Sosial, Screen-Time"
+          },
+          {
+            id: `question-sosiologi-ref-3-${userId}`,
+            userId: userId,
+            noSoal: 3,
+            kisiKisiId: `kisi-sosiologi-ref-3-${userId}`,
+            kompetensi: "Menjelaskan dan menganalisis berbagai langkah dan metode penelitian sosial.",
+            subKompetensi: "Menganalisis rancangan metode penelitian sosial kuantitatif dan menyempurnakannya secara metodologis.",
+            bentukSoal: "mcma",
+            stimulus: "Seorang peneliti sosiologi SMA ingin meneliti pengaruh intensitas pergaulan kelompok teman sebaya (peer group) terhadap kelekatan hubungan antar-anggota keluarga di kalangan siswa kelas XII. Peneliti tersebut merumuskan masalah: 'Apakah terdapat hubungan antara pergaulan sebaya dengan kelekatan hubungan keluarga?' Peneliti menyusun instrumen pengumpulan data berupa daftar pertanyaan terbuka sebanyak 10 butir untuk wawancara mendalam. Namun, pada saat yang sama, ia juga berencana menganalisis kekuatan hubungan antar-variabel tersebut secara kuantitatif melalui uji korelasi statistik menggunakan aplikasi pengolah data.",
+            soal: "Berdasarkan rancangan penelitian di atas, manakah rekomendasi metodologis yang paling tepat dan logis untuk menyempurnakan penelitian tersebut agar valid? (Pilihlah semua jawaban yang benar! Jawaban benar lebih dari satu)",
+            opsi: [
+              "A. Peneliti perlu mengubah daftar pertanyaan terbuka menjadi kuesioner tertutup berskala Likert agar data kuantitatif yang diperoleh dapat diolah dengan uji korelasi statistik secara valid.",
+              "B. Peneliti harus menentukan teknik sampling (seperti simple random sampling atau stratified random sampling) dan ukuran sampel yang representatif terlebih dahulu sebelum menyebarkan instrumen.",
+              "C. Peneliti sebaiknya menghapus rumusan masalah utama karena analisis statistik kuantitatif tidak memerlukan perumusan masalah yang detail terkait interaksi sosial.",
+              "D. Peneliti wajib menggunakan metode observasi partisipatif penuh (peneliti tinggal bersama keluarga responden selama minimal satu tahun penuh) untuk mempercepat proses kuantifikasi.",
+              "E. Peneliti perlu melakukan operasionalisasi konsep variabel bebas (intensitas pergaulan sebaya) dan variabel terikat (kelekatan hubungan keluarga) untuk mempermudah penyusunan indikator instrumen kuesioner."
+            ],
+            kunciJawaban: "A, B, E",
+            pembahasan: "Penelitian ini memiliki kontradiksi metodologis: ingin menguji hubungan kuantitatif (korelasi statistik) tetapi instrumennya adalah pertanyaan terbuka (kualitatif). Maka rekomendasi penyempurnaan yang logis:\n1. [A BENAR] Pertanyaan terbuka harus diubah menjadi tertutup (seperti skala Likert) agar datanya berbentuk angka dan dapat diproses secara statistik.\n2. [B BENAR] Penentuan teknik sampling probabilitas dan jumlah sampel representatif sangat penting untuk penelitian kuantitatif agar hasil uji hubungan bisa digeneralisasi.\n3. [E BENAR] Operasionalisasi konsep variabel sangat krusial dalam kuantitatif untuk menerjemahkan teori sosiologi ke dalam indikator kuesioner yang valid.\nOpsi C salah karena rumusan masalah adalah fondasi utama penelitian. Opsi D tidak tepat karena observasi partisipatif penuh adalah metode khas kualitatif (etnografi) yang sangat lama dan bertolak belakang dengan kebutuhan pengujian korelasi kuantitatif cepat.",
+            kataKunci: "Metodologi Penelitian, Penelitian Kuantitatif, Teknik Sampling, Validitas"
+          }
+        ];
 
-      defaultQuestions.forEach((item) => {
-        batch.set(doc(db, 'questions', item.id), item);
-      });
-
-      const defaultMaterials = {
-        [`kisi-sosiologi-ref-1-${userId}`]: `# 1. PENDAHULUAN & DEFINISI\nSosiologi berasal dari bahasa Latin *socius* yang berarti teman atau kawan, dan bahasa Yunani *logos* yang berarti ilmu atau berbicara. Secara harfiah, sosiologi adalah ilmu tentang masyarakat. Auguste Comte, bapak sosiologi, mendefinisikan sosiologi sebagai ilmu positif tentang hukum-hukum dasar gejala sosial. Sosiologi merupakan ilmu pengetahuan murni (*pure science*) dan ilmu abstrak (*abstract science*) yang membatasi diri pada apa yang nyata terjadi (*das sein*) bukan apa yang seharusnya terjadi (*das sollen*).\n\n# 2. KONSEP UTAMA & TEORI PENDEKATAN\n* **Objek Kajian Sosiologi**: Objek material sosiologi adalah kehidupan sosial, gejala-gejala sosial, dan proses hubungan antarmanusia. Objek formal sosiologi adalah manusia sebagai makhluk sosial serta interaksi sosial antarmanusia dalam masyarakat.\n* **Paradigma Sosiologi**: Terdapat tiga paradigma utama menurut George Ritzer:\n  1. *Fakta Sosial* (Durkheim): Struktur dan institusi sosial yang memengaruhi individu secara eksternal dan memaksa.\n  2. *Definisi Sosial* (Weber): Tindakan sosial yang memiliki makna subjektif bagi pelakunya.\n  3. *Perilaku Sosial* (Skinner): Hubungan stimulus-respons dan pengulangan perilaku berdasarkan konsekuensi.\n\n# 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)\nDi era disrupsi digital Indonesia saat ini, muncul fenomena interaksi sosial virtual baru di kalangan remaja, seperti pembentukan komunitas daring di Discord dan penyebaran konten di TikTok. Interaksi ini tidak dibatasi oleh ruang fisik, namun memicu pergeseran nilai dan norma konvensional, seperti memudarnya sopan santun komunikasi langsung (tatap muka) karena terbiasa dengan anonimitas di dunia maya.\n\n# 4. ANALISIS KRITIS & REFLEKSI\n**Pertanyaan Reflektif**: Bagaimana kemunculan fenomena "flexing" (pamer kekayaan) di media sosial Indonesia dianalisis menggunakan paradigma definisi sosial Max Weber? Analisislah makna subjektif di balik tindakan pamer tersebut dan bagaimana masyarakat mengonstruksi status sosial di ruang digital!`,
-        [`kisi-sosiologi-ref-2-${userId}`]: `# 1. PENDAHULUAN & DEFINISI\nSosialisasi adalah sebuah proses seumur hidup di mana individu mempelajari nilai, norma, peran, dan perilaku sosial yang berlaku di masyarakatnya untuk membentuk kepribadian yang utuh. Sosialisasi primer merupakan tahap awal yang berlangsung di lingkungan keluarga, yang menjadi landasan utama pembentukan karakter dasar anak sebelum ia berinteraksi dengan lingkungan luar (sosialisasi sekunder).\n\n# 2. KONSEP UTAMA & TEORI PENDEKATAN\n* **Tahapan Sosialisasi (George Herbert Mead)**:\n  1. *Preparatory Stage* (Persiapan): Bayi meniru tindakan orang dewasa tanpa memahami maknanya.\n  2. *Play Stage* (Meniru): Anak mulai meniru peran orang di sekitarnya secara sadar (misal bermain peran ibu/guru).\n  3. *Game Stage* (Siap Bertindak): Anak memahami perannya sendiri dan peran orang lain yang terlibat dalam permainan terstruktur.\n  4. *Generalized Other* (Penerimaan Norma): Anak mampu menginternalisasi nilai dan norma masyarakat secara luas serta bertindak sebagai warga masyarakat yang bertanggung jawab.\n* **Pola Asuh Sosialisasi**:\n  - *Sosialisasi Represif*: Berfokus pada kepatuhan ketat, hukuman fisik, dan komunikasi satu arah (dominasi orang tua).\n  - *Sosialisasi Partisipatoris*: Berfokus pada interaksi timbal balik, hadiah atas perilaku baik, dan komunikasi dua arah yang menempatkan anak sebagai pusat perhatian.\n\n# 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)\nBanyak keluarga perkotaan di Indonesia yang menerapkan pola asuh longgar atau menggunakan gawai sebagai "pengasuh elektronik" demi kepraktisan. Anak-anak dibiarkan mengakses layar (*screen-time*) di atas durasi aman tanpa pendampingan. Gejala sosial ini mengganggu tahap *play stage* anak karena interaksi konkret dengan manusia berkurang, yang berakibat pada hambatan emosional dan lambatnya pemahaman norma-norma sosial primer.\n\n# 4. ANALISIS KRITIS & REFLEKSI\n**Pertanyaan Reflektif**: Jika dikaitkan dengan pembentukan karakter Pancasila, apa dampak jangka panjang bagi ketahanan sosial nasional apabila sosialisasi primer dalam keluarga Indonesia digantikan sepenuhnya oleh algoritma media sosial global? Rincikan solusi taktis sosiologis bagi para orang tua modern!`,
-        [`kisi-sosiologi-ref-3-${userId}`]: `# 1. PENDAHULUAN & DEFINISI\nPenelitian sosial adalah penyelidikan terencana, kritis, dan empiris untuk memecahkan masalah-masalah sosial atau menguji kebenaran teori sosiologi yang ada di masyarakat. Penelitian sosial bertumpu pada keobjektifan ilmiah, keteraturan metodologis, serta kejujuran data lapangan agar hasil kesimpulannya valid dan dapat dipertanggungjawabkan secara akademis.\n\n# 2. KONSEP UTAMA & TEORI PENDEKATAN\n* **Metode Penelitian Kuantitatif**: Berorientasi pada pembuktian teori, pengujian hubungan antar-variabel secara statistik, instrumen terstruktur (kuesioner tertutup/skala Likert), pengambilan sampel probabilitas (*random sampling*), serta analisis data objektif-numerik.\n* **Metode Penelitian Kualitatif**: Berorientasi pada pemahaman mendalam (*verstehen*), deskripsi interpretatif wacana atau makna sosial, instrumen fleksibel (wawancara mendalam, observasi partisipatif), serta teknik sampling non-probabilitas (*purposive/snowball sampling*).\n* **Operasionalisasi Variabel**: Proses menerjemahkan konsep teoretis yang abstrak (variabel bebas & terikat) menjadi indikator-indikator empiris terukur untuk memudahkan pembuatan instrumen kuesioner.\n\n# 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)\nSeorang peneliti sosiologi ingin meneliti pengaruh intensitas pergaulan kelompok teman sebaya (*peer group*) terhadap kelekatan hubungan antar-anggota keluarga siswa kelas XII di sebuah SMA di Jakarta. Agar riset kuantitatif ini valid, peneliti menerjemahkan konsep "intensitas pergaulan" menjadi indikator terukur (seperti frekuensi berkumpul dalam seminggu dan durasi interaksi) serta menggunakan skala Likert 1-5 untuk kuesioner tertutup.\n\n# 4. ANALISIS KRITIS & REFLEKSI\n**Pertanyaan Reflektif**: Mengapa pencampuran instrumen kualitatif (wawancara terbuka) ke dalam analisis korelasi statistik murni tanpa metodologi *Mixed Methods* yang jelas sering kali menghasilkan bias validitas? Jelaskan bagaimana integrasi triangulasi metode yang tepat dapat menyelesaikannya!`
-      };
-
-      Object.entries(defaultMaterials).forEach(([kId, content]) => {
-        batch.set(doc(db, 'materials', kId), {
-          content,
-          userId,
-          updatedAt: new Date()
+        defaultQuestions.forEach((item) => {
+          batch.set(doc(db, 'questions', item.id), item);
         });
-      });
+
+        const defaultMaterials = {
+          [`kisi-sosiologi-ref-1-${userId}`]: `# 1. PENDAHULUAN & DEFINISI\nSosiologi berasal dari bahasa Latin *socius* yang berarti teman atau kawan, dan bahasa Yunani *logos* yang berarti ilmu atau berbicara. Secara harfiah, sosiologi adalah ilmu tentang masyarakat. Auguste Comte, bapak sosiologi, mendefinisikan sosiologi sebagai ilmu positif tentang hukum-hukum dasar gejala sosial. Sosiologi merupakan ilmu pengetahuan murni (*pure science*) dan ilmu abstrak (*abstract science*) yang membatasi diri pada apa yang nyata terjadi (*das sein*) bukan apa yang seharusnya terjadi (*das sollen*).\n\n# 2. KONSEP UTAMA & TEORI PENDEKATAN\n* **Objek Kajian Sosiologi**: Objek material sosiologi adalah kehidupan sosial, gejala-gejala sosial, dan proses hubungan antarmanusia. Objek formal sosiologi adalah manusia sebagai makhluk sosial serta interaksi sosial antarmanusia dalam masyarakat.\n* **Paradigma Sosiologi**: Terdapat tiga paradigma utama menurut George Ritzer:\n  1. *Fakta Sosial* (Durkheim): Struktur dan institusi sosial yang memengaruhi individu secara eksternal dan memaksa.\n  2. *Definisi Sosial* (Weber): Tindakan sosial yang memiliki makna subjektif bagi pelakunya.\n  3. *Perilaku Sosial* (Skinner): Hubungan stimulus-respons dan pengulangan perilaku berdasarkan konsekuensi.\n\n# 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)\nDi era disrupsi digital Indonesia saat ini, muncul fenomena interaksi sosial virtual baru di kalangan remaja, seperti pembentukan komunitas daring di Discord dan penyebaran konten di TikTok. Interaksi ini tidak dibatasi oleh ruang fisik, namun memicu pergeseran nilai dan norma konvensional, seperti memudarnya sopan santun komunikasi langsung (tatap muka) karena terbiasa dengan anonimitas di dunia maya.\n\n# 4. ANALISIS KRITIS & REFLEKSI\n**Pertanyaan Reflektif**: Bagaimana kemunculan fenomena "flexing" (pamer kekayaan) di media sosial Indonesia dianalisis menggunakan paradigma definisi sosial Max Weber? Analisislah makna subjektif di balik tindakan pamer tersebut dan bagaimana masyarakat mengonstruksi status sosial di ruang digital!`,
+          [`kisi-sosiologi-ref-2-${userId}`]: `# 1. PENDAHULUAN & DEFINISI\nSosialisasi adalah sebuah proses seumur hidup di mana individu mempelajari nilai, norma, peran, dan perilaku sosial yang berlaku di masyarakatnya untuk membentuk kepribadian yang utuh. Sosialisasi primer merupakan tahap awal yang berlangsung di lingkungan keluarga, yang menjadi landasan utama pembentukan karakter dasar anak sebelum ia berinteraksi dengan lingkungan luar (sosialisasi sekunder).\n\n# 2. KONSEP UTAMA & TEORI PENDEKATAN\n* **Tahapan Sosialisasi (George Herbert Mead)**:\n  1. *Preparatory Stage* (Persiapan): Bayi meniru tindakan orang dewasa tanpa memahami maknanya.\n  2. *Play Stage* (Meniru): Anak mulai meniru peran orang di sekitarnya secara sadar (misal bermain peran ibu/guru).\n  3. *Game Stage* (Siap Bertindak): Anak memahami perannya sendiri dan peran orang lain yang terlibat dalam permainan terstruktur.\n  4. *Generalized Other* (Penerimaan Norma): Anak mampu menginternalisasi nilai dan norma masyarakat secara luas serta bertindak sebagai warga masyarakat yang bertanggung jawab.\n* **Pola Asuh Sosialisasi**:\n  - *Sosialisasi Represif*: Berfokus pada kepatuhan ketat, hukuman fisik, dan komunikasi satu arah (dominasi orang tua).\n  - *Sosialisasi Partisipatoris*: Berfokus pada interaksi timbal balik, hadiah atas perilaku baik, dan komunikasi dua arah yang menempatkan anak sebagai pusat perhatian.\n\n# 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)\nBanyak keluarga perkotaan di Indonesia yang menerapkan pola asuh longgar atau menggunakan gawai sebagai "pengasuh elektronik" demi kepraktisan. Anak-anak dibiarkan mengakses layar (*screen-time*) di atas durasi aman tanpa pendampingan. Gejala sosial ini mengganggu tahap *play stage* anak karena interaksi konkret dengan manusia berkurang, yang berakibat pada hambatan emosional dan lambatnya pemahaman norma-norma sosial primer.\n\n# 4. ANALISIS KRITIS & REFLEKSI\n**Pertanyaan Reflektif**: Jika dikaitkan dengan pembentukan karakter Pancasila, apa dampak jangka panjang bagi ketahanan sosial nasional apabila sosialisasi primer dalam keluarga Indonesia digantikan sepenuhnya oleh algoritma media sosial global? Rincikan solusi taktis sosiologis bagi para orang tua modern!`,
+          [`kisi-sosiologi-ref-3-${userId}`]: `# 1. PENDAHULUAN & DEFINISI\nPenelitian sosial adalah penyelidikan terencana, kritis, dan empiris untuk memecahkan masalah-masalah sosial atau menguji kebenaran teori sosiologi yang ada di masyarakat. Penelitian sosial bertumpu pada keobjektifan ilmiah, keteraturan metodologis, serta kejujuran data lapangan agar hasil kesimpulannya valid dan dapat dipertanggungjawabkan secara akademis.\n\n# 2. KONSEP UTAMA & TEORI PENDEKATAN\n* **Metode Penelitian Kuantitatif**: Berorientasi pada pembuktian teori, pengujian hubungan antar-variabel secara statistik, instrumen terstruktur (kuesioner tertutup/skala Likert), pengambilan sampel probabilitas (*random sampling*), serta analisis data objektif-numerik.\n* **Metode Penelitian Kualitatif**: Berorientasi pada pemahaman mendalam (*verstehen*), deskripsi interpretatif wacana atau makna sosial, instrumen fleksibel (wawancara mendalam, observasi partisipatif), serta teknik sampling non-probabilitas (*purposive/snowball sampling*).\n* **Operasionalisasi Variabel**: Proses menerjemahkan konsep teoretis yang abstrak (variabel bebas & terikat) menjadi indikator-indikator empiris terukur untuk memudahkan pembuatan instrumen kuesioner.\n\n# 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)\nSeorang peneliti sosiologi ingin meneliti pengaruh intensitas pergaulan kelompok teman sebaya (*peer group*) terhadap kelekatan hubungan antar-anggota keluarga siswa kelas XII di sebuah SMA di Jakarta. Agar riset kuantitatif ini valid, peneliti menerjemahkan konsep "intensitas pergaulan" menjadi indikator terukur (seperti frekuensi berkumpul dalam seminggu dan durasi interaksi) serta menggunakan skala Likert 1-5 untuk kuesioner tertutup.\n\n# 4. ANALISIS KRITIS & REFLEKSI\n**Pertanyaan Reflektif**: Mengapa pencampuran instrumen kualitatif (wawancara terbuka) ke dalam analisis korelasi statistik murni tanpa metodologi *Mixed Methods* yang jelas sering kali menghasilkan bias validitas? Jelaskan bagaimana integrasi triangulasi metode yang tepat dapat menyelesaikannya!`
+        };
+
+        Object.entries(defaultMaterials).forEach(([kId, content]) => {
+          batch.set(doc(db, 'materials', kId), {
+            content,
+            userId,
+            updatedAt: new Date()
+          });
+        });
+      }
 
       batch.update(doc(db, 'users', userId), { isSeeded: true });
 
@@ -1971,24 +2033,35 @@ export default function App() {
             setUserRole(data.role || 'user');
             setUserName(data.name || user.displayName || user.email?.split('@')[0] || 'User');
             
+            if (data.mataPelajaran) {
+              setConfig(prev => ({ ...prev, mataPelajaran: data.mataPelajaran }));
+            }
+
+            if (data.geminiApiKey) {
+              setAiConfig(prev => ({ ...prev, apiKey: data.geminiApiKey, mode: 'client' }));
+              localStorage.setItem('gemini_api_key', data.geminiApiKey);
+            }
+            
             if (!data.isSeeded) {
-              await seedDefaultData(user.uid);
+              await seedDefaultData(user.uid, data.mataPelajaran || 'Sosiologi');
             }
           } else {
             const isAdminEmail = user.email === 'admin@tka.com' || user.email === 'ajisosiologi84@gmail.com';
             const defaultRole = isAdminEmail ? 'admin' : 'user';
             const defaultName = user.displayName || (isAdminEmail ? 'Admin TKA SMA' : 'Guru Sosiologi');
+            const defaultSubject = 'Sosiologi';
             
             await setDoc(userDocRef, {
               uid: user.uid,
               email: user.email,
               name: defaultName,
               role: defaultRole,
+              mataPelajaran: defaultSubject,
               isSeeded: true,
               createdAt: new Date()
             });
             
-            await seedDefaultData(user.uid);
+            await seedDefaultData(user.uid, defaultSubject);
             
             setUserRole(defaultRole);
             setUserName(defaultName);
@@ -2338,7 +2411,13 @@ export default function App() {
     } else if (config.mataPelajaran === 'Produk atau Projek Kreatif dan Kewirausahaan SMK dan MAK') {
       setSelectedPresetSubject('Produk Kreatif dan Kewirausahaan');
     }
-  }, [config.mataPelajaran]);
+
+    if (currentUser && config.mataPelajaran) {
+      updateDoc(doc(db, 'users', currentUser.uid), {
+        mataPelajaran: config.mataPelajaran
+      }).catch(err => console.error("Error saving subject selection:", err));
+    }
+  }, [config.mataPelajaran, currentUser]);
 
   const handleSelectPresetSubject = (subject: typeof selectedPresetSubject) => {
     setSelectedPresetSubject(subject);
@@ -5249,8 +5328,17 @@ PANDUAN EKSTRA:
                           </div>
                           <button
                             type="button"
-                            onClick={() => {
+                            onClick={async () => {
                               localStorage.setItem('gemini_api_key', aiConfig.apiKey);
+                              if (currentUser) {
+                                try {
+                                  await updateDoc(doc(db, 'users', currentUser.uid), {
+                                    geminiApiKey: aiConfig.apiKey
+                                  });
+                                } catch (err) {
+                                  console.error("Gagal menyimpan API Key ke cloud:", err);
+                                }
+                              }
                               setShowApiKeySaved(true);
                               setTimeout(() => setShowApiKeySaved(false), 3000);
                             }}
@@ -8286,12 +8374,13 @@ PANDUAN EKSTRA:
                 setUserSuccess(null);
                 setIsAddingUser(true);
                 try {
-                  await createNewUserByAdmin(newUserEmail.trim(), newUserPassword, newUserName, newUserRole);
+                  await createNewUserByAdmin(newUserEmail.trim(), newUserPassword, newUserName, newUserRole, newUserRole === 'user' ? newUserMataPelajaran : 'Sosiologi');
                   setUserSuccess(`Akun ${newUserName} (${newUserRole === 'admin' ? 'Admin' : 'Guru'}) berhasil didaftarkan!`);
                   setNewUserName('');
                   setNewUserEmail('');
                   setNewUserPassword('');
                   setNewUserRole('user');
+                  setNewUserMataPelajaran('Sosiologi');
                 } catch (err: any) {
                   console.error(err);
                   if (err.code === 'auth/email-already-in-use') {
@@ -8354,7 +8443,7 @@ PANDUAN EKSTRA:
                       }`}
                     >
                       <User className="h-4 w-4" />
-                      Guru Sosiologi
+                      Guru Mapel
                     </button>
                     <button
                       type="button"
@@ -8370,6 +8459,35 @@ PANDUAN EKSTRA:
                     </button>
                   </div>
                 </div>
+
+                {newUserRole === 'user' && (
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Mata Pelajaran Ampuan</label>
+                    <select
+                      value={newUserMataPelajaran}
+                      onChange={(e) => setNewUserMataPelajaran(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl px-4 py-2.5 text-xs text-slate-800 font-bold"
+                    >
+                      <option value="Sosiologi">👥 Sosiologi</option>
+                      <option value="Matematika">📐 Matematika</option>
+                      <option value="Bahasa Indonesia">🇮🇩 Bahasa Indonesia</option>
+                      <option value="Bahasa Inggris">🇬🇧 Bahasa Inggris</option>
+                      <option value="Matematika Tingkat Lanjut">🚀 Matematika Tingkat Lanjut</option>
+                      <option value="Bahasa Indonesia Tingkat Lanjut">✍️ Bahasa Indonesia Tingkat Lanjut</option>
+                      <option value="Bahasa Inggris Tingkat Lanjut">🗣️ Bahasa Inggris Tingkat Lanjut</option>
+                      <option value="Fisika">⚛️ Fisika</option>
+                      <option value="Kimia">🧪 Kimia</option>
+                      <option value="Biologi">🧬 Biologi</option>
+                      <option value="PPKN">🏛️ PPKN</option>
+                      <option value="Ekonomi">📈 Ekonomi</option>
+                      <option value="Geografi">🗺️ Geografi</option>
+                      <option value="Sejarah Tingkat Lanjut">📜 Sejarah Tingkat Lanjut</option>
+                      <option value="Antropologi">🗿 Antropologi</option>
+                      <option value="Bahasa Jepang">🇯🇵 Bahasa Jepang</option>
+                      <option value="Produk Kreatif dan Kewirausahaan">🛠️ Produk Kreatif dan Kewirausahaan</option>
+                    </select>
+                  </div>
+                )}
 
                 <button
                   type="submit"
@@ -8416,7 +8534,12 @@ PANDUAN EKSTRA:
                   <tbody className="divide-y divide-slate-100">
                     {usersList.map((usr) => (
                       <tr key={usr.id} className="hover:bg-slate-50/50 transition">
-                        <td className="py-3.5 px-2 font-bold text-slate-800">{usr.name || 'Guru Sosiologi'}</td>
+                        <td className="py-3.5 px-2 font-bold text-slate-800">
+                          <div>{usr.name || 'Guru Sosiologi'}</div>
+                          {usr.role !== 'admin' && (
+                            <div className="text-[10px] text-indigo-600 font-medium mt-0.5">Mapel: {usr.mataPelajaran || 'Sosiologi'}</div>
+                          )}
+                        </td>
                         <td className="py-3.5 px-2 text-slate-600">{usr.email}</td>
                         <td className="py-3.5 px-2">
                           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-bold text-[9px] uppercase tracking-wide ${

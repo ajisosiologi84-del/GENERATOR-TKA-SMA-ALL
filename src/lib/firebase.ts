@@ -15,7 +15,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = initializeFirestore(app, {}, "ai-studio-copyofremixgener-b07a4ffe-e968-483e-a44f-cb6e8eb2dc8c");
 
-export async function createNewUserByAdmin(email: string, pass: string, name: string, role: 'admin' | 'user') {
+export async function createNewUserByAdmin(email: string, pass: string, name: string, role: 'admin' | 'user', mataPelajaran?: string) {
   // Use a secondary app instance to register the new user without signing out the current admin session
   const secondaryAppName = `SecondaryApp_${Date.now()}`;
   const secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
@@ -30,6 +30,7 @@ export async function createNewUserByAdmin(email: string, pass: string, name: st
       email: email,
       name: name,
       role: role,
+      mataPelajaran: mataPelajaran || 'Sosiologi',
       createdAt: new Date()
     });
     
