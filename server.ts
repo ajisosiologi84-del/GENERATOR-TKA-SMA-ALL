@@ -47,74 +47,79 @@ async function generateContentWithFallbackAndRetry(
     config?: any;
   }
 ): Promise<any> {
-  // Ordered by preferred + high availability
+  // Ordered by preferred + high availability (only valid supported models)
   const modelsToTry = [
     "gemini-2.5-flash",
-    "gemini-3.5-flash",
     "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-2.5-pro",
-    "gemini-1.5-pro"
+    "gemini-2.5-pro"
   ];
 
   const now = Date.now();
   // Filter active models not in active cool-off
-  const activeModels = modelsToTry.filter(m => {
+  let activeModels = modelsToTry.filter(m => {
     const lastFail = coolOffModels.get(m);
     return !lastFail || (now - lastFail > COOL_OFF_DURATION);
   });
   
-  // Deferred ones kept as low-priority fallback at the end
-  const deferredModels = modelsToTry.filter(m => {
-    const lastFail = coolOffModels.get(m);
-    return lastFail && (now - lastFail <= COOL_OFF_DURATION);
-  });
+  // If all models are in cool-off, reset cool-off so we don't lock out forever
+  if (activeModels.length === 0) {
+    coolOffModels.clear();
+    activeModels = [...modelsToTry];
+  }
 
-  const orderedModels = activeModels.length > 0 ? [...activeModels, ...deferredModels] : modelsToTry;
+  const deferredModels = modelsToTry.filter(m => !activeModels.includes(m));
+  const orderedModels = [...activeModels, ...deferredModels];
   let lastError: any = null;
 
   for (const model of orderedModels) {
     const isCoolOff = coolOffModels.has(model) && (now - (coolOffModels.get(model) || 0) <= COOL_OFF_DURATION);
     console.log(`Calling Gemini API using model ${model}${isCoolOff ? ' (deferred fallback)' : ''}...`);
-    try {
-      // 90-second timeout per model call to allow sufficient time for complex JSON structure generation
-      let timeoutId: any;
-      const apiCall = ai.models.generateContent({
-        model,
-        contents: params.contents,
-        config: params.config,
-      });
 
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(`Timeout waiting for model ${model}`)), 90000);
-      });
-
+    // Retry loop per model (up to 2 attempts with a short delay for transient rate limits)
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const response = await Promise.race([apiCall, timeoutPromise]);
-        return response;
-      } finally {
-        if (timeoutId) clearTimeout(timeoutId);
-      }
-    } catch (error: any) {
-      lastError = error;
-      console.error(`Model ${model} failed with error:`, error);
+        // 90-second timeout per model call
+        let timeoutId: any;
+        const apiCall = ai.models.generateContent({
+          model,
+          contents: params.contents,
+          config: params.config,
+        });
 
-      // Check if this error is a rate limit / quota exceeded error (429) or high demand / service unavailable (503)
-      const errorString = typeof error === 'string' ? error : (error?.message || JSON.stringify(error) || '');
-      const isQuotaOrDemandError = 
-        error?.status === 429 || 
-        error?.statusCode === 429 || 
-        error?.status === 503 ||
-        error?.statusCode === 503 ||
-        error?.code === 429 ||
-        error?.code === 503 ||
-        /quota|limit|429|exhausted|503|demand|unavailable/i.test(errorString);
-      
-      if (isQuotaOrDemandError) {
-        console.warn(`Model ${model} returned a quota limit or high demand error. Cool-off applied.`);
-        coolOffModels.set(model, Date.now());
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error(`Timeout waiting for model ${model}`)), 90000);
+        });
+
+        try {
+          const response = await Promise.race([apiCall, timeoutPromise]);
+          return response;
+        } finally {
+          if (timeoutId) clearTimeout(timeoutId);
+        }
+      } catch (error: any) {
+        lastError = error;
+        console.error(`Model ${model} (attempt ${attempt}) failed with error:`, error?.message || error);
+
+        const errorString = typeof error === 'string' ? error : (error?.message || JSON.stringify(error) || '');
+        const isQuotaOrDemandError = 
+          error?.status === 429 || 
+          error?.statusCode === 429 || 
+          error?.status === 503 ||
+          error?.statusCode === 503 ||
+          error?.code === 429 ||
+          error?.code === 503 ||
+          /quota|limit|429|exhausted|503|demand|unavailable/i.test(errorString);
+
+        if (isQuotaOrDemandError) {
+          coolOffModels.set(model, Date.now());
+          if (attempt < 2) {
+            console.log(`Rate limit encountered on ${model}. Waiting 2.5s before retry...`);
+            await new Promise(r => setTimeout(r, 2500));
+            continue; // Retry same model once
+          }
+        }
+        break; // Move to next model if not 429 or if attempt 2 failed
       }
-      // Immediately proceed to the next model in the list
     }
   }
 
@@ -482,21 +487,33 @@ apiRouter.post("/generate-materi", async (req, res) => {
     let userPrompt = "";
 
     if (mode === "materi") {
-      systemInstruction = `Anda adalah ahli kurikulum sosiologi dan pengajar senior kelas dunia.
-Tugas Anda adalah menyusun RINGKASAN MATERI AJAR (bukan prompt) yang sangat detail, akademis, komprehensif, mendalam, dan sistematis berdasarkan parameter kisi-kisi matriks yang diberikan.
-Materi ajar ini wajib terdiri dari 4 bagian utama yang diberi nomor/judul Markdown:
+      systemInstruction = `Anda adalah ahli kurikulum sosiologi dan pengajar senior kelas dunia yang sangat karismatik dan inspiratif.
+Tugas Anda adalah menyusun RINGKASAN MATERI AJAR yang sangat detail, akademis, komprehensif, mendalam, dan sistematis berdasarkan parameter kisi-kisi matriks yang diberikan.
+
+PEDOMAN GAYA PENULISAN & FORMATTING TERIKAT:
+1. Tulis dengan gaya bahasa yang sangat MENARIK BACA, KOMUNIKATIF, INSPIRATIF, DAN MENGGUGAH MINAT BACA SISWA MAUPUN GURU.
+2. ATURAN BOLD DAN ITALIC (CETAK TEBAL DAN MIRING):
+   - WAJIB MENGGUNAKAN CETAK MIRING (Markdown *istilah*) KHUSUS UNTUK SEMUA ISTILAH BAHASA ASING, BAHASA LATIN, ATAU BAHASA INGGRIS (contoh: *social mobility*, *status quo*, *Gemeinschaft*, *Gesellschaft*, *Verstehen*, *anomie*, *looking-glass self*, *pattern variables*).
+   - WAJIB MENGGUNAKAN CETAK TEBAL (Markdown **Konsep**) KHUSUS UNTUK KATA ATAU KONSEP KHUSUS, NAMA TEORI, NAMA TOKOH/AHLI SOSIOLOGI, DAN KUNCI UTAMA MATERI (contoh: **Emile Durkheim**, **Teori Konflik**, **Mobilitas Sosial Vertikal**, **Solidaritas Mekanis**).
+3. DILARANG KERAS MENGGUNAKAN TABEL: Jangan membuat tabel Markdown (| Kolom 1 | Kolom 2 |). Sajikan semua perbandingan, dimensi, klasifikasi, atau materi dalam bentuk narasi paragraf yang rapi, sub-bab yang jelas, serta daftar poin (1, 2, 3 atau bullet points).
+4. DILARANG MENGGUNAKAN TANDA BINTANG / ASTERISK ('*') SECARA ACAK ATAU BERANTAKAN. Hanya gunakan tanda bintang ganda (**konsep**) untuk bold dan bintang tunggal (*foreign term*) untuk italic.
+
+Materi ajar ini wajib terdiri dari 4 bagian utama yang diberi judul Markdown (#):
 # 1. PENDAHULUAN & DEFINISI
-Berikan pengantar sejarah konsep dan definisi teoretis mendalam berdasarkan pandangan para tokoh/ahli sosiologi terkemuka (seperti Auguste Comte, Emile Durkheim, Max Weber, Karl Marx, dll. yang relevan).
+Berikan pengantar inspiratif tentang latar belakang sejarah konsep dan definisi teoretis mendalam berdasarkan pandangan para tokoh/ahli sosiologi terkemuka (seperti Auguste Comte, Emile Durkheim, Max Weber, Karl Marx, dsb. yang relevan).
+
 # 2. KONSEP UTAMA & TEORI PENDEKATAN
-Berikan penjelasan teoretis sosiologis yang kuat, klasifikasi, dimensi, indikator, atau mekanisme penting di dalam topik ini secara mendalam.
+Berikan penjelasan teoretis sosiologis yang kuat, klasifikasi, dimensi, indikator, serta mekanisme penting. Jelaskan klasifikasi/perbandingan secara naratif dan terstruktur menggunakan daftar poin yang rapi tanpa tabel.
+
 # 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)
-Berikan penjelasan mendalam tentang satu studi kasus nyata, faktual, spesifik, atau fenomena sosial kontemporer di kalangan masyarakat Indonesia saat ini yang menggambarkan konsep tersebut.
+Berikan penjelasan dan narasi faktual yang memikat tentang satu studi kasus nyata, spesifik, atau fenomena sosial kontemporer di masyarakat Indonesia saat ini yang sangat menarik untuk dibaca.
+
 # 4. ANALISIS KRITIS & REFLEKSI
-Tuliskan 1-2 pertanyaan reflektif tingkat tinggi (HOTS) yang mendalam untuk merangsang pemikiran kritis siswa.
+Tuliskan 2-3 pertanyaan reflektif tingkat tinggi (HOTS) yang mendalam untuk merangsang pemikiran kritis siswa.
 
-Gunakan format Markdown yang indah dan mudah dibaca. Tulis isi materi secara detail dan komprehensif, jangan berikan kata pengantar/penutup atau penjelasan tambahan di luar isi materi itu sendiri.`;
+Tulis isi materi secara detail, panjang lebar, kaya analogi kontekstual Indonesia, tanpa memberikan kata pengantar/penutup atau penjelasan tambahan di luar isi materi itu sendiri.`;
 
-      userPrompt = `Buatkan RINGKASAN MATERI AJAR yang komprehensif dan mendalam untuk tingkat SMA Kelas XII berdasarkan unit berikut:
+      userPrompt = `Buatkan RINGKASAN MATERI AJAR yang komprehensif, inspiratif, dan sangat menarik untuk dibaca untuk tingkat SMA Kelas XII berdasarkan unit berikut:
 Mata Pelajaran: ${mataPelajaran || "Sosiologi"}
 Topik / Elemen Materi: ${kisi.elemenMateri}
 Sub-elemen / Sub-materi: ${kisi.subElemenMateri}
@@ -504,7 +521,7 @@ Target Kompetensi Siswa: ${kisi.kompetensi}
 Level Kognitif: ${kisi.levelKognitif === 'level_1' ? 'Pemahaman & Pengetahuan (Knowing - C1/C2)' : kisi.levelKognitif === 'level_2' ? 'Penerapan/Aplikasi (Applying - C3)' : 'Penalaran/Analisis Tinggi (Reasoning/HOTS - C4/C5/C6)'}
 Batasan & Catatan Kurikulum: ${kisi.batasanCatatan || "Tidak ada batasan khusus"}
 
-Tulis secara panjang lebar dan kaya konten akademis tanpa meringkas berlebihan.`;
+Tulis secara panjang lebar, menarik, dan rapi. Gunakan cetak miring (*...*) untuk bahasa asing dan cetak tebal (**...**) untuk kata/konsep khusus. TANPA TABEL.`;
     } else {
       // Default to "prompt" mode
       systemInstruction = `Anda adalah ahli prompt engineering pendidikan dan desainer instruksional kelas dunia.

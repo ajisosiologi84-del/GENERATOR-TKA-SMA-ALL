@@ -2589,15 +2589,62 @@ export default function App() {
     }
   };
 
+  const [copiedMateriKisiId, setCopiedMateriKisiId] = useState<string | null>(null);
+
+  const copyToClipboard = async (text: string): Promise<boolean> => {
+    if (!text) return false;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (err) {
+      console.warn("navigator.clipboard failed:", err);
+    }
+    try {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-999999px";
+      textArea.style.top = "-999999px";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      const successful = document.execCommand('copy');
+      textArea.remove();
+      return successful;
+    } catch (fallbackErr) {
+      console.error("Fallback copy failed:", fallbackErr);
+      return false;
+    }
+  };
+
   const handleDeleteMateri = async (kisiId: string) => {
     const label = activeSubTab === 'materi' ? 'Ringkasan Materi' : 'Prompt Slide & Infografis';
     if (!confirm(`Apakah Anda yakin ingin menghapus ${label} untuk kisi-kisi ini?`)) return;
     try {
       const updateField = activeSubTab === 'materi' ? 'content' : 'prompt';
-      await setDoc(doc(db, 'materials', kisiId), {
-        [updateField]: '',
-        updatedAt: new Date()
-      }, { merge: true });
+      
+      // Update local state immediately so UI refreshes without delay
+      setGeneratedMaterials(prev => {
+        const existing = prev[kisiId] || {};
+        return {
+          ...prev,
+          [kisiId]: {
+            ...existing,
+            [updateField]: ''
+          }
+        };
+      });
+
+      if (currentUser?.uid) {
+        await setDoc(doc(db, 'materials', kisiId), {
+          [updateField]: '',
+          userId: currentUser.uid,
+          updatedAt: new Date()
+        }, { merge: true });
+      }
+
       setIsEditingMateri(false);
       alert(`${label} berhasil dihapus!`);
     } catch (err: any) {
@@ -2836,6 +2883,33 @@ export default function App() {
             color: #374151;
             border-radius: 0;
             text-align: justify;
+          }
+          .content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16pt 0;
+            border: 1.5pt solid #111827;
+            page-break-inside: avoid;
+          }
+          .content th {
+            background-color: #1e3a8a !important;
+            color: #ffffff !important;
+            font-weight: bold;
+            padding: 8pt 10pt;
+            border: 1pt solid #1e3a8a;
+            text-align: left;
+            font-size: 11pt;
+            font-family: 'Times New Roman', serif;
+          }
+          .content td {
+            padding: 8pt 10pt;
+            border: 1pt solid #cbd5e1;
+            font-size: 11pt;
+            vertical-align: top;
+            font-family: 'Times New Roman', serif;
+          }
+          .content tr:nth-child(even) {
+            background-color: #f8fafc;
           }
           .print-btn-container {
             position: fixed;
@@ -7511,11 +7585,45 @@ PANDUAN EKSTRA:
                               {kisi.kompetensi}
                             </p>
 
-                            <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2">
-                              <div className="flex gap-1.5">
+                            <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-1.5 flex-wrap">
+                              <div className="flex items-center gap-1 flex-wrap">
                                 <span className="bg-slate-200 text-slate-700 text-[9px] font-semibold px-1.5 py-0.5 rounded">
                                   {getLevelKognitifLabel(kisi.levelKognitif)}
                                 </span>
+                                {((activeSubTab === 'materi' && isMateriReady) || (activeSubTab === 'prompt' && isPromptReady)) && (
+                                  <>
+                                    <button
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        const text = activeSubTab === 'materi' ? generatedMaterials[kisi.id]?.content : generatedMaterials[kisi.id]?.prompt;
+                                        if (text) {
+                                          const success = await copyToClipboard(text);
+                                          if (success) {
+                                            setCopiedMateriKisiId(kisi.id);
+                                            setTimeout(() => setCopiedMateriKisiId(null), 2500);
+                                          }
+                                        }
+                                      }}
+                                      className="text-[9px] font-bold px-1.5 py-0.5 bg-slate-200/80 hover:bg-slate-300 text-slate-700 rounded transition flex items-center gap-0.5 cursor-pointer"
+                                      title="Salin Teks"
+                                    >
+                                      {copiedMateriKisiId === kisi.id ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                                      <span>{copiedMateriKisiId === kisi.id ? 'Tersalin' : 'Salin'}</span>
+                                    </button>
+
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteMateri(kisi.id);
+                                      }}
+                                      className="text-[9px] font-bold px-1.5 py-0.5 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded transition flex items-center gap-0.5 cursor-pointer"
+                                      title="Hapus"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                      <span>Hapus</span>
+                                    </button>
+                                  </>
+                                )}
                               </div>
 
                               <button
@@ -7524,7 +7632,7 @@ PANDUAN EKSTRA:
                                   handleGenerateMateri(kisi, activeSubTab);
                                 }}
                                 disabled={isGenerating}
-                                className={`text-[10px] font-black px-2.5 py-1 rounded transition-all flex items-center gap-1 ${
+                                className={`text-[10px] font-black px-2 py-1 rounded transition-all flex items-center gap-1 ${
                                   (activeSubTab === 'materi' ? isMateriReady : isPromptReady)
                                     ? 'bg-slate-200 hover:bg-slate-300 text-slate-700' 
                                     : 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-sm hover:from-purple-700 hover:to-indigo-700'
@@ -7540,7 +7648,7 @@ PANDUAN EKSTRA:
                                     <Sparkles className="h-3 w-3" />
                                     <span>
                                       {(activeSubTab === 'materi' ? isMateriReady : isPromptReady)
-                                        ? `Buat Ulang ${activeSubTab === 'materi' ? 'Materi' : 'Prompt'}`
+                                        ? `Buat Ulang`
                                         : `Buat ${activeSubTab === 'materi' ? 'Materi' : 'Prompt'} AI`
                                       }
                                     </span>
@@ -7714,17 +7822,33 @@ PANDUAN EKSTRA:
                                       </button>
 
                                       <button
-                                        onClick={() => {
-                                          navigator.clipboard.writeText(activeMateriContent);
-                                          const successMsg = activeSubTab === 'materi'
-                                            ? "Ringkasan materi berhasil disalin ke clipboard!"
-                                            : "Mega-Prompt untuk NotebookLM & Gemini berhasil disalin ke clipboard! Anda dapat menempelkannya langsung ke NotebookLM atau Gemini AI.";
-                                          alert(successMsg);
+                                        onClick={async () => {
+                                          const success = await copyToClipboard(activeMateriContent);
+                                          if (success) {
+                                            setCopiedMateriKisiId(activeKisi.id);
+                                            setTimeout(() => setCopiedMateriKisiId(null), 2500);
+                                            const successMsg = activeSubTab === 'materi'
+                                              ? "Ringkasan materi berhasil disalin ke clipboard!"
+                                              : "Mega-Prompt berhasil disalin ke clipboard!";
+                                            alert(successMsg);
+                                          } else {
+                                            alert("Gagal menyalin teks secara otomatis. Silakan pilih dan salin teks secara manual.");
+                                          }
                                         }}
-                                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+                                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                                        title={`Salin ${activeSubTab === 'materi' ? 'ringkasan materi' : 'prompt'}`}
                                       >
-                                        <Copy className="h-3.5 w-3.5" />
-                                        <span>Salin</span>
+                                        {copiedMateriKisiId === activeKisi.id ? (
+                                          <>
+                                            <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                            <span className="text-emerald-700">Tersalin!</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Copy className="h-3.5 w-3.5 text-slate-600" />
+                                            <span>Salin</span>
+                                          </>
+                                        )}
                                       </button>
 
                                       <button
@@ -9542,7 +9666,7 @@ PANDUAN EKSTRA:
 }
 
 function SimpleMarkdown({ content }: { content: string }) {
-  const blocks = content.split('\n\n');
+  const blocks = content.split(/\n\n+/);
 
   return (
     <div className="space-y-4 text-slate-700 leading-relaxed text-sm">
@@ -9550,25 +9674,74 @@ function SimpleMarkdown({ content }: { content: string }) {
         const trimmed = block.trim();
         if (!trimmed) return null;
 
+        // Table
+        if (trimmed.includes('|') && trimmed.split('\n').some(l => l.includes('|-') || l.includes('| -') || l.includes('|:'))) {
+          const lines = trimmed.split('\n').map(l => l.trim()).filter(Boolean);
+          if (lines.length >= 2) {
+            const isSeparator = (line: string) => /^\|?\s*:?-+:?\s*(\||\s*$)/.test(line) && line.includes('-');
+            const headerLine = lines[0];
+            const dataLines = lines.slice(1).filter(l => !isSeparator(l));
+
+            const parseRow = (line: string) => {
+              let t = line;
+              if (t.startsWith('|')) t = t.slice(1);
+              if (t.endsWith('|')) t = t.slice(0, -1);
+              return t.split('|').map(c => c.trim());
+            };
+
+            const headers = parseRow(headerLine);
+
+            return (
+              <div key={bIdx} className="my-5 overflow-x-auto rounded-xl border border-indigo-100 shadow-sm bg-white">
+                <table className="w-full text-left border-collapse text-xs sm:text-sm">
+                  <thead>
+                    <tr className="bg-indigo-900 text-white font-bold divide-x divide-indigo-800">
+                      {headers.map((h, i) => (
+                        <th key={i} className="px-3.5 py-2.5 border-b border-indigo-800 text-xs font-bold uppercase tracking-wider">
+                          {renderInlines(h)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {dataLines.map((rowLine, rIdx) => {
+                      const cells = parseRow(rowLine);
+                      return (
+                        <tr key={rIdx} className={rIdx % 2 === 0 ? 'bg-white hover:bg-indigo-50/40 transition' : 'bg-slate-50/60 hover:bg-indigo-50/40 transition'}>
+                          {cells.map((cell, cIdx) => (
+                            <td key={cIdx} className="px-3.5 py-2.5 leading-relaxed border-r border-slate-100 last:border-r-0">
+                              {renderInlines(cell)}
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          }
+        }
+
         // Header 1
         if (trimmed.startsWith('# ')) {
-          return <h1 key={bIdx} className="text-xl font-extrabold text-indigo-950 mt-6 mb-2 pb-1 border-b border-slate-200">{trimmed.slice(2)}</h1>;
+          return <h1 key={bIdx} className="text-xl font-extrabold text-indigo-950 mt-6 mb-2 pb-1 border-b border-indigo-200">{renderInlines(trimmed.slice(2))}</h1>;
         }
         // Header 2
         if (trimmed.startsWith('## ')) {
-          return <h2 key={bIdx} className="text-lg font-bold text-indigo-950 mt-5 mb-2">{trimmed.slice(3)}</h2>;
+          return <h2 key={bIdx} className="text-lg font-bold text-indigo-900 mt-5 mb-2 pl-2.5 border-l-4 border-indigo-600">{renderInlines(trimmed.slice(3))}</h2>;
         }
         // Header 3
         if (trimmed.startsWith('### ')) {
-          return <h3 key={bIdx} className="text-md font-bold text-slate-850 mt-4 mb-2">{trimmed.slice(4)}</h3>;
+          return <h3 key={bIdx} className="text-base font-bold text-slate-800 mt-4 mb-2 italic">{renderInlines(trimmed.slice(4))}</h3>;
         }
         // Bullet points
-        if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
+        if (trimmed.startsWith('* ') || trimmed.startsWith('- ') || trimmed.startsWith('+ ')) {
           const lines = trimmed.split('\n');
           return (
-            <ul key={bIdx} className="list-disc pl-5 space-y-1.5">
+            <ul key={bIdx} className="list-disc pl-5 space-y-1.5 my-2">
               {lines.map((line, lIdx) => {
-                const itemText = line.replace(/^[*-\s]+/, '');
+                const itemText = line.replace(/^[*+\-\s]+/, '');
                 return <li key={lIdx}>{renderInlines(itemText)}</li>;
               })}
             </ul>
@@ -9578,7 +9751,7 @@ function SimpleMarkdown({ content }: { content: string }) {
         if (/^\d+\.\s/.test(trimmed)) {
           const lines = trimmed.split('\n');
           return (
-            <ol key={bIdx} className="list-decimal pl-5 space-y-1.5">
+            <ol key={bIdx} className="list-decimal pl-5 space-y-1.5 my-2">
               {lines.map((line, lIdx) => {
                 const itemText = line.replace(/^\d+\.\s+/, '');
                 return <li key={lIdx}>{renderInlines(itemText)}</li>;
@@ -9590,7 +9763,7 @@ function SimpleMarkdown({ content }: { content: string }) {
         if (trimmed.startsWith('> ')) {
           const text = trimmed.slice(2).replace(/\n>\s/g, '\n');
           return (
-            <blockquote key={bIdx} className="border-l-4 border-purple-500 bg-slate-100/50 p-3 rounded-r-xl italic text-slate-600 my-2">
+            <blockquote key={bIdx} className="border-l-4 border-indigo-500 bg-indigo-50/50 p-3.5 rounded-r-xl italic text-slate-700 my-3">
               {renderInlines(text)}
             </blockquote>
           );
@@ -9598,7 +9771,7 @@ function SimpleMarkdown({ content }: { content: string }) {
 
         // Standard paragraph
         return (
-          <p key={bIdx} className="whitespace-pre-line text-slate-650 leading-relaxed">
+          <p key={bIdx} className="whitespace-pre-line text-slate-700 leading-relaxed text-justify">
             {renderInlines(trimmed)}
           </p>
         );
@@ -9608,47 +9781,34 @@ function SimpleMarkdown({ content }: { content: string }) {
 }
 
 function renderInlines(text: string) {
-  const parts = [];
-  let currentText = text;
+  if (!text) return null;
+  const regex = /(\*\*\*.*?\*\*\*|\*\*.*?\*\*|\*.*?\*|`.*?`)/g;
+  const parts = text.split(regex);
 
-  while (currentText.length > 0) {
-    const boldMatch = currentText.match(/\*\*([^*]+)\*\*/);
-    const codeMatch = currentText.match(/`([^`]+)`/);
-
-    let firstMatch = null;
-    let type = '';
-
-    if (boldMatch && codeMatch) {
-      if ((boldMatch.index ?? 0) < (codeMatch.index ?? 0)) {
-        firstMatch = boldMatch;
-        type = 'bold';
-      } else {
-        firstMatch = codeMatch;
-        type = 'code';
-      }
-    } else if (boldMatch) {
-      firstMatch = boldMatch;
-      type = 'bold';
-    } else if (codeMatch) {
-      firstMatch = codeMatch;
-      type = 'code';
-    }
-
-    if (firstMatch && firstMatch.index !== undefined) {
-      if (firstMatch.index > 0) {
-        parts.push(currentText.substring(0, firstMatch.index));
-      }
-      if (type === 'bold') {
-        parts.push(<strong key={currentText.length} className="font-extrabold text-slate-900">{firstMatch[1]}</strong>);
-      } else if (type === 'code') {
-        parts.push(<code key={currentText.length} className="bg-slate-250 px-1.5 py-0.5 rounded text-rose-600 font-mono text-xs">{firstMatch[1]}</code>);
-      }
-      currentText = currentText.substring(firstMatch.index + firstMatch[0].length);
-    } else {
-      parts.push(currentText);
-      break;
-    }
-  }
-
-  return <>{parts}</>;
+  return (
+    <>
+      {parts.map((part, index) => {
+        if (!part) return null;
+        if (part.startsWith('***') && part.endsWith('***') && part.length >= 6) {
+          const inner = part.slice(3, -3).replace(/\*/g, '');
+          return <strong key={index} className="font-extrabold italic text-slate-900">{inner}</strong>;
+        }
+        if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
+          const inner = part.slice(2, -2).replace(/\*/g, '');
+          return <strong key={index} className="font-extrabold text-slate-900">{inner}</strong>;
+        }
+        if (part.startsWith('*') && part.endsWith('*') && part.length >= 2) {
+          const inner = part.slice(1, -1).replace(/\*/g, '');
+          return <em key={index} className="italic text-slate-800">{inner}</em>;
+        }
+        if (part.startsWith('`') && part.endsWith('`') && part.length >= 2) {
+          const inner = part.slice(1, -1);
+          return <code key={index} className="bg-slate-200 text-rose-700 px-1.5 py-0.5 rounded font-mono text-xs">{inner}</code>;
+        }
+        // Plain text: strip stray asterisks
+        const cleaned = part.replace(/\*/g, '');
+        return <span key={index}>{cleaned}</span>;
+      })}
+    </>
+  );
 }

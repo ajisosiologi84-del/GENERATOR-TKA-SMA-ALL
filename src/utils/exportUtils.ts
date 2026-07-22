@@ -427,7 +427,7 @@ export function exportQuestionsToExcel(questions: Question[], mataPelajaran: str
 }
 
 /**
- * Helper to convert Simple Markdown to styled HTML for Word Export
+ * Helper to convert Simple Markdown to styled HTML for Word Export and PDF Print
  */
 export function markdownToHtmlForWord(markdown: string): string {
   if (!markdown) return '';
@@ -438,29 +438,69 @@ export function markdownToHtmlForWord(markdown: string): string {
   const converted = blocks.map(block => {
     let trimmed = block.trim();
     if (!trimmed) return '';
+
+    // Check if block is a Table
+    if (trimmed.includes('|') && trimmed.split('\n').some(l => l.includes('|-') || l.includes('| -') || l.includes('|:'))) {
+      const lines = trimmed.split('\n').map(l => l.trim()).filter(Boolean);
+      if (lines.length >= 2) {
+        const isSeparator = (line: string) => /^\|?\s*:?-+:?\s*(\||\s*$)/.test(line) && line.includes('-');
+        const headerLine = lines[0];
+        const dataLines = lines.slice(1).filter(l => !isSeparator(l));
+
+        const parseRow = (line: string) => {
+          let t = line;
+          if (t.startsWith('|')) t = t.slice(1);
+          if (t.endsWith('|')) t = t.slice(0, -1);
+          return t.split('|').map(c => c.trim());
+        };
+
+        const headers = parseRow(headerLine);
+        const headerHtml = headers.map(h => 
+          `<th style="border: 1px solid #1e3a8a; background-color: #1e3a8a; color: #ffffff; padding: 8px 12px; font-family: 'Times New Roman', serif; font-size: 11pt; font-weight: bold; text-align: left;">${parseInlineMarkdown(h)}</th>`
+        ).join('');
+
+        const rowsHtml = dataLines.map((rowLine, rIdx) => {
+          const cells = parseRow(rowLine);
+          const bg = rIdx % 2 === 0 ? '#ffffff' : '#f8fafc';
+          const cellHtml = cells.map(cell => 
+            `<td style="border: 1px solid #cbd5e1; background-color: ${bg}; padding: 8px 12px; font-family: 'Times New Roman', serif; font-size: 11pt; color: #1e293b; text-align: left; vertical-align: top;">${parseInlineMarkdown(cell)}</td>`
+          ).join('');
+          return `<tr>${cellHtml}</tr>`;
+        }).join('');
+
+        return `<table style="width: 100%; border-collapse: collapse; margin-top: 15pt; margin-bottom: 15pt; border: 1.5px solid #1e3a8a;">
+          <thead>
+            <tr>${headerHtml}</tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>`;
+      }
+    }
     
     // Headings
     if (trimmed.startsWith('# ')) {
-      return `<h1 style="font-family: 'Times New Roman', 'Georgia', serif; font-size: 16pt; color: #111827; border-bottom: 2pt solid #111827; padding-bottom: 4px; margin-top: 24pt; margin-bottom: 12pt; font-weight: normal; text-transform: none; line-height: 1.3;">${trimmed.slice(2)}</h1>`;
+      return `<h1 style="font-family: 'Times New Roman', 'Georgia', serif; font-size: 16pt; color: #1e3a8a; border-bottom: 2pt solid #1e3a8a; padding-bottom: 4px; margin-top: 24pt; margin-bottom: 12pt; font-weight: bold; text-transform: none; line-height: 1.3;">${parseInlineMarkdown(trimmed.slice(2))}</h1>`;
     }
     if (trimmed.startsWith('## ')) {
-      return `<h2 style="font-family: 'Times New Roman', 'Georgia', serif; font-size: 14pt; color: #1f2937; margin-top: 18pt; margin-bottom: 10pt; font-weight: normal; border-left: 3.5pt solid #1f2937; padding-left: 8pt; line-height: 1.3;">${trimmed.slice(3)}</h2>`;
+      return `<h2 style="font-family: 'Times New Roman', 'Georgia', serif; font-size: 14pt; color: #1e293b; margin-top: 18pt; margin-bottom: 10pt; font-weight: bold; border-left: 3.5pt solid #1e3a8a; padding-left: 8pt; line-height: 1.3;">${parseInlineMarkdown(trimmed.slice(3))}</h2>`;
     }
     if (trimmed.startsWith('### ')) {
-      return `<h3 style="font-family: 'Times New Roman', 'Georgia', serif; font-size: 12pt; color: #374151; margin-top: 14pt; margin-bottom: 8pt; font-weight: normal; font-style: italic; line-height: 1.3;">${trimmed.slice(4)}</h3>`;
+      return `<h3 style="font-family: 'Times New Roman', 'Georgia', serif; font-size: 12pt; color: #334155; margin-top: 14pt; margin-bottom: 8pt; font-weight: bold; font-style: italic; line-height: 1.3;">${parseInlineMarkdown(trimmed.slice(4))}</h3>`;
     }
     
     // Blockquote
     if (trimmed.startsWith('> ')) {
       const cleanText = trimmed.replace(/^>\s?/gm, '').trim();
-      return `<div style="border-left: 3pt solid #4b5563; background-color: #f9fafb; padding: 10pt 15pt; margin: 12pt 0; font-style: italic; color: #374151; font-family: 'Times New Roman', serif; font-size: 11.5pt; text-align: justify; line-height: 1.5;">${parseInlineMarkdown(cleanText)}</div>`;
+      return `<div style="border-left: 3.5pt solid #4f46e5; background-color: #f8fafc; padding: 10pt 15pt; margin: 12pt 0; font-style: italic; color: #334155; font-family: 'Times New Roman', serif; font-size: 11.5pt; text-align: justify; line-height: 1.5;">${parseInlineMarkdown(cleanText)}</div>`;
     }
     
     // Lists (bulleted)
-    if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
+    if (trimmed.startsWith('* ') || trimmed.startsWith('- ') || trimmed.startsWith('+ ')) {
       const lines = trimmed.split('\n');
       const itemsHtml = lines.map(line => {
-        const itemText = line.replace(/^[*-\s]+/, '').trim();
+        const itemText = line.replace(/^[*+\-\s]+/, '').trim();
         return `<li style="font-family: 'Times New Roman', serif; font-size: 12pt; margin-bottom: 6pt; line-height: 1.5; text-align: justify; color: #111827;">${parseInlineMarkdown(itemText)}</li>`;
       }).join('');
       return `<ul style="margin-top: 8pt; margin-bottom: 8pt; padding-left: 24pt; list-style-type: disc;">${itemsHtml}</ul>`;
@@ -477,20 +517,41 @@ export function markdownToHtmlForWord(markdown: string): string {
     }
     
     // Normal paragraph
-    return `<p style="font-family: 'Times New Roman', serif; font-size: 12pt; line-height: 1.5; margin-top: 0; margin-bottom: 10pt; text-align: justify; color: #111827; text-indent: 0.5in;">${parseInlineMarkdown(trimmed)}</p>`;
+    return `<p style="font-family: 'Times New Roman', serif; font-size: 12pt; line-height: 1.6; margin-top: 0; margin-bottom: 10pt; text-align: justify; color: #111827;">${parseInlineMarkdown(trimmed)}</p>`;
   }).join('\n');
   
   return converted;
 }
 
 function parseInlineMarkdown(text: string): string {
-  let formatted = text;
-  // Bold **text**
-  formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  // Italic *text*
-  formatted = formatted.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-  // Inline Code `code`
-  formatted = formatted.replace(/`([^`]+)`/g, '<code style="background-color: #f3f4f6; padding: 2px 4px; font-family: Consolas, monospace; font-size: 10pt; color: #b91c1c; border: 1px solid #e5e7eb; border-radius: 3px;">$1</code>');
+  if (!text) return '';
+  
+  // Use regex to tokenize bold-italic, bold, italic, code
+  const regex = /(\*\*\*.*?\*\*\*|\*\*.*?\*\*|\*.*?\*|`.*?`)/g;
+  const parts = text.split(regex);
+
+  const formatted = parts.map(part => {
+    if (!part) return '';
+    if (part.startsWith('***') && part.endsWith('***') && part.length >= 6) {
+      const inner = part.slice(3, -3).replace(/\*/g, '');
+      return `<strong><em>${inner}</em></strong>`;
+    }
+    if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
+      const inner = part.slice(2, -2).replace(/\*/g, '');
+      return `<strong>${inner}</strong>`;
+    }
+    if (part.startsWith('*') && part.endsWith('*') && part.length >= 2) {
+      const inner = part.slice(1, -1).replace(/\*/g, '');
+      return `<em>${inner}</em>`;
+    }
+    if (part.startsWith('`') && part.endsWith('`') && part.length >= 2) {
+      const inner = part.slice(1, -1);
+      return `<code style="background-color: #f3f4f6; padding: 2px 4px; font-family: Consolas, monospace; font-size: 10pt; color: #b91c1c; border: 1px solid #e5e7eb; border-radius: 3px;">${inner}</code>`;
+    }
+    // For plain text parts, strip any stray asterisks
+    return part.replace(/\*/g, '');
+  }).join('');
+
   return formatted;
 }
 
