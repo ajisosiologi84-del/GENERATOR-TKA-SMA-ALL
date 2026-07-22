@@ -1663,6 +1663,7 @@ export default function App() {
 
   // Jadwal Rencana Pembelajaran State & Handlers
   const [jadwalList, setJadwalList] = useState<JadwalItem[]>([]);
+  const [jadwalSortNotification, setJadwalSortNotification] = useState<string | null>(null);
 
   // Sync selectedJadwalPresetSubject with config.mataPelajaran
   useEffect(() => {
@@ -1815,6 +1816,40 @@ export default function App() {
 
   const handleResetJadwal = () => {
     setShowClearJadwalConfirm(true);
+  };
+
+  const handleSortJadwal = () => {
+    if (jadwalList.length === 0) return;
+
+    const monthOrder: Record<string, number> = {
+      'Juli': 1,
+      'Agustus': 2,
+      'September': 3,
+      'Oktober': 4,
+      'November': 5,
+      'Desember': 6,
+      'Januari': 7,
+      'Februari': 8,
+      'Maret': 9,
+      'April': 10,
+      'Mei': 11,
+      'Juni': 12
+    };
+
+    const sorted = [...jadwalList].sort((a, b) => {
+      const mA = monthOrder[a.bulan] || 99;
+      const mB = monthOrder[b.bulan] || 99;
+      if (mA !== mB) {
+        return mA - mB;
+      }
+      return (Number(a.mingguKe) || 0) - (Number(b.mingguKe) || 0);
+    });
+
+    setJadwalList(sorted);
+    setJadwalSortNotification('Jadwal Rencana Pembelajaran TKA Kelas XII berhasil diurutkan berdasarkan Bulan dan Minggu ke-!');
+    setTimeout(() => {
+      setJadwalSortNotification(null);
+    }, 4000);
   };
 
   const executeClearJadwal = () => {
@@ -7851,6 +7886,15 @@ PANDUAN EKSTRA:
                     </button>
 
                     <button
+                      onClick={handleSortJadwal}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 rounded-xl text-xs font-bold transition cursor-pointer shadow-xs"
+                      title="Urutkan Jadwal Rencana Pembelajaran TKA Kelas XII berdasarkan bulan dan Minggu ke-"
+                    >
+                      <Sliders className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>Urutkan Jadwal Rencana Pembelajaran TKA Kelas XII</span>
+                    </button>
+
+                    <button
                       onClick={() => {
                         const printWindow = window.open('', '_blank');
                         if (!printWindow) return;
@@ -7912,6 +7956,28 @@ PANDUAN EKSTRA:
                     </button>
                   </div>
                 </div>
+
+                <AnimatePresence>
+                  {jadwalSortNotification && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between gap-2 text-xs text-emerald-800 font-medium overflow-hidden"
+                    >
+                      <div className="flex items-center gap-2">
+                        <CheckSquare className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <span>{jadwalSortNotification}</span>
+                      </div>
+                      <button 
+                        onClick={() => setJadwalSortNotification(null)}
+                        className="p-1 hover:bg-emerald-100 rounded-lg text-emerald-600 transition"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 {/* Info Box */}
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-800 flex gap-2.5">
