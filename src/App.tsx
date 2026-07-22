@@ -636,6 +636,54 @@ const PUSMENDIK_FISIKA_PRESETS = [
     subElemenMateri: 'Bunyi',
     kompetensi: 'Menganalisis keterkaitan sifat bunyi dengan parameter gelombangnya berdasarkan peristiwa dalam kehidupan sehari-hari.',
     batasanCatatan: 'Karakteristik gelombang mekanik dalam gelombang bunyi, sumber dan intensitas bunyi.'
+  },
+  {
+    elemenMateri: 'Gelombang',
+    subElemenMateri: 'Cahaya',
+    kompetensi: 'Menganalisis keterkaitan sifat cahaya dengan peristiwa dalam kehidupan sehari-hari serta penerapannya.',
+    batasanCatatan: 'Karakteristik gelombang elektromagnetik, sifat cahaya serta penerapannya dalam cermin, lensa, dan alat optik.'
+  },
+  {
+    elemenMateri: 'Kalor dan Termodinamika',
+    subElemenMateri: 'Kalor dan Perpindahannya',
+    kompetensi: 'Menguraikan pengaruh kalor terhadap kenaikan suhu, perubahan wujud zat, serta faktor-faktor yang mempengaruhi perpindahan kalor dalam kehidupan sehari-hari.',
+    batasanCatatan: 'Kalor untuk perubahan suhu, perubahan wujud, pemuaian, perpindahan kalor, serta peristiwa pencampuran zat.'
+  },
+  {
+    elemenMateri: 'Kalor dan Termodinamika',
+    subElemenMateri: 'Pemanasan Global',
+    kompetensi: 'Menganalisis penyebab, proses, dan cara mengatasi permasalahan terkait dengan pemanasan global.',
+    batasanCatatan: 'Efek rumah kaca: fokus pada proses, penyebab, cara mengatasinya.'
+  },
+  {
+    elemenMateri: 'Kalor dan Termodinamika',
+    subElemenMateri: 'Gas Ideal',
+    kompetensi: 'Mengidentifikasi besaran tertentu pada perubahan suhu, tekanan, dan/atau volume gas ideal dalam ruang tertutup.',
+    batasanCatatan: 'Hukum Boyle, Boyle-Gay Lussac, dan persamaan gas ideal.'
+  },
+  {
+    elemenMateri: 'Kalor dan Termodinamika',
+    subElemenMateri: 'Termodinamika',
+    kompetensi: 'Menganalisis perubahan kalor, perubahan energi dalam, atau usaha dalam proses termodinamika.',
+    batasanCatatan: 'Empat proses termodinamika, hukum Termodinamik, mesin kalor.'
+  },
+  {
+    elemenMateri: 'Kelistrikan',
+    subElemenMateri: 'Listrik Statis',
+    kompetensi: 'Menganalisis keterkaitan besaran listrik statis dalam peristiwa yang terjadi dalam kehidupan sehari-hari.',
+    batasanCatatan: 'Gejala listrik statis, hukum Coulomb, medan listrik, potensial listrik, dan penerapannya.'
+  },
+  {
+    elemenMateri: 'Kelistrikan',
+    subElemenMateri: 'Rangkaian Arus Searah',
+    kompetensi: 'Menguraikan hubungan antara kuat arus, tegangan, dan hambatan dalam rangkaian listrik arus searah berdasarkan hukum-hukum kelistrikan.',
+    batasanCatatan: 'Hukum Ohm dan Hukum Kirchoff dibatasi pada rangkaian listrik campuran (seri-paralel) dengan arus searah hingga perhitungan daya.'
+  },
+  {
+    elemenMateri: 'Keterampilan Proses Sains',
+    subElemenMateri: 'Penyelidikan Ilmiah, Mengamati, Mempertanyakan & Mengomunikasikan Data',
+    kompetensi: 'Mengamati, mempertanyakan, memprediksi, merencanakan penyelidikan, menentukan variabel/alat/prosedur, serta menganalisis dan mengomunikasikan data eksperimen secara sistematis.',
+    batasanCatatan: 'Keterampilan proses sains: mengamati, merumuskan hipotesis, merancang percobaan, mengorganisasi data tabel/grafik, dan mengomunikasikan hasil.'
   }
 ];
 
@@ -4422,17 +4470,27 @@ PANDUAN EKSTRA:
         alert("Tidak ada soal untuk dihapus.");
         return;
       }
-      const batch = writeBatch(db);
-      questions.forEach((q) => {
-        batch.delete(doc(db, 'questions', q.id));
-      });
-      await batch.commit();
+      
+      const chunkSize = 400;
+      for (let i = 0; i < questions.length; i += chunkSize) {
+        const chunk = questions.slice(i, i + chunkSize);
+        const batch = writeBatch(db);
+        chunk.forEach((q) => {
+          batch.delete(doc(db, 'questions', q.id));
+        });
+        await batch.commit();
+      }
+      
       setShowDeleteAllConfirm(false);
       alert("Semua butir soal berhasil dihapus.");
     } catch (err: any) {
       setShowDeleteAllConfirm(false);
       console.error("Gagal menghapus semua soal:", err);
-      handleFirestoreError(err, OperationType.DELETE, 'questions');
+      try {
+        handleFirestoreError(err, OperationType.DELETE, 'questions');
+      } catch (e) {
+        alert(`Gagal menghapus semua soal: ${err.message || err}`);
+      }
     }
   };
 
@@ -5623,34 +5681,36 @@ PANDUAN EKSTRA:
                 </h3>
 
                 <div className="space-y-4">
-                  {/* Prompt A: Matriks Asesmen */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-300 uppercase tracking-wide">
-                        PROMPT 1: PEMBUAT KISI-KISI (MATRIKS ASESMEN)
-                      </span>
-                      <button
-                        onClick={() => handleCopy(generatedKisiPrompt, 'kisi')}
-                        className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded flex items-center gap-1 transition-all"
-                      >
-                        {copiedKisi ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
-                        <span>{copiedKisi ? 'Tersalin!' : 'Salin Prompt'}</span>
-                      </button>
-                    </div>
-                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 max-h-36 overflow-y-auto text-xs font-mono text-slate-300 whitespace-pre-wrap">
-                      {generatedKisiPrompt}
-                    </div>
+                  {/* Button Generate Prompt above Salin Prompt */}
+                  <div>
+                    <button
+                      onClick={handleGenerateKisiViaAI}
+                      disabled={isGeneratingKisi}
+                      className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-slate-700 disabled:to-slate-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition flex items-center justify-center gap-2 text-sm cursor-pointer"
+                    >
+                      {isGeneratingKisi ? (
+                        <>
+                          <RefreshCw className="h-4.5 w-4.5 animate-spin text-white" />
+                          <span>Menggenerasi Prompt...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="h-4.5 w-4.5 text-yellow-300" />
+                          <span>Generate Prompt</span>
+                        </>
+                      )}
+                    </button>
                   </div>
 
-                  {/* Prompt B: Soal */}
-                  <div className="space-y-1.5">
+                  {/* Prompt Soal TKA SMA */}
+                  <div className="space-y-1.5 pt-2 border-t border-slate-800">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-300 uppercase tracking-wide">
-                        PROMPT 2: PEMBUAT SOAL TKA SMA
+                        PROMPT: PEMBUAT SOAL TKA SMA
                       </span>
                       <button
                         onClick={() => handleCopy(generatedSoalPrompt, 'soal')}
-                        className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded flex items-center gap-1 transition-all"
+                        className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded flex items-center gap-1 transition-all cursor-pointer"
                       >
                         {copiedSoal ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
                         <span>{copiedSoal ? 'Tersalin!' : 'Salin Prompt'}</span>
@@ -5660,49 +5720,6 @@ PANDUAN EKSTRA:
                       {generatedSoalPrompt}
                     </div>
                   </div>
-
-                  {/* Actions for Instant Generation */}
-                  <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row gap-3">
-                    <button
-                      onClick={handleGenerateKisiViaAI}
-                      disabled={isGeneratingKisi}
-                      className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-slate-700 disabled:to-slate-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition flex items-center justify-center gap-2 text-sm"
-                    >
-                      {isGeneratingKisi ? (
-                        <>
-                          <RefreshCw className="h-4.5 w-4.5 animate-spin text-white" />
-                          <span>Menganalisis Kurikulum...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="h-4.5 w-4.5 text-yellow-300" />
-                          <span>Generate Kisi-Kisi Instan via AI</span>
-                        </>
-                      )}
-                    </button>
-                    <button
-                      onClick={handleGenerateAllQuestions}
-                      disabled={isGeneratingSoal || kisiList.length === 0}
-                      className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:from-slate-700 disabled:to-slate-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition flex items-center justify-center gap-2 text-sm"
-                    >
-                      {isGeneratingSoal ? (
-                        <>
-                          <RefreshCw className="h-4.5 w-4.5 animate-spin text-white" />
-                          <span>Merancang Soal & Kunci...</span>
-                        </>
-                      ) : (
-                        <>
-                          <BookOpen className="h-4.5 w-4.5" />
-                          <span>Penyusunan Massal Soal dari Kisi-Kisi</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                  {kisiList.length === 0 && (
-                    <p className="text-center text-[10px] text-amber-400">
-                      💡 Generate atau tambahkan kisi-kisi terlebih dahulu untuk mengaktifkan Penyusunan Massal Soal.
-                    </p>
-                  )}
                 </div>
               </section>
 
@@ -5714,7 +5731,7 @@ PANDUAN EKSTRA:
                 </div>
                 <ul className="list-disc pl-4 space-y-1">
                   <li>Langkah 1: Tentukan 11 parameter mata pelajaran serta muatan kurikulum di panel kiri.</li>
-                  <li>Langkah 2: Salin prompt rancangan AI untuk manual playground, atau tekan tombol <b>"Generate Kisi-Kisi Instan via AI"</b> untuk mengotomatisasi pengisian.</li>
+                  <li>Langkah 2: Tekan tombol <b>"Generate Prompt"</b> atau salin prompt rancangan AI untuk digunakan pada AI playground/pilihan Anda.</li>
                   <li>Langkah 3: Tinjau dan edit matriks asesmen kisi-kisi Anda di tab kedua.</li>
                   <li>Langkah 4: Jalankan penyusunan butir soal, kemudian cetak atau download dalam format MS Word (.doc) atau Excel (.xls).</li>
                 </ul>
@@ -6519,22 +6536,36 @@ PANDUAN EKSTRA:
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => exportQuestionsToExcel(questions, printConfig.subjectName || config.mataPelajaran, printConfig.examName, printConfig.showAnswerKey)}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-sm"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-sm cursor-pointer"
                 >
                   <FileSpreadsheet className="h-4.5 w-4.5" />
                   <span>Download Excel (.xls)</span>
                 </button>
                 <button
                   onClick={() => exportQuestionsToWord(questions, printConfig.subjectName || config.mataPelajaran, printConfig.pageSize, printConfig.examName, printConfig.showAnswerKey)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-sm"
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-sm cursor-pointer"
                 >
                   <FileText className="h-4.5 w-4.5" />
                   <span>Download Word (.doc)</span>
                 </button>
+                {questions.length > 0 && (
+                  <button
+                    onClick={() => {
+                      if (confirm(`Apakah Anda yakin ingin menghapus SEMUA (${questions.length}) butir soal yang tersimpan?`)) {
+                        handleDeleteAllQuestions();
+                      }
+                    }}
+                    className="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-sm cursor-pointer"
+                    title="Hapus seluruh butir soal yang ada"
+                  >
+                    <Trash2 className="h-4.5 w-4.5" />
+                    <span>Hapus Semua Soal</span>
+                  </button>
+                )}
                 {currentUser ? (
                   <button
                     onClick={() => setIsEditingQuestion(true)}
-                    className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
+                    className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
                   >
                     <Plus className="h-4.5 w-4.5" />
                     <span>Tambah Soal</span>
@@ -9176,8 +9207,8 @@ PANDUAN EKSTRA:
             <p>Sistem Asesmen Pintar untuk Guru, Dosen, dan Pengajar Seluruh Indonesia.</p>
           </div>
           <div className="text-right flex flex-col items-end gap-1">
-            <p>© 2026 Kemdikbud SMA TKA Assessment. All Rights Reserved.</p>
-            <p>Dikembangkan dengan <span className="text-rose-500">♥</span> menggunakan Gemini Flash & React.</p>
+            <p>©ajisosiologi 2026 Assessment TKA SMA. All Rights Reserved.</p>
+            <p>Dikembangkan dengan menggunakan Gemini Flash & React.</p>
             <a 
               href="https://lynk.id/ajisosiologi" 
               target="_blank" 

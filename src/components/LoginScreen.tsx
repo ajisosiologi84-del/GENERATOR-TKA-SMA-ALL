@@ -185,7 +185,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           <div className="inline-flex items-center justify-center h-12 w-12 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 text-indigo-400 mb-3 shadow-inner">
             <GraduationCap className="h-6 w-6" />
           </div>
-          <h2 className="text-xl font-extrabold text-white tracking-tight">MasterPrint TKA SMA</h2>
+          <h2 className="text-xl font-extrabold text-white tracking-tight">Master TKA SMA</h2>
           <p className="text-xs text-slate-400 mt-1">Sistem Manajemen Kisi-Kisi & Soal TKA SMA berbasis AI</p>
         </div>
 
