@@ -36,7 +36,12 @@ import {
   User,
   Calendar,
   Save,
-  X
+  X,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Minimize2,
+  RotateCw
 } from 'lucide-react';
 import { KisiKisiItem, Question, GeneratorConfig, BentukSoal, LevelKognitif, JumlahOpsi, JenisSoal, JadwalItem } from './types';
 import { auth, db, createNewUserByAdmin } from './lib/firebase';
@@ -2308,6 +2313,10 @@ export default function App() {
     localStorage.setItem('gemini_api_mode', mode);
   };
 
+  const getCleanApiKey = (keyString: string) => {
+    return (keyString || '').replace(/[\r\n]+/g, ',').trim();
+  };
+
   const callGeminiDirect = async (
     systemInstruction: string,
     promptText: string,
@@ -2346,7 +2355,7 @@ export default function App() {
 
       for (const model of modelsToTry) {
         try {
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model.trim())}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
 
           const requestBody: any = {
             contents: [
@@ -2409,6 +2418,17 @@ export default function App() {
           }
         }
       }
+    }
+
+    const errorString = typeof lastError === 'string' ? lastError : (lastError?.message || JSON.stringify(lastError) || '');
+    if (/quota|limit|429|exhausted|503|demand|unavailable/i.test(errorString)) {
+      throw new Error(`⚠️ Kuota API Gemini Direct (Client) Telah Terlampaui (Error 429 Exceeded Quota).
+
+💡 SOLUSI CARA MENGATASINYA:
+1. Periksa Kunci API Gemini Anda di Pengaturan Koneksi AI (Langkah 1).
+2. Dapatkan Kunci API Gemini baru/tambahan secara GRATIS di: https://aistudio.google.com/app/apikey
+3. Masukkan beberapa Kunci API dipisah koma/baris baru agar sistem merotasi kunci secara otomatis jika salah satu kuota habis.
+4. Atau tunggu beberapa menit hingga kuota di-reset kembali oleh Google.`);
     }
 
     throw lastError || new Error("Gagal memanggil API Gemini setelah merotasi seluruh API Key dan model.");
@@ -2535,6 +2555,70 @@ export default function App() {
   const [deletingKisiId, setDeletingKisiId] = useState<string | null>(null);
   const [deletingQuestionId, setDeletingQuestionId] = useState<string | null>(null);
 
+  // Image Optimization & Zoom Lightbox States
+  const [isCompressingImage, setIsCompressingImage] = useState<boolean>(false);
+  const [imageCompressReport, setImageCompressReport] = useState<{ originalSizeKb: number; compressedSizeKb: number; savingPercent: number } | null>(null);
+  const [activeZoomImage, setActiveZoomImage] = useState<{ url: string; caption?: string } | null>(null);
+  const [zoomScale, setZoomScale] = useState<number>(1);
+  const [zoomRotation, setZoomRotation] = useState<number>(0);
+
+  // Client-side HTMLCanvasElement Image Compressor (Optimasi & Kompresi Performa)
+  const compressImageFile = (
+    file: File, 
+    maxWidth = 1000, 
+    maxHeight = 800, 
+    quality = 0.8
+  ): Promise<{ dataUrl: string; originalSizeKb: number; compressedSizeKb: number; savingPercent: number }> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error("Gagal menginisialisasi canvas context"));
+            return;
+          }
+
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, 0, 0, width, height);
+
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          
+          const originalSizeKb = Math.round(file.size / 1024);
+          const head = 'data:image/jpeg;base64,';
+          const compressedSizeBytes = Math.round((dataUrl.length - head.length) * 3 / 4);
+          const compressedSizeKb = Math.round(compressedSizeBytes / 1024);
+          const savingPercent = originalSizeKb > 0 
+            ? Math.max(0, Math.round(((originalSizeKb - compressedSizeKb) / originalSizeKb) * 100))
+            : 0;
+
+          resolve({ dataUrl, originalSizeKb, compressedSizeKb, savingPercent });
+        };
+        img.onerror = (err) => reject(err);
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(file);
+    });
+  };
+
   const [questionForm, setQuestionForm] = useState<Partial<Question>>({
     kisiKisiId: '',
     kompetensi: '',
@@ -2546,7 +2630,10 @@ export default function App() {
     kunciJawaban: '',
     pembahasan: '',
     kataKunci: '',
-    gambarUrl: ''
+    gambarUrl: '',
+    gambarCaption: '',
+    gambarPosisi: 'center',
+    gambarUkuran: 'medium'
   });
 
   // Prompt Generator States
@@ -2621,7 +2708,7 @@ export default function App() {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'x-api-key': aiConfig.apiKey || ''
+          'x-api-key': getCleanApiKey(aiConfig.apiKey)
         },
         body: JSON.stringify({
           kisi,
@@ -3332,7 +3419,7 @@ Aturan Penyusunan Matriks:
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
-            'x-api-key': aiConfig.apiKey || ''
+            'x-api-key': getCleanApiKey(aiConfig.apiKey)
           },
           body: JSON.stringify({
             mataPelajaran: config.mataPelajaran,
@@ -3491,7 +3578,7 @@ Hasilkan rancangan prompt instruksi lengkap, terstruktur, profesional, dan dalam
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': aiConfig.apiKey || ''
+            'x-api-key': getCleanApiKey(aiConfig.apiKey)
           },
           body: JSON.stringify({
             kisi: selectedKisiForPrompt,
@@ -3649,7 +3736,7 @@ PANDUAN EKSTRA:
             method: 'POST',
             headers: { 
               'Content-Type': 'application/json',
-              'x-api-key': aiConfig.apiKey || ''
+              'x-api-key': getCleanApiKey(aiConfig.apiKey)
             },
             body: JSON.stringify({
               kisi,
@@ -3799,7 +3886,10 @@ Ingat: HANYA berikan kode SVG murni. Jika Anda membungkusnya dengan blok markdow
       } else {
         const response = await fetch('/api/generate-illustration', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-api-key': getCleanApiKey(aiConfig.apiKey)
+          },
           body: JSON.stringify({
             prompt: aiIllustratorPrompt,
             context: questionForm.soal || ''
@@ -3997,7 +4087,10 @@ PANDUAN EKSTRA:
           } else {
             const response = await fetch('/api/generate-soal', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 
+                'Content-Type': 'application/json',
+                'x-api-key': getCleanApiKey(aiConfig.apiKey)
+              },
               body: JSON.stringify({
                 kisi,
                 count: countForThisChunk,
@@ -4415,7 +4508,10 @@ PANDUAN EKSTRA:
           kunciJawaban: questionForm.kunciJawaban || '',
           pembahasan: questionForm.pembahasan || '',
           kataKunci: questionForm.kataKunci || '',
-          gambarUrl: questionForm.gambarUrl || ''
+          gambarUrl: questionForm.gambarUrl || '',
+          gambarCaption: questionForm.gambarCaption || '',
+          gambarPosisi: questionForm.gambarPosisi || 'center',
+          gambarUkuran: questionForm.gambarUkuran || 'medium'
         };
         await setDoc(doc(db, 'questions', editingQuestionId), updatedQ);
         setIsEditingQuestion(false);
@@ -4435,7 +4531,10 @@ PANDUAN EKSTRA:
           kunciJawaban: questionForm.kunciJawaban || '',
           pembahasan: questionForm.pembahasan || 'Pembahasan terstruktur.',
           kataKunci: questionForm.kataKunci || '',
-          gambarUrl: questionForm.gambarUrl || ''
+          gambarUrl: questionForm.gambarUrl || '',
+          gambarCaption: questionForm.gambarCaption || '',
+          gambarPosisi: questionForm.gambarPosisi || 'center',
+          gambarUkuran: questionForm.gambarUkuran || 'medium'
         };
         await setDoc(doc(db, 'questions', newQ.id), newQ);
       }
@@ -4452,8 +4551,12 @@ PANDUAN EKSTRA:
         kunciJawaban: '',
         pembahasan: '',
         kataKunci: '',
-        gambarUrl: ''
+        gambarUrl: '',
+        gambarCaption: '',
+        gambarPosisi: 'center',
+        gambarUkuran: 'medium'
       });
+      setImageCompressReport(null);
       setIsEditingQuestion(false);
       alert('Berhasil menyimpan butir soal!');
     } catch (err: any) {
@@ -4480,8 +4583,12 @@ PANDUAN EKSTRA:
       kunciJawaban: q.kunciJawaban,
       pembahasan: q.pembahasan,
       kataKunci: q.kataKunci || '',
-      gambarUrl: q.gambarUrl || ''
+      gambarUrl: q.gambarUrl || '',
+      gambarCaption: q.gambarCaption || '',
+      gambarPosisi: q.gambarPosisi || 'center',
+      gambarUkuran: q.gambarUkuran || 'medium'
     });
+    setImageCompressReport(null);
     setIsEditingQuestion(true);
     setEditingQuestionId(q.id);
   };
@@ -6819,22 +6926,37 @@ PANDUAN EKSTRA:
                     <div className="mt-2 flex items-center gap-2 flex-wrap">
                       <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition border border-slate-250 select-none">
                         <Upload className="h-3.5 w-3.5 text-slate-500" />
-                        <span>📁 Pilih/Upload Gambar dari Komputer</span>
+                        <span>{isCompressingImage ? "⚡ Mengompresi Gambar..." : "📁 Pilih/Upload Gambar (Auto-Compress Canvas)"}</span>
                         <input 
                           type="file" 
                           accept="image/*" 
                           className="hidden" 
-                          onChange={(e) => {
+                          disabled={isCompressingImage}
+                          onChange={async (e) => {
                             const file = e.target.files?.[0];
                             if (file) {
-                              const reader = new FileReader();
-                              reader.onloadend = () => {
+                              setIsCompressingImage(true);
+                              try {
+                                const result = await compressImageFile(file);
                                 setQuestionForm(prev => ({
                                   ...prev,
-                                  gambarUrl: reader.result as string
+                                  gambarUrl: result.dataUrl
                                 }));
-                              };
-                              reader.readAsDataURL(file);
+                                setImageCompressReport({
+                                  originalSizeKb: result.originalSizeKb,
+                                  compressedSizeKb: result.compressedSizeKb,
+                                  savingPercent: result.savingPercent
+                                });
+                              } catch (err) {
+                                console.error("Compression fallback to FileReader:", err);
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                  setQuestionForm(prev => ({ ...prev, gambarUrl: reader.result as string }));
+                                };
+                                reader.readAsDataURL(file);
+                              } finally {
+                                setIsCompressingImage(false);
+                              }
                             }
                           }} 
                         />
@@ -6842,8 +6964,11 @@ PANDUAN EKSTRA:
                       {questionForm.gambarUrl && (
                         <button
                           type="button"
-                          onClick={() => setQuestionForm(prev => ({ ...prev, gambarUrl: '' }))}
-                          className="bg-rose-50 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 transition border border-rose-100"
+                          onClick={() => {
+                            setQuestionForm(prev => ({ ...prev, gambarUrl: '', gambarCaption: '' }));
+                            setImageCompressReport(null);
+                          }}
+                          className="bg-rose-50 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1 transition border border-rose-100 cursor-pointer"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                           Hapus Gambar
@@ -6855,6 +6980,82 @@ PANDUAN EKSTRA:
                         </div>
                       )}
                     </div>
+
+                    {/* Gambar Metadata: Caption, Posisi, Ukuran */}
+                    {questionForm.gambarUrl && (
+                      <div className="mt-3 bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2.5">
+                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                          <span className="flex items-center gap-1">
+                            <Image className="h-3.5 w-3.5 text-indigo-600" />
+                            Pengaturan Tampilan & Caption Gambar (Optimasi Responsive)
+                          </span>
+                          {imageCompressReport && (
+                            <span className="bg-emerald-100 text-emerald-800 text-[9px] font-bold px-2 py-0.5 rounded-full">
+                              ⚡ Terkompresi Canvas: {imageCompressReport.originalSizeKb}KB ➔ {imageCompressReport.compressedSizeKb}KB (-{imageCompressReport.savingPercent}%)
+                            </span>
+                          )}
+                        </div>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                          {/* Caption */}
+                          <div className="sm:col-span-3">
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Judul / Keterangan Gambar (Caption)</label>
+                            <input 
+                              type="text"
+                              value={questionForm.gambarCaption || ''}
+                              onChange={(e) => setQuestionForm({ ...questionForm, gambarCaption: e.target.value })}
+                              placeholder="Contoh: Gambar 1.1 Struktur Organisasi Kemdikbudristek"
+                              className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-medium"
+                            />
+                          </div>
+
+                          {/* Posisi Alignment */}
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Posisi Alignment</label>
+                            <select
+                              value={questionForm.gambarPosisi || 'center'}
+                              onChange={(e) => setQuestionForm({ ...questionForm, gambarPosisi: e.target.value as any })}
+                              className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-medium"
+                            >
+                              <option value="left">Rata Kiri (Left)</option>
+                              <option value="center">Rata Tengah (Center)</option>
+                              <option value="right">Rata Kanan (Right)</option>
+                            </select>
+                          </div>
+
+                          {/* Ukuran Display */}
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Ukuran Gambar</label>
+                            <select
+                              value={questionForm.gambarUkuran || 'medium'}
+                              onChange={(e) => setQuestionForm({ ...questionForm, gambarUkuran: e.target.value as any })}
+                              className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-medium"
+                            >
+                              <option value="small">Kecil (25% / ~160px)</option>
+                              <option value="medium">Sedang (50% / ~320px)</option>
+                              <option value="large">Besar (75% / ~480px)</option>
+                              <option value="full">Lebar Penuh (100%)</option>
+                            </select>
+                          </div>
+
+                          {/* Quick Preview & Lightbox Trigger */}
+                          <div className="flex items-end">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setZoomScale(1);
+                                setZoomRotation(0);
+                                setActiveZoomImage({ url: questionForm.gambarUrl!, caption: questionForm.gambarCaption });
+                              }}
+                              className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold px-3 py-1.5 rounded-lg border border-indigo-200 text-xs transition flex items-center justify-center gap-1 cursor-pointer"
+                            >
+                              <ZoomIn className="h-3.5 w-3.5" />
+                              <span>Pratinjau Zoom</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Bank Prompt Super-AI Section */}
                     <div className="mt-4 bg-slate-50 border border-slate-200 rounded-2xl p-4">
@@ -9194,25 +9395,55 @@ PANDUAN EKSTRA:
                           )}
 
                           {/* Illustration / Image Box */}
-                          {q.gambarUrl && q.gambarUrl.trim() !== '' && printConfig.showIllustration && (
-                            <div className="my-2 bg-slate-50 border border-slate-200/50 rounded-2xl p-3 flex flex-col items-center justify-center space-y-1.5 break-inside-avoid">
-                              {q.gambarUrl.trim().toLowerCase().startsWith('<svg') ? (
-                                <div 
-                                  className="w-full max-w-sm overflow-x-auto flex justify-center py-2 px-3 bg-white rounded-xl border border-slate-100 shadow-xs"
-                                  dangerouslySetInnerHTML={{ __html: q.gambarUrl }}
-                                />
-                              ) : (
-                                <div className="relative group max-w-xs w-full overflow-hidden rounded-xl border border-slate-200 bg-white">
-                                  <img 
-                                    src={q.gambarUrl} 
-                                    alt={`Ilustrasi Soal ${q.noSoal}`}
-                                    referrerPolicy="no-referrer"
-                                    className="w-full h-auto object-contain max-h-[180px] mx-auto"
-                                  />
-                                </div>
-                              )}
-                            </div>
-                          )}
+                          {q.gambarUrl && q.gambarUrl.trim() !== '' && printConfig.showIllustration && (() => {
+                            const alignClass = q.gambarPosisi === 'left' ? 'items-start text-left' : q.gambarPosisi === 'right' ? 'items-end text-right' : 'items-center text-center';
+                            const sizeClass = q.gambarUkuran === 'small' ? 'max-w-[160px]' : q.gambarUkuran === 'large' ? 'max-w-md' : q.gambarUkuran === 'full' ? 'max-w-full' : 'max-w-xs';
+
+                            return (
+                              <div className={`my-2 bg-slate-50/80 border border-slate-200/60 rounded-2xl p-3 flex flex-col ${alignClass} space-y-1.5 break-inside-avoid transition`}>
+                                {q.gambarUrl.trim().toLowerCase().startsWith('<svg') ? (
+                                  <div className={`w-full ${sizeClass} overflow-x-auto flex justify-center py-2 px-3 bg-white rounded-xl border border-slate-100 shadow-xs relative group`}>
+                                    <div dangerouslySetInnerHTML={{ __html: q.gambarUrl }} />
+                                  </div>
+                                ) : (
+                                  <div className={`relative group ${sizeClass} w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs`}>
+                                    <img 
+                                      src={q.gambarUrl} 
+                                      alt={`Ilustrasi Soal ${q.noSoal}`}
+                                      referrerPolicy="no-referrer"
+                                      className="w-full h-auto object-contain max-h-[260px] mx-auto transition-transform duration-300 group-hover:scale-102 cursor-pointer"
+                                      onClick={() => {
+                                        setZoomScale(1);
+                                        setZoomRotation(0);
+                                        setActiveZoomImage({ url: q.gambarUrl!, caption: q.gambarCaption || `Gambar Ilustrasi Soal #${q.noSoal}` });
+                                      }}
+                                    />
+                                    {/* Zoom Overlay Trigger */}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setZoomScale(1);
+                                        setZoomRotation(0);
+                                        setActiveZoomImage({ url: q.gambarUrl!, caption: q.gambarCaption || `Gambar Ilustrasi Soal #${q.noSoal}` });
+                                      }}
+                                      className="no-print absolute top-2 right-2 bg-slate-900/80 hover:bg-slate-900 text-white p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1 text-[10px] font-bold shadow-md cursor-pointer backdrop-blur-xs"
+                                      title="Klik untuk Perbesar Gambar (Zoom Lightbox)"
+                                    >
+                                      <ZoomIn className="h-3.5 w-3.5" />
+                                      <span>Zoom</span>
+                                    </button>
+                                  </div>
+                                )}
+
+                                {/* Gambar Caption / Title */}
+                                {q.gambarCaption && (
+                                  <p className="text-[11px] font-semibold text-slate-600 italic tracking-tight max-w-md">
+                                    {q.gambarCaption}
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })()}
 
                           {/* Question Statement */}
                           <div className="text-slate-900 leading-relaxed font-semibold whitespace-pre-line text-xs sm:text-sm">
@@ -9779,6 +10010,125 @@ PANDUAN EKSTRA:
                 </button>
               </div>
             </motion.div>
+          </motion.div>
+        )}
+
+        {/* Full-Screen Image Zoom Lightbox Modal */}
+        {activeZoomImage && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-950/90 backdrop-blur-lg z-[99999] flex flex-col justify-between p-4 sm:p-6 no-print select-none"
+          >
+            {/* Lightbox Top Header Toolbar */}
+            <div className="flex items-center justify-between gap-4 bg-slate-900/80 border border-slate-800 backdrop-blur-md px-4 py-3 rounded-2xl shadow-xl">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="p-2 bg-indigo-500/20 text-indigo-400 rounded-xl border border-indigo-500/30 flex-shrink-0">
+                  <Maximize2 className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-white truncate">
+                    {activeZoomImage.caption || 'Pratinjau Gambar Soal (Detail Lightbox)'}
+                  </h3>
+                  <p className="text-[10px] text-slate-400 font-mono">
+                    Skala: {Math.round(zoomScale * 100)}% | Rotasi: {zoomRotation}°
+                  </p>
+                </div>
+              </div>
+
+              {/* Control Buttons */}
+              <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                {/* Zoom Out */}
+                <button
+                  onClick={() => setZoomScale(prev => Math.max(0.5, prev - 0.25))}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1 border border-slate-700 cursor-pointer"
+                  title="Perkecil (-25%)"
+                >
+                  <ZoomOut className="h-4 w-4" />
+                  <span className="hidden sm:inline">Perkecil</span>
+                </button>
+
+                {/* Zoom In */}
+                <button
+                  onClick={() => setZoomScale(prev => Math.min(3.5, prev + 0.25))}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1 border border-slate-700 cursor-pointer"
+                  title="Perbesar (+25%)"
+                >
+                  <ZoomIn className="h-4 w-4" />
+                  <span className="hidden sm:inline">Perbesar</span>
+                </button>
+
+                {/* Rotate */}
+                <button
+                  onClick={() => setZoomRotation(prev => (prev + 90) % 360)}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1 border border-slate-700 cursor-pointer"
+                  title="Putar Gambar (90°)"
+                >
+                  <RotateCw className="h-4 w-4" />
+                  <span className="hidden sm:inline">Putar</span>
+                </button>
+
+                {/* Reset */}
+                <button
+                  onClick={() => {
+                    setZoomScale(1);
+                    setZoomRotation(0);
+                  }}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition flex items-center gap-1 border border-slate-700 cursor-pointer"
+                  title="Reset Ukuran Normal"
+                >
+                  <Minimize2 className="h-4 w-4" />
+                  <span className="hidden sm:inline">Reset</span>
+                </button>
+
+                {/* Close Button */}
+                <button
+                  onClick={() => {
+                    setActiveZoomImage(null);
+                    setZoomScale(1);
+                    setZoomRotation(0);
+                  }}
+                  className="p-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition ml-2 shadow-lg flex items-center gap-1 cursor-pointer"
+                >
+                  <span className="font-extrabold text-sm px-1">✕</span>
+                  <span className="hidden sm:inline">Tutup</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Center Image Container */}
+            <div className="flex-1 flex items-center justify-center overflow-auto my-4 p-2 relative">
+              {activeZoomImage.url.trim().toLowerCase().startsWith('<svg') ? (
+                <div 
+                  className="bg-white p-6 rounded-2xl shadow-2xl overflow-auto max-w-4xl max-h-[75vh]"
+                  style={{
+                    transform: `scale(${zoomScale}) rotate(${zoomRotation}deg)`,
+                    transition: 'transform 0.2s ease-out'
+                  }}
+                  dangerouslySetInnerHTML={{ __html: activeZoomImage.url }}
+                />
+              ) : (
+                <motion.img
+                  src={activeZoomImage.url}
+                  alt={activeZoomImage.caption || 'Detail Gambar'}
+                  className="max-h-[78vh] max-w-full object-contain rounded-2xl shadow-2xl border border-slate-800 cursor-grab active:cursor-grabbing"
+                  style={{
+                    transform: `scale(${zoomScale}) rotate(${zoomRotation}deg)`,
+                    transition: 'transform 0.2s ease-out'
+                  }}
+                />
+              )}
+            </div>
+
+            {/* Bottom Caption Bar */}
+            {activeZoomImage.caption && (
+              <div className="bg-slate-900/80 border border-slate-800 backdrop-blur-md px-6 py-3 rounded-2xl text-center shadow-xl max-w-3xl mx-auto w-full">
+                <p className="text-xs sm:text-sm font-semibold text-slate-200 tracking-tight">
+                  {activeZoomImage.caption}
+                </p>
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

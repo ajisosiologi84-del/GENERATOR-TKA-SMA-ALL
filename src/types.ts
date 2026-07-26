@@ -39,6 +39,9 @@ export interface Question {
   pembahasan: string; // Structured explanation
   kataKunci?: string; // Kata Kunci atau Konsep yang digunakan
   gambarUrl?: string; // URL Gambar, Ilustrasi, or Grafik (Opsional)
+  gambarCaption?: string; // Keterangan / Alt text Gambar (Opsional)
+  gambarPosisi?: 'center' | 'left' | 'right'; // Posisi rata gambar
+  gambarUkuran?: 'small' | 'medium' | 'large' | 'full'; // Ukuran relatif tampilan gambar
 }
 
 export interface GeneratorConfig {

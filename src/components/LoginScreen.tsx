@@ -17,7 +17,9 @@ import {
   ArrowRight,
   BookOpen,
   GraduationCap,
-  ShieldCheck
+  ShieldCheck,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 interface LoginScreenProps {
@@ -28,6 +30,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const [activeTab, setActiveTab] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState<'admin' | 'user'>('user');
   const [adminSecretCode, setAdminSecretCode] = useState('');
@@ -325,13 +328,21 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                   <Lock className="h-4 w-4" />
                 </span>
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   placeholder="******"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-10 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
                   disabled={loading}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition cursor-pointer"
+                  title={showPassword ? "Sembunyikan Password" : "Tampilkan Password"}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4 text-indigo-400" /> : <Eye className="h-4 w-4" />}
+                </button>
               </div>
             </div>
 
@@ -390,14 +401,22 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                   <Lock className="h-4 w-4" />
                 </span>
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   placeholder="Minimal 6 Karakter"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-10 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
                   disabled={loading}
                   required
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition cursor-pointer"
+                  title={showPassword ? "Sembunyikan Password" : "Tampilkan Password"}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4 text-indigo-400" /> : <Eye className="h-4 w-4" />}
+                </button>
               </div>
             </div>
 

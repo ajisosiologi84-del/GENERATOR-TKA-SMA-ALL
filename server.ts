@@ -26,6 +26,37 @@ function parseApiKeys(rawInput?: string): string[] {
   return keys;
 }
 
+// Helper to format AI errors nicely for client responses
+function formatServerAiError(error: any): { statusCode: number; message: string } {
+  const errorString = typeof error === 'string' ? error : (error?.message || JSON.stringify(error) || '');
+  const isQuota = 
+    error?.status === 429 || 
+    error?.statusCode === 429 || 
+    error?.status === 503 ||
+    error?.statusCode === 503 ||
+    error?.code === 429 ||
+    error?.code === 503 ||
+    /quota|limit|429|exhausted|503|demand|unavailable/i.test(errorString);
+
+  if (isQuota) {
+    return {
+      statusCode: 429,
+      message: `⚠️ Kuota / Rate Limit API Gemini Server Telah Terlampaui (Error 429 Exceeded Quota).
+
+💡 SOLUSI CARA MENGATASINYA:
+1. Buka Tab 1 ('Langkah 1: Pengaturan & Bobot Soal') dan pilih Pengaturan Koneksi AI.
+2. Masukkan Kunci API Gemini Anda sendiri pada kolom 'Kunci API Gemini' (Anda dapat memasukkan beberapa API Key dipisah koma/baris baru untuk Rotasi Otomatis).
+3. Dapatkan Kunci API Gemini secara GRATIS & INSTAN di: https://aistudio.google.com/app/apikey
+4. Atau tunggu beberapa menit hingga kuota publik di-reset kembali oleh Google.`
+    };
+  }
+
+  return {
+    statusCode: 500,
+    message: errorString || "Terjadi kesalahan pada layanan AI Gemini."
+  };
+}
+
 // Circuit breaker to avoid spamming rate-limited or quota-exhausted models
 const coolOffModels = new Map<string, number>();
 const COOL_OFF_DURATION = 180 * 1000; // 3 minutes cool-off
@@ -234,7 +265,8 @@ Aturan Penyusunan Matriks:
     res.json(parsed);
   } catch (error: any) {
     console.error("Error generating kisi-kisi:", error);
-    res.status(500).json({ error: error.message || "Gagal membuat kisi-kisi" });
+    const formatted = formatServerAiError(error);
+    res.status(formatted.statusCode).json({ error: formatted.message });
   }
 });
 
@@ -383,7 +415,8 @@ PANDUAN EKSTRA:
     res.json(parsed);
   } catch (error: any) {
     console.error("Error generating soal:", error);
-    res.status(500).json({ error: error.message || "Gagal membuat soal" });
+    const formatted = formatServerAiError(error);
+    res.status(formatted.statusCode).json({ error: formatted.message });
   }
 });
 
@@ -435,7 +468,8 @@ Ingat, hanya hasilkan kode SVG langsung tanpa penanda kode atau pembungkus markd
     res.json({ svg: svgCode });
   } catch (error: any) {
     console.error("Error generating illustration:", error);
-    res.status(500).json({ error: error.message || "Gagal menghasilkan ilustrasi" });
+    const formatted = formatServerAiError(error);
+    res.status(formatted.statusCode).json({ error: formatted.message });
   }
 });
 
@@ -488,7 +522,8 @@ Tulis draf prompt tersebut langsung dalam format Markdown yang elegan, berwibawa
     res.json({ prompt: optimizedPrompt });
   } catch (error: any) {
     console.error("Error optimizing prompt:", error);
-    res.status(500).json({ error: error.message || "Gagal mengoptimasi prompt" });
+    const formatted = formatServerAiError(error);
+    res.status(formatted.statusCode).json({ error: formatted.message });
   }
 });
 
@@ -578,7 +613,8 @@ Sediakan di dalam prompt tersebut uraian materi yang sangat kaya, komprehensif, 
     res.json({ materi });
   } catch (error: any) {
     console.error("Error generating materi:", error);
-    res.status(500).json({ error: error.message || "Gagal membuat materi pembelajaran" });
+    const formatted = formatServerAiError(error);
+    res.status(formatted.statusCode).json({ error: formatted.message });
   }
 });
 
