@@ -16,7 +16,8 @@ import {
   AlertCircle, 
   ArrowRight,
   BookOpen,
-  GraduationCap
+  GraduationCap,
+  ShieldCheck
 } from 'lucide-react';
 
 interface LoginScreenProps {
@@ -180,13 +181,55 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         transition={{ duration: 0.5 }}
         className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl p-6 relative z-10"
       >
-        {/* App Title & Header */}
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center h-12 w-12 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 text-indigo-400 mb-3 shadow-inner">
-            <GraduationCap className="h-6 w-6" />
+        {/* TKA SMA Official-Style Header & Emblem Banner (Anti-Plagiarism Original Design) */}
+        <div className="mb-5 space-y-3 bg-slate-950/80 border border-slate-800 p-4 rounded-2xl text-center relative overflow-hidden shadow-inner">
+          {/* Subtle Ambient Glow Effects */}
+          <div className="absolute -top-12 -left-12 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
+          <div className="absolute -bottom-12 -right-12 w-32 h-32 bg-sky-500/10 rounded-full blur-2xl pointer-events-none" />
+
+          {/* TKA Visual Banner Logo */}
+          <div className="pt-1 space-y-1.5">
+            <div className="inline-flex items-center justify-center gap-2">
+              {/* Custom Styled 3D Letter TKA */}
+              <div className="flex items-center gap-1">
+                <span className="text-2xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 drop-shadow-[0_2px_8px_rgba(245,158,11,0.3)]">
+                  T
+                </span>
+                {/* Book integrated in K */}
+                <div className="relative inline-flex items-center justify-center">
+                  <span className="text-2xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500">
+                    K
+                  </span>
+                  <BookOpen className="h-3.5 w-3.5 text-amber-300 absolute -top-0.5 -right-1 transform rotate-12 drop-shadow-sm" />
+                </div>
+                <span className="text-2xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 drop-shadow-[0_2px_8px_rgba(245,158,11,0.3)]">
+                  A
+                </span>
+              </div>
+              <span className="text-xs font-black bg-amber-400/10 text-amber-300 border border-amber-400/30 px-2 py-0.5 rounded-md uppercase tracking-wider">
+                SMA
+              </span>
+            </div>
+
+            <p className="text-[10px] font-bold text-slate-300 tracking-wide uppercase">
+              Tes Kemampuan Akademik SMA
+            </p>
+
+            {/* Slogan Banner Pill */}
+            <div className="inline-flex items-center gap-1.5 bg-sky-950/60 border border-sky-500/30 px-3 py-1 rounded-full text-[10px] font-extrabold text-sky-300 shadow-sm mt-1">
+              <span className="text-amber-400">#JUJUR</span>
+              <span className="text-sky-500">•</span>
+              <span className="text-sky-300">#PRESTATIF</span>
+              <span className="text-sky-500">•</span>
+              <span className="text-emerald-400">#GEMBIRA</span>
+            </div>
           </div>
-          <h2 className="text-xl font-extrabold text-white tracking-tight">Master TKA SMA</h2>
-          <p className="text-xs text-slate-400 mt-1">Sistem Manajemen Kisi-Kisi & Soal TKA SMA berbasis AI</p>
+        </div>
+
+        {/* App Title Sub-Header */}
+        <div className="text-center mb-5">
+          <h2 className="text-base font-extrabold text-white tracking-tight">Master TKA SMA</h2>
+          <p className="text-xs text-slate-400 mt-0.5">Sistem Manajemen Kisi-Kisi & Soal TKA SMA berbasis AI</p>
         </div>
 
         {/* Conditional Tab Selector for Registration */}
@@ -426,14 +469,25 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
         {/* Helper text when register query IS used */}
         {isRegisterParamPresent && (
-          <div className="mt-6 text-center text-[10px] text-slate-400 bg-indigo-950/20 p-3 border border-indigo-900/40 rounded-2xl leading-relaxed">
+          <div className="mt-5 text-center text-[10px] text-slate-400 bg-indigo-950/20 p-3 border border-indigo-900/40 rounded-2xl leading-relaxed">
             <span className="font-bold text-indigo-400 block mb-1">🔑 Mode Registrasi Aktif (Melalui URL Khusus)</span>
             Daftarkan akun Admin menggunakan kode verifikasi khusus, atau daftarkan akun Guru langsung dari sini.
           </div>
         )}
 
+        {/* Pusmendik & Perkaban Regulation Compliance Banner */}
+        <div className="mt-5 p-3.5 bg-slate-950/90 border border-slate-800 rounded-2xl text-[10px] text-slate-300 text-center leading-relaxed shadow-sm">
+          <div className="flex items-center justify-center gap-1.5 font-bold text-sky-400 mb-1">
+            <ShieldCheck className="h-3.5 w-3.5 text-sky-400" />
+            <span className="uppercase tracking-wider">Standar & Kerangka Resmi</span>
+          </div>
+          <p className="text-slate-400 font-medium leading-normal">
+            Sesuai Kerangka Asesmen Pusmendik TKA (Pusat Asesmen & Standar Pendidikan SMA) dan Perkaban Nomor 45 Tahun 2025 tentang Kerangka Asesmen TKA SMA-MA dan SMK-MAK.
+          </p>
+        </div>
+
         {/* Developer Credit Link */}
-        <div className="mt-5 text-center">
+        <div className="mt-4 text-center">
           <a
             href="https://lynk.id/ajisosiologi"
             target="_blank"
