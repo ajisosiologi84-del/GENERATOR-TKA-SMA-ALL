@@ -41,7 +41,17 @@ import {
   ZoomOut,
   Maximize2,
   Minimize2,
-  RotateCw
+  RotateCw,
+  Code,
+  Play,
+  CheckCircle2,
+  Clock,
+  Award,
+  Terminal,
+  ExternalLink,
+  Send,
+  Zap,
+  ShieldAlert
 } from 'lucide-react';
 import { KisiKisiItem, Question, GeneratorConfig, BentukSoal, LevelKognitif, JumlahOpsi, JenisSoal, JadwalItem } from './types';
 import { auth, db, createNewUserByAdmin } from './lib/firebase';
@@ -1566,8 +1576,34 @@ const DEFAULT_JADWAL_LIST: JadwalItem[] = [
 ];
 
 export default function App() {
-  // Navigation Tabs: 'config' (Generator & Prompt), 'kisi' (Matriks Asesmen), 'soal' (Pembuat Soal), 'materi' (Ringkasan Materi & Panduan), 'jadwal' (Jadwal Pembelajaran), 'users' (Manajemen Pengguna)
-  const [activeTab, setActiveTab] = useState<'config' | 'kisi' | 'soal' | 'materi' | 'jadwal' | 'users'>('config');
+  // Navigation Tabs: 'config' (Generator & Prompt), 'kisi' (Matriks Asesmen), 'soal' (Pembuat Soal), 'quiz' (Prompt Quiz Interaktif), 'materi' (Ringkasan Materi & Panduan), 'jadwal' (Jadwal Pembelajaran), 'users' (Manajemen Pengguna)
+  const [activeTab, setActiveTab] = useState<'config' | 'kisi' | 'soal' | 'quiz' | 'materi' | 'jadwal' | 'users'>('config');
+
+  // Interactive Quiz & Prompt Generator State (2 Wadah Prompt)
+  const [cbtForm, setCbtForm] = useState({
+    mataPelajaran: 'Sosiologi',
+    materiPokok: 'Perubahan Sosial dan Globalisasi',
+    lingkupMateri: 'Mengidentifikasi bentuk-bentuk perubahan sosial dan menganalisis dampak perubahan sosial.',
+    subMateri: 'Bentuk-bentuk perubahan sosial dan dampaknya.',
+    levelKognitif: 'Penalaran HOTS (Reasoning) (level_3)',
+    bentukSoal: 'Pilihan Ganda Sederhana (A-E)',
+    jumlahSoal: 20, // Min 10, Max 50
+    durasiMenit: 60,
+    usernameCbt: 'peserta_tka',
+    passwordCbt: 'cbt2026_sosiologi',
+    enableSecurity: true,
+    randomizeOrder: true,
+    antiTabSwitch: true,
+    disableCopyPaste: true
+  });
+
+  const [promptWadah1Text, setPromptWadah1Text] = useState<string>('');
+  const [promptWadah2Text, setPromptWadah2Text] = useState<string>('');
+  const [copiedWadah1, setCopiedWadah1] = useState(false);
+  const [copiedWadah2, setCopiedWadah2] = useState(false);
+  const [wadah2SuccessMsg, setWadah2SuccessMsg] = useState<string>('');
+  const [quizActiveSubTab, setQuizActiveSubTab] = useState<'prompt' | 'embed'>('prompt');
+  const [copiedEmbedCode, setCopiedEmbedCode] = useState(false);
 
   // User Management State (for Admin)
   const [usersList, setUsersList] = useState<any[]>([]);
@@ -2289,15 +2325,15 @@ export default function App() {
   const [aiConfig, setAiConfig] = useState(() => {
     const savedKey = localStorage.getItem('gemini_api_key') || '';
     const savedMode = localStorage.getItem('gemini_api_mode') || 'server';
-    let savedModel = localStorage.getItem('gemini_api_model') || 'gemini-3.5-flash';
+    let savedModel = localStorage.getItem('gemini_api_model') || 'gemini-2.0-flash';
     // Upgrade deprecated or invalid models automatically
     if (
-      savedModel === 'gemini-1.5-flash' || 
-      savedModel === 'gemini-2.0-flash' || 
-      savedModel === 'gemini-2.5-flash'
+      !savedModel ||
+      savedModel.includes('3.5') || 
+      savedModel.includes('2.5-flash')
     ) {
-      savedModel = 'gemini-3.5-flash';
-      localStorage.setItem('gemini_api_model', 'gemini-3.5-flash');
+      savedModel = 'gemini-2.0-flash';
+      localStorage.setItem('gemini_api_model', 'gemini-2.0-flash');
     }
     return {
       mode: savedMode as 'server' | 'client',
@@ -2335,16 +2371,19 @@ export default function App() {
       throw new Error("Kunci API Gemini tidak valid! Silakan masukkan Kunci API Gemini terlebih dahulu di Langkah 1.");
     }
 
-    const preferredModel = aiConfig.model || "gemini-2.5-flash";
-    
-    // Fallback list of models in case the preferred model is not available for this API Key
-    const modelsToTry = [preferredModel];
-    if (preferredModel !== "gemini-2.5-flash") {
-      modelsToTry.push("gemini-2.5-flash");
-    }
-    if (preferredModel !== "gemini-2.0-flash") {
-      modelsToTry.push("gemini-2.0-flash");
-    }
+    const preferredModel = (aiConfig.model && !aiConfig.model.includes('2.5-flash') && !aiConfig.model.includes('3.5-flash'))
+      ? aiConfig.model
+      : "gemini-2.0-flash";
+
+    const allModels = [
+      "gemini-2.0-flash",
+      "gemini-2.5-pro",
+      "gemini-1.5-flash",
+      "gemini-1.5-pro",
+      "gemini-2.0-flash-lite"
+    ];
+
+    const modelsToTry = [preferredModel, ...allModels.filter(m => m !== preferredModel)];
 
     let lastError: any = null;
 
@@ -2409,12 +2448,16 @@ export default function App() {
           console.warn(`Direct call with Key #${keyIdx + 1} model ${model} failed:`, err?.message || err);
 
           const errorString = typeof err === 'string' ? err : (err?.message || JSON.stringify(err) || '');
+          const isNotFound = /not_found|404|no longer available/i.test(errorString);
+          if (isNotFound) {
+            continue; // Move to next model
+          }
+
           const isQuotaOrDemandError = 
             /quota|limit|429|exhausted|503|demand|unavailable/i.test(errorString);
 
-          if (isQuotaOrDemandError && apiKeys.length > 1) {
-            console.log(`Rate limit detected on Key #${keyIdx + 1}. Rotating to next API Key...`);
-            break; // Switch immediately to the next API key
+          if (isQuotaOrDemandError) {
+            continue; // Try next model for this key before switching keys
           }
         }
       }
@@ -3280,6 +3323,91 @@ Pembahasan:
     setGeneratedKisiPrompt(promptKisiText);
     setGeneratedSoalPrompt(promptSoalText);
   }, [config]);
+
+  // Generator Prompt Wadah 2 (CBT Kompleks, Login User/Password, Anti-Contek)
+  const buildPromptWadah2 = (form = cbtForm) => {
+    const jumlahSoal = Math.min(Math.max(Number(form.jumlahSoal) || 20, 10), 50);
+    return `[PROMPT UTUH APLIKASI QUIZ INTERAKTIF & CBT KOMPLEKS UNTUK CANVAS GEMINI AI]
+
+Anda adalah Pakar Evaluasi Kurikulum Pendidikan SMA, Lead EdTech Software Engineer, dan Specialist Cyber Security Education.
+Tugas Anda adalah merancang SATU FILE HTML UTUH TERINTEGRASI (HTML + CSS + JavaScript Interaktif) untuk Aplikasi Computer Based Test (CBT) Komprehensif yang siap dijalankan langsung di CANVAS Gemini AI.
+
+==================================================
+1. SPESIFIKASI DAN PARAMETER UJIAN CBT:
+==================================================
+- Mata Pelajaran          : ${form.mataPelajaran || config.mataPelajaran || 'Sosiologi'}
+- Lingkup Materi          : ${form.lingkupMateri}
+- Elemen / Materi Pokok   : ${form.materiPokok}
+- Sub-Materi / Indikator  : ${form.subMateri}
+- Level Kognitif          : ${form.levelKognitif}
+- Bentuk Soal             : ${form.bentukSoal}
+- Target Jumlah Soal      : ${jumlahSoal} Butir Soal HOTS (C4–C6) (Minimal 10 - Maksimal 50 Soal)
+- Durasi Ujian            : ${form.durasiMenit} Menit
+
+==================================================
+2. SISTEM OTENTIKASI CBT (USER & PASSWORD):
+==================================================
+- Sebelum masuk ke lembar soal, aplikasi WAJIB menampilkan Portal Login CBT Mandiri.
+- Kredensial Akses Ujian Wajib:
+  * Username CBT : ${form.usernameCbt}
+  * Password CBT : ${form.passwordCbt}
+- Validasi Ketat: Jika Username atau Password salah, munculkan notifikasi kesalahan "Kredensial Login CBT Tidak Valid!" dengan animasi shake.
+- Setelah login berhasil, tampilkan Nama Siswa, Nomor Peserta, Mata Pelajaran, dan Tombol "Mulai Mengerjakan Ujian".
+
+==================================================
+3. SISTEM KEAMANAN KOMPLEKS (ANTI-CONTEK & ANTI-CURANG):
+==================================================
+- Pengacakan Dinamis (Randomization Engine): Urutan ${jumlahSoal} butir soal dan pilihan jawaban A, B, C, D, E diacak secara otomatis (Fisher-Yates Shuffle) untuk tiap sesi pengerjaan siswa.
+- Focus Guard & Anti Tab-Switching: Pantau event 'visibilitychange' & 'blur'. Jika siswa berpindah tab/layar, tampilkan Peringatan Pelanggaran. Batas melanggar 3 kali; jika dilanggar 3x, sistem akan OTOMATIS MENGUMPULKAN (AUTO-SUBMIT) lembar jawaban secara paksa.
+- Proteksi Pemblokiran Konten (Anti Copy-Paste & Anti Inspect): Blokir Klik Kanan (contextmenu), fungsi Copy, Cut, Paste, dan Seleksi Teks. Blokir shortcut keyboard: F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U, Ctrl+C, Ctrl+V, Alt+Tab, PrtScr.
+- Fullscreen Lock Requirement: Wajibkan mode Layar Penuh (Fullscreen) sebelum soal terbuka. Ujian terkunci jika keluar dari mode Fullscreen.
+- Timer Countdown Realtime & Auto-Submit: Hitung mundur durasi ${form.durasiMenit} menit. Ketika waktu habis (00:00), jawaban siswa otomatis terkirim.
+
+==================================================
+4. FITUR NAVIGASI & EVALUASI AKHIR:
+==================================================
+- Header Judul, Indikator Sisa Waktu, dan Tombol "Selesaikan Ujian".
+- Grid Navigasi Nomor Soal (1–${jumlahSoal}) dengan status: Hijau (Terjawab), Abu-abu (Belum), Kuning (Ragu-ragu).
+- Kartu Skor Akhir (Nilai 0–100, Jumlah Benar/Salah, Persentase Kelulusan).
+- Pembahasan Ilmiah HOTS Langkah Demi Langkah untuk setiap butir soal (baru dapat dibuka setelah disubmit).
+
+==================================================
+PETUNJUK EKSEKUSI PADA CANVAS GEMINI AI:
+==================================================
+Tolong buka fitur CANVAS di Gemini AI dan buatkan SATU KESATUAN KODE HTML, CSS, dan JAVASCRIPT UTUH untuk Aplikasi CBT Interaktif sesuai spesifikasi di atas. Tampilan UI harus bersih, modern, kontras tinggi, dan nyaman untuk siswa SMA.
+
+© 2026 @AJISOSIOLOGI - Assessment TKA SMA & CBT System`;
+  };
+
+  // Auto-sync Pembuat Prompt Otomatis AI (Megaprompt) ke Wadah 1 & Wadah 2 untuk CANVAS Gemini AI
+  useEffect(() => {
+    // Wadah 1: Synced from Matriks Asesmen (Kisi-Kisi)
+    if (generatedSoalPrompt || generatedKisiPrompt) {
+      const w1Formatted = `[INSTRUCTION FOR CANVAS GEMINI AI - HASIL PROMPT MATRIKS ASESMEN & KISI-KISI]
+
+Anda adalah Pakar Evaluasi Kurikulum Pendidikan SMA & Developer Aplikasi EdTech Interaktif.
+Gunakan Draf Megaprompt Terstruktur dari Matriks Asesmen Pintar TKA di bawah ini untuk menghasilkan Modul Asesmen / Quiz Interaktif pada CANVAS Gemini AI.
+
+==================================================
+DRAF MEGAPROMPT MATRIKS ASESMEN / KISI-KISI (${config.mataPelajaran || 'SMA'} - HOTS C4-C6):
+==================================================
+${generatedSoalPrompt || generatedKisiPrompt}
+
+==================================================
+PETUNJUK EKSEKUSI PADA CANVAS GEMINI AI:
+==================================================
+1. Tolong buka tampilan CANVAS di Gemini AI dan buatkan Modul Asesmen / Quiz Interaktif berbasis HTML, CSS, dan JS.
+2. Tampilkan Soal HOTS dengan Stimulus Kontekstual, Pilihan Jawaban A–E, Skor Otomatis, dan Pembahasan Ilmiah.
+3. Tampilan UI bersih, modern, kontras tinggi, dan nyaman untuk siswa SMA.
+
+© 2026 @AJISOSIOLOGI - Assessment TKA SMA System`;
+      setPromptWadah1Text(w1Formatted);
+    }
+
+    // Wadah 2: Auto-generate CBT Kompleks Prompt
+    const w2Text = buildPromptWadah2(cbtForm);
+    setPromptWadah2Text(w2Text);
+  }, [generatedSoalPrompt, generatedKisiPrompt, config.mataPelajaran, cbtForm]);
 
   // Copy helper
   const handleCopy = (text: string, type: 'kisi' | 'soal') => {
@@ -5289,6 +5417,18 @@ PANDUAN EKSTRA:
               )}
             </button>
             <button
+              id="tab-btn-quiz"
+              onClick={() => setActiveTab('quiz')}
+              className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-bold transition-all relative whitespace-nowrap ${
+                activeTab === 'quiz'
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md ring-2 ring-indigo-300'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <Sparkles className="h-4.5 w-4.5 text-amber-300 animate-pulse" />
+              <span>4. Promt QUIZ INTERAKTIF</span>
+            </button>
+            <button
               id="tab-btn-materi"
               onClick={() => setActiveTab('materi')}
               className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-bold transition-all relative whitespace-nowrap ${
@@ -5298,7 +5438,7 @@ PANDUAN EKSTRA:
               }`}
             >
               <FileText className="h-4.5 w-4.5 text-purple-600" />
-              <span>4. Prompt Slide & Infografis</span>
+              <span>5. Promt Slide & Infografis</span>
             </button>
             <button
               id="tab-btn-jadwal"
@@ -5310,7 +5450,7 @@ PANDUAN EKSTRA:
               }`}
             >
               <Calendar className="h-4.5 w-4.5 text-rose-600" />
-              <span>5. Jadwal Pembelajaran XII</span>
+              <span>6. Jadwal Pembelajaran XII</span>
             </button>
             {userRole === 'admin' && (
               <button
@@ -5323,7 +5463,7 @@ PANDUAN EKSTRA:
                 }`}
               >
                 <Users className="h-4.5 w-4.5 text-amber-600" />
-                <span>6. Manajemen Pengguna (Admin)</span>
+                <span>7. Manajemen Pengguna (Admin)</span>
                 {usersList.length > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 bg-amber-600 text-white text-[10px] h-5 px-1.5 rounded-full flex items-center justify-center font-bold">
                     {usersList.length}
@@ -5708,9 +5848,11 @@ PANDUAN EKSTRA:
                         }}
                         className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:outline-none"
                       >
-                        <option value="gemini-2.5-flash">Gemini 2.5 Flash (Sangat Cepat & Stabil - Direkomendasikan)</option>
-                        <option value="gemini-2.0-flash">Gemini 2.0 Flash (Alternatif Cepat)</option>
-                        <option value="gemini-2.5-pro">Gemini 2.5 Pro (Penalaran Sangat Dalam)</option>
+                        <option value="gemini-2.0-flash">Gemini 2.0 Flash (Sangat Cepat & Stabil - Direkomendasikan)</option>
+                        <option value="gemini-2.5-pro">Gemini 2.5 Pro (Penalaran Berpikir Lebih Dalam)</option>
+                        <option value="gemini-1.5-flash">Gemini 1.5 Flash (Model Alternatif)</option>
+                        <option value="gemini-1.5-pro">Gemini 1.5 Pro (Model Alternatif Pro)</option>
+                        <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Model Ringan & Hemat)</option>
                       </select>
                       <p className="text-[10px] text-slate-500 leading-relaxed">
                         💡 <b>Sistem Fallback & Rotasi API Key:</b> Jika model utama atau API Key pertama mengalami limit (429/503), sistem akan otomatis merotasi ke API Key berikutnya dan mencoba model alternatif secara otomatis.
@@ -7816,7 +7958,590 @@ PANDUAN EKSTRA:
           </div>
         )}
 
-        {/* Tab 4: Pembuatan Materi & Panduan */}
+        {/* Tab 4: Prompt QUIZ INTERAKTIF & Generator App CBT */}
+        {activeTab === 'quiz' && (
+          <div id="quiz-panel" className="space-y-6 animate-fadeIn no-print text-left">
+            
+            {/* Header Banner */}
+            <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden border border-indigo-500/30">
+              <div className="absolute top-0 right-0 -mt-10 -mr-10 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute bottom-0 left-1/3 -mb-10 w-48 h-48 bg-purple-500/20 rounded-full blur-2xl pointer-events-none" />
+
+              <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div className="space-y-2 max-w-3xl">
+                  <div className="inline-flex items-center gap-2 bg-indigo-500/20 border border-indigo-400/30 text-indigo-200 text-xs font-bold px-3 py-1 rounded-full backdrop-blur-md">
+                    <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+                    <span>Interactive Quiz & CBT Prompt Generator EdTech</span>
+                  </div>
+                  <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                    Promt QUIZ INTERAKTIF & CBT Generator
+                  </h2>
+                  <p className="text-sm text-slate-300 leading-relaxed">
+                    Sediakan 2 Wadah Prompt AI Khusus: (1) Hasil Draf Prompt Matriks Asesmen / Kisi-Kisi & (2) Prompt Utuh Aplikasi QUIZ INTERAKTIF & CBT Kompleks (10–50 Soal, Login CBT & Anti-Contek).
+                  </p>
+                </div>
+
+                {/* Sub tab selector */}
+                <div className="flex bg-slate-800/90 border border-slate-700/80 p-1.5 rounded-2xl flex-shrink-0 self-start md:self-center shadow-inner">
+                  <button
+                    onClick={() => setQuizActiveSubTab('prompt')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      quizActiveSubTab === 'prompt'
+                        ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-md'
+                        : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
+                    }`}
+                  >
+                    <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+                    <span>Dua Wadah Prompt AI (Canvas Gemini)</span>
+                  </button>
+                  <button
+                    onClick={() => setQuizActiveSubTab('embed')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                      quizActiveSubTab === 'embed'
+                        ? 'bg-gradient-to-r from-indigo-600 to-blue-600 text-white shadow-md'
+                        : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
+                    }`}
+                  >
+                    <Code className="h-3.5 w-3.5 text-purple-300" />
+                    <span>Kode HTML Embed Standalone</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Sub-Tab 1: Dua Wadah Prompt AI */}
+            {quizActiveSubTab === 'prompt' && (
+              <div className="space-y-8">
+                
+                {/* WADAH 1: HASIL PROMPT MATRIKS ASESMEN (KISI-KISI) */}
+                <div className="bg-white border-2 border-indigo-200 rounded-3xl p-6 sm:p-7 shadow-md space-y-4 relative overflow-hidden">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-indigo-100 pb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 bg-indigo-600 text-white rounded-2xl shadow-md">
+                        <FileText className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="bg-indigo-100 text-indigo-900 font-black text-[11px] px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                            Wadah 1
+                          </span>
+                          <span className="bg-emerald-100 text-emerald-800 text-[10.5px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                            <Sparkles className="h-3 w-3 text-emerald-600" />
+                            <span>Terhubung Otomatis Matriks Asesmen</span>
+                          </span>
+                        </div>
+                        <h3 className="font-extrabold text-slate-900 text-lg sm:text-xl tracking-tight mt-0.5">
+                          Hasil Prompt Matriks Asesmen & Kisi-Kisi (Megaprompt AI)
+                        </h3>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={async () => {
+                          const activeText = promptWadah1Text || generatedSoalPrompt || generatedKisiPrompt;
+                          if (!activeText) return;
+                          await copyToClipboard(activeText);
+                          setCopiedWadah1(true);
+                          setTimeout(() => setCopiedWadah1(false), 2500);
+                          window.open("https://aistudio.google.com/app/prompts/new_chat", "_blank");
+                        }}
+                        className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-4 py-2 rounded-xl text-xs font-black transition shadow-md flex items-center gap-1.5 cursor-pointer"
+                        title="Salin Prompt Wadah 1 dan Buka CANVAS Gemini AI"
+                      >
+                        <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+                        <span>⚡ Terapkan & Buka CANVAS Gemini AI ↗</span>
+                      </button>
+
+                      <button
+                        onClick={async () => {
+                          const activeText = promptWadah1Text || generatedSoalPrompt || generatedKisiPrompt;
+                          if (!activeText) return;
+                          await copyToClipboard(activeText);
+                          setCopiedWadah1(true);
+                          setTimeout(() => setCopiedWadah1(false), 2500);
+                        }}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                          copiedWadah1
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow'
+                        }`}
+                      >
+                        {copiedWadah1 ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                        <span>{copiedWadah1 ? 'Tersalin!' : 'Salin Prompt Wadah 1'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Terminal Box Wadah 1 */}
+                  <div className="relative">
+                    <textarea
+                      readOnly
+                      value={
+                        promptWadah1Text ||
+                        generatedSoalPrompt ||
+                        generatedKisiPrompt ||
+                        `[BELUM ADA PROMPT MATRIKS ASESMEN]
+
+Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen (Kisi-Kisi)" untuk menggenerasikan prompt kisi-kisi atau butir soal HOTS secara otomatis.`
+                      }
+                      className="w-full h-[220px] bg-slate-950 text-indigo-200 p-4 rounded-2xl font-mono text-xs leading-relaxed focus:outline-none border border-slate-800 resize-y selection:bg-indigo-500 selection:text-white"
+                    />
+                    {!(promptWadah1Text || generatedSoalPrompt || generatedKisiPrompt) && (
+                      <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center p-4 text-center space-y-3 border border-slate-800">
+                        <FileText className="h-8 w-8 text-indigo-400" />
+                        <p className="text-xs text-slate-300 max-w-md font-medium">
+                          Belum ada draf prompt dari Matriks Asesmen. Buka menu Matriks Asesmen untuk menggenerasikan prompt kisi-kisi secara otomatis.
+                        </p>
+                        <button
+                          onClick={() => setActiveTab('kisi')}
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition shadow flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Zap className="h-4 w-4 text-amber-300" />
+                          <span>⚡ Buka Menu Matriks Asesmen (Kisi-Kisi)</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      <span>Format Draf Asesmen Standar Pusmendik & TKA HOTS</span>
+                    </span>
+                    <span className="text-[11px] text-indigo-600 font-bold">
+                      Wadah 1: Matriks Asesmen & Kisi-Kisi
+                    </span>
+                  </div>
+                </div>
+
+
+                {/* WADAH 2: PROMPT UTUH QUIZ INTERAKTIF & CBT KOMPLEKS */}
+                <div className="bg-white border-2 border-purple-300 rounded-3xl p-6 sm:p-7 shadow-lg space-y-6 relative overflow-hidden">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-purple-100 pb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-2xl shadow-md">
+                        <ShieldAlert className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="bg-purple-100 text-purple-900 font-black text-[11px] px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                            Wadah 2
+                          </span>
+                          <span className="bg-amber-100 text-amber-900 text-[10.5px] font-extrabold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                            <Lock className="h-3 w-3 text-amber-700" />
+                            <span>10–50 Soal + Anti-Contek & Login CBT</span>
+                          </span>
+                        </div>
+                        <h3 className="font-extrabold text-slate-900 text-lg sm:text-xl tracking-tight mt-0.5">
+                          Prompt Utuh QUIZ INTERAKTIF & CBT Kompleks (Anti-Contek System)
+                        </h3>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={async () => {
+                          const activeText = promptWadah2Text || buildPromptWadah2(cbtForm);
+                          await copyToClipboard(activeText);
+                          setCopiedWadah2(true);
+                          setTimeout(() => setCopiedWadah2(false), 2500);
+                          window.open("https://aistudio.google.com/app/prompts/new_chat", "_blank");
+                        }}
+                        className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-4 py-2 rounded-xl text-xs font-black transition shadow-md flex items-center gap-1.5 cursor-pointer"
+                        title="Salin Prompt Wadah 2 dan Buka CANVAS Gemini AI"
+                      >
+                        <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+                        <span>⚡ Terapkan & Buka CANVAS Gemini AI ↗</span>
+                      </button>
+
+                      <button
+                        onClick={async () => {
+                          const activeText = promptWadah2Text || buildPromptWadah2(cbtForm);
+                          await copyToClipboard(activeText);
+                          setCopiedWadah2(true);
+                          setTimeout(() => setCopiedWadah2(false), 2500);
+                        }}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                          copiedWadah2
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-purple-600 hover:bg-purple-700 text-white shadow'
+                        }`}
+                      >
+                        {copiedWadah2 ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                        <span>{copiedWadah2 ? 'Tersalin!' : 'Salin Prompt Wadah 2'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Form Controls for Wadah 2 */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-200/80 pb-3 gap-2">
+                      <div>
+                        <h4 className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
+                          <Sliders className="h-4 w-4 text-purple-600" />
+                          <span>Pengaturan Parameter Prompt CBT Wadah 2</span>
+                        </h4>
+                        <span className="text-[11px] text-slate-500 font-medium">
+                          Konfigurasi Jumlah Soal (10–50), Login & Keamanan
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCbtForm(prev => ({
+                            ...prev,
+                            mataPelajaran: config.mataPelajaran || prev.mataPelajaran,
+                            materiPokok: config.materiPokok || prev.materiPokok,
+                            lingkupMateri: config.lingkupMateri || prev.lingkupMateri,
+                            subMateri: config.subMateri || prev.subMateri,
+                            levelKognitif: config.levelKognitif || prev.levelKognitif,
+                            jumlahSoal: config.jumlahSoal || prev.jumlahSoal
+                          }));
+                          setWadah2SuccessMsg('✅ Parameter CBT berhasil disinkronkan dari Generator Utama!');
+                          setTimeout(() => setWadah2SuccessMsg(''), 3500);
+                        }}
+                        className="text-[11px] font-bold text-purple-700 bg-purple-100 hover:bg-purple-200 border border-purple-300 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5 text-purple-600" />
+                        <span>Sinkronkan Parameter dari Config</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+                      
+                      {/* Mata Pelajaran */}
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1">Mata Pelajaran</label>
+                        <input
+                          type="text"
+                          value={cbtForm.mataPelajaran}
+                          onChange={(e) => setCbtForm({ ...cbtForm, mataPelajaran: e.target.value })}
+                          className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+
+                      {/* Materi Pokok */}
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1">Materi Pokok (Elemen)</label>
+                        <input
+                          type="text"
+                          value={cbtForm.materiPokok}
+                          onChange={(e) => setCbtForm({ ...cbtForm, materiPokok: e.target.value })}
+                          className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+
+                      {/* Sub-Materi */}
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1">Sub-Materi / Indikator</label>
+                        <input
+                          type="text"
+                          value={cbtForm.subMateri}
+                          onChange={(e) => setCbtForm({ ...cbtForm, subMateri: e.target.value })}
+                          className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+
+                      {/* Jumlah Soal (10 - 50 Slider & Buttons) */}
+                      <div className="md:col-span-2 lg:col-span-1 bg-purple-50/70 border border-purple-200/80 p-3 rounded-xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="font-extrabold text-purple-950 text-xs">
+                            Jumlah Soal Ujian (Min 10 - Max 50)
+                          </label>
+                          <span className="bg-purple-600 text-white font-mono font-black text-xs px-2.5 py-0.5 rounded-lg shadow">
+                            {cbtForm.jumlahSoal} Soal
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={10}
+                          max={50}
+                          step={5}
+                          value={cbtForm.jumlahSoal}
+                          onChange={(e) => setCbtForm({ ...cbtForm, jumlahSoal: parseInt(e.target.value) || 10 })}
+                          className="w-full accent-purple-600 cursor-pointer"
+                        />
+                        <div className="flex items-center justify-between gap-1">
+                          {[10, 20, 30, 40, 50].map((num) => (
+                            <button
+                              key={num}
+                              type="button"
+                              onClick={() => setCbtForm({ ...cbtForm, jumlahSoal: num })}
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer transition ${
+                                cbtForm.jumlahSoal === num
+                                  ? 'bg-purple-600 text-white'
+                                  : 'bg-white text-purple-900 border border-purple-200 hover:bg-purple-100'
+                              }`}
+                            >
+                              {num} Soal
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Durasi Ujian */}
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1">Durasi Ujian (Menit)</label>
+                        <input
+                          type="number"
+                          min={10}
+                          max={180}
+                          value={cbtForm.durasiMenit}
+                          onChange={(e) => setCbtForm({ ...cbtForm, durasiMenit: parseInt(e.target.value) || 60 })}
+                          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+
+                      {/* Level Kognitif & Bentuk Soal */}
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1">Level Kognitif & Bentuk</label>
+                        <select
+                          value={cbtForm.levelKognitif}
+                          onChange={(e) => setCbtForm({ ...cbtForm, levelKognitif: e.target.value })}
+                          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        >
+                          <option value="Penalaran HOTS (Reasoning) (level_3)">L3 - Penalaran HOTS (Reasoning)</option>
+                          <option value="Penerapan (Applying) (level_2)">L2 - Penerapan (Applying)</option>
+                          <option value="Pemahaman (Knowing) (level_1)">L1 - Pemahaman (Knowing)</option>
+                        </select>
+                      </div>
+
+                    </div>
+
+                    {/* Authentication CBT Section */}
+                    <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-4 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Lock className="h-4 w-4 text-amber-700" />
+                        <h5 className="font-extrabold text-amber-950 text-xs uppercase tracking-wider">
+                          Sistem Otentikasi & Login CBT Mandiri
+                        </h5>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="font-bold text-amber-900 block mb-1 text-[11px]">Username CBT Ujian</label>
+                          <input
+                            type="text"
+                            value={cbtForm.usernameCbt}
+                            onChange={(e) => setCbtForm({ ...cbtForm, usernameCbt: e.target.value })}
+                            className="w-full bg-white border border-amber-300 rounded-lg px-3 py-1.5 font-mono text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="font-bold text-amber-900 block mb-1 text-[11px]">Password CBT Ujian</label>
+                          <input
+                            type="text"
+                            value={cbtForm.passwordCbt}
+                            onChange={(e) => setCbtForm({ ...cbtForm, passwordCbt: e.target.value })}
+                            className="w-full bg-white border border-amber-300 rounded-lg px-3 py-1.5 font-mono text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Anti-Cheat Parameters Badges */}
+                    <div className="p-3.5 bg-slate-900 text-slate-200 rounded-xl space-y-2 text-xs border border-slate-800">
+                      <div className="flex items-center gap-2">
+                        <ShieldAlert className="h-4 w-4 text-rose-400" />
+                        <span className="font-bold text-rose-300 uppercase tracking-wider text-[11px]">
+                          Proteksi Keamanan Anti-Contek & Anti-Curang Aktif
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 text-[11px]">
+                        <div className="flex items-center gap-1.5 text-emerald-300 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
+                          <span>Acak Soal & Jawaban A–E</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-emerald-300 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
+                          <span>Focus Guard (Anti Tab-Switch Max 3x)</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-emerald-300 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
+                          <span>Block Copy, Paste, Cut, Right-Click & F12</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-emerald-300 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
+                          <span>Fullscreen Mode Lock Requirement</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-emerald-300 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
+                          <span>Timer Realtime & Auto-Submit Paksa</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-emerald-300 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 flex-shrink-0" />
+                          <span>Portal Login User/Pass Mandiri</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Prominent Button "Buatkan / Sinkronkan Prompt Quiz CBT Wadah 2" */}
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const promptText = buildPromptWadah2(cbtForm);
+                        setPromptWadah2Text(promptText);
+                        await copyToClipboard(promptText);
+                        setCopiedWadah2(true);
+                        setWadah2SuccessMsg(`✨ Prompt Quiz CBT Wadah 2 Berhasil Digenerasikan (${cbtForm.jumlahSoal} Soal) & Tersalin ke Clipboard!`);
+                        setTimeout(() => setCopiedWadah2(false), 3000);
+                        setTimeout(() => setWadah2SuccessMsg(''), 5000);
+                      }}
+                      className="w-full bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-700 hover:via-indigo-700 hover:to-blue-700 text-white font-black text-sm sm:text-base px-5 py-3.5 rounded-xl shadow-lg hover:shadow-purple-500/30 transition-all flex items-center justify-center gap-2.5 cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
+                    >
+                      <Sparkles className="h-5 w-5 text-amber-300 animate-spin" style={{ animationDuration: '4s' }} />
+                      <span>Buatkan / Sinkronkan Prompt Quiz CBT Wadah 2</span>
+                    </button>
+
+                  </div>
+
+                  {/* Success Toast Banner Wadah 2 */}
+                  {wadah2SuccessMsg && (
+                    <div className="bg-emerald-600 text-white p-3.5 rounded-2xl flex items-center justify-between text-xs font-bold shadow-md animate-fadeIn border border-emerald-500">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="h-5 w-5 text-amber-300 flex-shrink-0" />
+                        <span>{wadah2SuccessMsg}</span>
+                      </div>
+                      <span className="bg-emerald-800/80 px-2.5 py-1 rounded-lg text-[10px] uppercase tracking-wider font-mono">
+                        Canvas Ready
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Terminal Box Wadah 2 */}
+                  <div className="relative">
+                    <textarea
+                      readOnly
+                      value={promptWadah2Text || buildPromptWadah2(cbtForm)}
+                      className="w-full h-[320px] bg-slate-950 text-indigo-200 p-4 rounded-2xl font-mono text-xs leading-relaxed focus:outline-none border border-slate-800 resize-y selection:bg-purple-500 selection:text-white"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      <span>Lengkap dengan Instruksi Pembahasan HOTS & Anti-Contek Canvas AI</span>
+                    </span>
+                    <span className="text-[11px] text-purple-600 font-bold">
+                      Wadah 2: Prompt Utuh CBT Kompleks
+                    </span>
+                  </div>
+
+                </div>
+
+              </div>
+            )}
+
+            {/* Sub-Tab 2: Source Code Single File HTML Standalone */}
+            {quizActiveSubTab === 'embed' && (
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="font-extrabold text-slate-900 text-base flex items-center gap-2">
+                      <Code className="h-5 w-5 text-purple-600" />
+                      <span>Source Code Single File HTML (Canvas / iFrame Embed Ready)</span>
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Satu file utuh terintegrasi (HTML + CSS + JS) siap dijalankan langsung di browser atau LMS Canvas
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={async () => {
+                        const htmlCode = `<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive Quiz & CBT Generator - @AJISOSIOLOGI</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
+    body { background: #f8fafc; color: #1e293b; padding: 20px; min-height: 100vh; display: flex; flex-direction: column; }
+    .container { max-width: 900px; margin: 0 auto; width: 100%; }
+    .header { background: linear-gradient(135deg, #1e1b4b, #312e81); color: white; padding: 24px; border-radius: 16px; margin-bottom: 24px; text-align: center; }
+    .header h1 { font-size: 24px; margin-bottom: 6px; }
+    .header p { font-size: 13px; color: #c7d2fe; }
+    .card { background: white; border: 1px solid #e2e8f0; border-radius: 16px; padding: 24px; margin-bottom: 24px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+    .btn-main { background: linear-gradient(135deg, #2563eb, #4f46e5); color: white; border: none; padding: 14px 24px; border-radius: 12px; font-weight: bold; font-size: 15px; cursor: pointer; width: 100%; margin-bottom: 16px; }
+    .prompt-box { background: #0f172a; color: #a5b4fc; font-family: monospace; padding: 16px; border-radius: 12px; font-size: 12px; line-height: 1.6; white-space: pre-wrap; width: 100%; min-height: 250px; border: 1px solid #1e293b; }
+    .footer { text-align: center; padding: 20px 0; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Interactive Quiz & CBT Prompt Generator</h1>
+      <p>Aplikasi CBT & Pembuat Prompt TKA Sosiologi HOTS</p>
+    </div>
+
+    <div class="card">
+      <button class="btn-main" onclick="copyPrompt()">✨ Salin Prompt CBT Wadah 2</button>
+      <textarea id="promptArea" class="prompt-box" readonly>${(promptWadah2Text || buildPromptWadah2(cbtForm)).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+    </div>
+  </div>
+
+  <div class="footer">
+    <p><strong>© 2026 @AJISOSIOLOGI</strong> - All Rights Reserved.</p>
+  </div>
+
+  <script>
+    function copyPrompt() {
+      var copyText = document.getElementById("promptArea");
+      copyText.select();
+      navigator.clipboard.writeText(copyText.value);
+      alert("Prompt Quiz CBT Berhasil Disalin ke Clipboard!");
+    }
+  </script>
+</body>
+</html>`;
+                        await copyToClipboard(htmlCode);
+                        setCopiedEmbedCode(true);
+                        setTimeout(() => setCopiedEmbedCode(false), 2500);
+                      }}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                        copiedEmbedCode ? 'bg-emerald-600 text-white' : 'bg-purple-600 hover:bg-purple-700 text-white shadow'
+                      }`}
+                    >
+                      {copiedEmbedCode ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                      <span>{copiedEmbedCode ? 'Tersalin!' : 'Salin Semua Kode HTML'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+                  <p className="text-xs text-indigo-300 font-mono mb-2">
+                    // Silakan salin kode HTML di bawah ini untuk dimasukkan langsung ke Canvas / LMS iFrame:
+                  </p>
+                  <pre className="bg-slate-950 text-slate-300 p-4 rounded-xl text-xs font-mono overflow-x-auto max-h-[350px]">
+{`<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Interactive Quiz & CBT Prompt Generator - @AJISOSIOLOGI</title>
+</head>
+<body>
+  ...
+  <footer>
+    <p>© 2026 @AJISOSIOLOGI</p>
+  </footer>
+</body>
+</html>`}
+                  </pre>
+                </div>
+              </div>
+            )}
+
+            {/* Mandatory Copyright Footer */}
+            <div className="pt-4 border-t border-slate-200 text-center text-xs text-slate-500 space-y-1">
+              <p className="font-extrabold text-slate-700">© 2026 @AJISOSIOLOGI</p>
+              <p className="text-[11px] text-slate-400">Interactive Quiz & Prompt Generator Sosiologi / TKA SMA</p>
+            </div>
+
+          </div>
+        )}
+
+        {/* Tab 5: Pembuatan Materi & Panduan */}
         {activeTab === 'materi' && (
           <div id="materi-panel" className="space-y-6 animate-fadeIn no-print">
             
@@ -9528,7 +10253,8 @@ PANDUAN EKSTRA:
             <p>Sistem Asesmen Pintar untuk Guru, Dosen, dan Pengajar Seluruh Indonesia.</p>
           </div>
           <div className="text-right flex flex-col items-end gap-1">
-            <p>©ajisosiologi 2026 Assessment TKA SMA. All Rights Reserved.</p>
+            <p className="font-extrabold text-slate-300">© 2026 @AJISOSIOLOGI</p>
+            <p className="text-[11px] text-slate-500">Assessment TKA SMA. All Rights Reserved.</p>
             <p>Dikembangkan dengan menggunakan Gemini Flash & React.</p>
             <a 
               href="https://lynk.id/ajisosiologi" 

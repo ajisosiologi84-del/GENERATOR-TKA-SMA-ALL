@@ -76,11 +76,13 @@ async function generateContentWithFallbackAndRetry(
     );
   }
 
-  // Ordered by preferred + high availability
+  // Ordered by preferred + high availability across independent quota buckets
   const modelsToTry = [
-    "gemini-2.5-flash",
     "gemini-2.0-flash",
-    "gemini-2.5-pro"
+    "gemini-2.5-pro",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "gemini-2.0-flash-lite"
   ];
 
   const now = Date.now();
@@ -142,6 +144,18 @@ async function generateContentWithFallbackAndRetry(
           console.error(`Key #${keyIdx + 1} Model ${model} (attempt ${attempt}) failed with error:`, error?.message || error);
 
           const errorString = typeof error === 'string' ? error : (error?.message || JSON.stringify(error) || '');
+          const isNotFound = 
+            error?.status === 404 || 
+            error?.statusCode === 404 || 
+            error?.code === 404 || 
+            /not_found|404|no longer available/i.test(errorString);
+
+          if (isNotFound) {
+            console.warn(`Model ${model} not found/deprecated. Skipping...`);
+            coolOffModels.set(model, Date.now() + 86400000); // 24 hours cool-off
+            break; // Move to next model immediately
+          }
+
           const isQuotaOrDemandError = 
             error?.status === 429 || 
             error?.statusCode === 429 || 
@@ -153,17 +167,10 @@ async function generateContentWithFallbackAndRetry(
 
           if (isQuotaOrDemandError) {
             coolOffModels.set(model, Date.now());
-            if (keysToTry.length > 1) {
-              console.log(`Rate limit/quota on Key #${keyIdx + 1}. Rotating to next API Key...`);
-              break; // Break model loop to immediately switch to the next API Key
-            }
-            if (attempt < 2) {
-              console.log(`Rate limit encountered on ${model}. Waiting 2.5s before retry...`);
-              await new Promise(r => setTimeout(r, 2500));
-              continue;
-            }
+            // Try next model for current key since each model has its own quota pool
+            break;
           }
-          break; // Move to next model if not 429 or if attempt 2 failed
+          break; // Move to next model if other error
         }
       }
     }
