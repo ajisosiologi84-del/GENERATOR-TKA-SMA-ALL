@@ -2317,6 +2317,15 @@ export default function App() {
       throw new Error("Kunci API Gemini belum diatur! Silakan masukkan kunci API terlebih dahulu di Tab 1 (Pengaturan Koneksi AI) atau beralih ke mode Server.");
     }
 
+    const apiKeys = (aiConfig.apiKey || '')
+      .split(/[\n,;]+/)
+      .map(k => k.trim())
+      .filter(k => k.length > 5);
+
+    if (apiKeys.length === 0) {
+      throw new Error("Kunci API Gemini tidak valid! Silakan masukkan Kunci API Gemini terlebih dahulu di Langkah 1.");
+    }
+
     const preferredModel = aiConfig.model || "gemini-2.5-flash";
     
     // Fallback list of models in case the preferred model is not available for this API Key
@@ -2324,81 +2333,85 @@ export default function App() {
     if (preferredModel !== "gemini-2.5-flash") {
       modelsToTry.push("gemini-2.5-flash");
     }
-    if (preferredModel !== "gemini-3.5-flash") {
-      modelsToTry.push("gemini-3.5-flash");
-    }
     if (preferredModel !== "gemini-2.0-flash") {
       modelsToTry.push("gemini-2.0-flash");
     }
-    if (preferredModel !== "gemini-1.5-flash") {
-      modelsToTry.push("gemini-1.5-flash");
-    }
 
-    let preferredModelError: any = null;
     let lastError: any = null;
 
-    for (const model of modelsToTry) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${aiConfig.apiKey}`;
+    // API Key Rotation Loop across all user-provided keys
+    for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx++) {
+      const apiKey = apiKeys[keyIdx];
+      console.log(`[Client API Key Rotation] Trying Key #${keyIdx + 1} of ${apiKeys.length}...`);
 
-        const requestBody: any = {
-          contents: [
-            {
-              parts: [{ text: promptText }]
+      for (const model of modelsToTry) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+          const requestBody: any = {
+            contents: [
+              {
+                parts: [{ text: promptText }]
+              }
+            ],
+            generationConfig: {
+              temperature: 0.7,
             }
-          ],
-          generationConfig: {
-            temperature: 0.7,
-          }
-        };
-
-        if (systemInstruction) {
-          requestBody.systemInstruction = {
-            parts: [{ text: systemInstruction }]
           };
-        }
 
-        if (responseSchema) {
-          requestBody.generationConfig.responseMimeType = "application/json";
-          requestBody.generationConfig.responseSchema = responseSchema;
-        }
-
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(requestBody)
-        });
-
-        if (!res.ok) {
-          let errorText = '';
-          try {
-            const errObj = await res.json();
-            errorText = errObj.error?.message || JSON.stringify(errObj);
-          } catch {
-            errorText = await res.text();
+          if (systemInstruction) {
+            requestBody.systemInstruction = {
+              parts: [{ text: systemInstruction }]
+            };
           }
-          throw new Error(`Google API Error: ${errorText || res.statusText}`);
-        }
 
-        const result = await res.json();
-        const candidateText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!candidateText) {
-          throw new Error("Tidak ada respon yang dihasilkan oleh model Gemini.");
+          if (responseSchema) {
+            requestBody.generationConfig.responseMimeType = "application/json";
+            requestBody.generationConfig.responseSchema = responseSchema;
+          }
+
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestBody)
+          });
+
+          if (!res.ok) {
+            let errorText = '';
+            try {
+              const errObj = await res.json();
+              errorText = errObj.error?.message || JSON.stringify(errObj);
+            } catch {
+              errorText = await res.text();
+            }
+            throw new Error(`Google API Error (${res.status}): ${errorText || res.statusText}`);
+          }
+
+          const result = await res.json();
+          const candidateText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!candidateText) {
+            throw new Error("Tidak ada respon yang dihasilkan oleh model Gemini.");
+          }
+          return candidateText;
+        } catch (err: any) {
+          lastError = err;
+          console.warn(`Direct call with Key #${keyIdx + 1} model ${model} failed:`, err?.message || err);
+
+          const errorString = typeof err === 'string' ? err : (err?.message || JSON.stringify(err) || '');
+          const isQuotaOrDemandError = 
+            /quota|limit|429|exhausted|503|demand|unavailable/i.test(errorString);
+
+          if (isQuotaOrDemandError && apiKeys.length > 1) {
+            console.log(`Rate limit detected on Key #${keyIdx + 1}. Rotating to next API Key...`);
+            break; // Switch immediately to the next API key
+          }
         }
-        return candidateText;
-      } catch (err: any) {
-        console.warn(`Direct call with model ${model} failed, trying fallback...`, err);
-        if (model === preferredModel) {
-          preferredModelError = err;
-        }
-        lastError = err;
-        // Continue to the next fallback model
       }
     }
 
-    throw preferredModelError || lastError || new Error("Gagal memanggil API Gemini melalui model pilihan maupun fallback.");
+    throw lastError || new Error("Gagal memanggil API Gemini setelah merotasi seluruh API Key dan model.");
   };
 
   // Prompt Generator outputs
@@ -2606,7 +2619,10 @@ export default function App() {
     try {
       const response = await fetch('/api/generate-materi', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-api-key': aiConfig.apiKey || ''
+        },
         body: JSON.stringify({
           kisi,
           mataPelajaran: config.mataPelajaran,
@@ -3314,7 +3330,10 @@ Aturan Penyusunan Matriks:
       } else {
         const response = await fetch('/api/generate-kisi', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-api-key': aiConfig.apiKey || ''
+          },
           body: JSON.stringify({
             mataPelajaran: config.mataPelajaran,
             definisi: config.definisi,
@@ -3472,6 +3491,7 @@ Hasilkan rancangan prompt instruksi lengkap, terstruktur, profesional, dan dalam
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'x-api-key': aiConfig.apiKey || ''
           },
           body: JSON.stringify({
             kisi: selectedKisiForPrompt,
@@ -3627,7 +3647,10 @@ PANDUAN EKSTRA:
         } else {
           const response = await fetch('/api/generate-soal', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              'x-api-key': aiConfig.apiKey || ''
+            },
             body: JSON.stringify({
               kisi,
               count: countForThisChunk,
@@ -4310,6 +4333,14 @@ PANDUAN EKSTRA:
     });
     setIsEditingKisi(true);
     setEditingKisiId(item.id);
+
+    // Scroll to edit form section smoothly
+    setTimeout(() => {
+      const formElem = document.getElementById('kisi-form-section');
+      if (formElem) {
+        formElem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 50);
   };
 
   const handleDeleteKisi = async (id: string) => {
@@ -5477,43 +5508,47 @@ PANDUAN EKSTRA:
                     </button>
                   </div>
 
-                  {aiConfig.mode === 'client' && (
-                    <div className="space-y-3 p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl animate-fadeIn text-left">
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between items-center">
-                          <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wide">
-                            Kunci API Gemini Anda (Direct API)
-                          </label>
-                          <a
-                            href="https://aistudio.google.com/"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[10px] text-indigo-600 hover:underline font-bold"
-                          >
-                            Dapatkan API Key Gratis ↗
-                          </a>
-                        </div>
-                        <div className="flex gap-2">
-                          <div className="relative flex-1">
-                            <input
-                              type={showApiKey ? "text" : "password"}
-                              value={aiConfig.apiKey}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setAiConfig(prev => ({ ...prev, apiKey: val }));
-                                localStorage.setItem('gemini_api_key', val);
-                              }}
-                              placeholder="AIzaSy..."
-                              className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg pl-3 pr-10 py-1.5 text-xs font-mono"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowApiKey(!showApiKey)}
-                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                            >
-                              {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                            </button>
-                          </div>
+                  {/* API Key Configuration & Rotation Input */}
+                  <div className="space-y-3 p-3.5 bg-indigo-50/60 border border-indigo-100 rounded-xl animate-fadeIn text-left mt-3">
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center flex-wrap gap-1">
+                        <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                          <span>Kunci API Gemini (Dukungan Rotasi Multi-Key)</span>
+                          {((aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5).length) > 0 && (
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold flex items-center gap-1 ${((aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5).length) > 1 ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-indigo-100 text-indigo-800 border border-indigo-200'}`}>
+                              {((aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5).length) === 1 
+                                ? '1 Key Terdeteksi' 
+                                : `🔄 Rotasi Otomatis Aktif: ${(aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5).length} Key`}
+                            </span>
+                          )}
+                        </label>
+                        <a
+                          href="https://aistudio.google.com/"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] text-indigo-600 hover:underline font-bold"
+                        >
+                          Dapatkan API Key Gratis ↗
+                        </a>
+                      </div>
+
+                      <div className="space-y-2">
+                        <textarea
+                          rows={((aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5).length) > 1 ? 3 : 2}
+                          value={aiConfig.apiKey}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setAiConfig(prev => ({ ...prev, apiKey: val }));
+                            localStorage.setItem('gemini_api_key', val);
+                          }}
+                          placeholder="Masukkan satu atau beberapa Kunci API (pisahkan dengan koma atau baris baru untuk Rotasi Otomatis)...&#10;Contoh:&#10;AIzaSyKeyPertama...&#10;AIzaSyKeyKedua..."
+                          className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg p-2.5 text-xs font-mono leading-relaxed shadow-inner"
+                        />
+                        
+                        <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
+                          <p className="text-[10.5px] text-slate-600 font-medium leading-normal">
+                            💡 <b>Fitur Rotasi API Key:</b> Masukkan beberapa API Key dari akun berbeda (pisahkan dengan koma atau enter). Jika 1 key mencapai limit kuota (429), sistem otomatis pindah ke key berikutnya tanpa menghentikan pembuatan soal.
+                          </p>
                           <button
                             type="button"
                             onClick={async () => {
@@ -5536,49 +5571,49 @@ PANDUAN EKSTRA:
                             <span>SIMPAN</span>
                           </button>
                         </div>
-
-                        <AnimatePresence>
-                          {showApiKeySaved && (
-                            <motion.div
-                              initial={{ opacity: 0, height: 0, y: -4 }}
-                              animate={{ opacity: 1, height: 'auto', y: 0 }}
-                              exit={{ opacity: 0, height: 0, y: -4 }}
-                              className="flex items-center gap-1.5 text-[10.5px] font-bold text-emerald-600 mt-1 bg-emerald-50 border border-emerald-200/50 py-1 px-2.5 rounded-lg overflow-hidden"
-                            >
-                              <Check className="h-3.5 w-3.5" />
-                              <span>Kunci API berhasil disimpan secara aman di browser!</span>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
                       </div>
 
-                      <div className="space-y-1.5">
-                        <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wide">
-                          Pilih Model Gemini
-                        </label>
-                        <select
-                          value={aiConfig.model}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setAiConfig(prev => ({ ...prev, model: val }));
-                            localStorage.setItem('gemini_api_model', val);
-                          }}
-                          className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:outline-none"
-                        >
-                          <option value="gemini-3.5-flash">gemini-3.5-flash (Utama - Sangat Cerdas, Cepat & Stabil)</option>
-                          <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Hemat Kuota & Kecepatan Tinggi)</option>
-                          <option value="gemini-flash-latest">gemini-flash-latest (Selalu Stabil & Terupdate)</option>
-                        </select>
-                        <p className="text-[10px] text-slate-500 leading-relaxed">
-                          💡 <b>Sistem Fallback Otomatis:</b> Jika model utama tidak dapat diakses, sistem akan otomatis mencoba model alternatif yang stabil agar pembuatan soal tidak terputus.
-                        </p>
-                      </div>
+                      <AnimatePresence>
+                        {showApiKeySaved && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0, y: -4 }}
+                            animate={{ opacity: 1, height: 'auto', y: 0 }}
+                            exit={{ opacity: 0, height: 0, y: -4 }}
+                            className="flex items-center gap-1.5 text-[10.5px] font-bold text-emerald-600 mt-1 bg-emerald-50 border border-emerald-200/50 py-1 px-2.5 rounded-lg overflow-hidden"
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            <span>Kunci API & Pengaturan Rotasi berhasil disimpan!</span>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
 
-                      <p className="text-[10px] text-slate-500 pt-1 border-t border-indigo-100">
-                        🔒 Kunci API disimpan secara lokal di browser Anda dan <b>tidak pernah</b> dikirimkan ke server eksternal mana pun selain Google API langsung.
+                    <div className="space-y-1.5 mt-3 pt-2 border-t border-indigo-100">
+                      <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wide">
+                        Pilih Model Gemini Utamamu
+                      </label>
+                      <select
+                        value={aiConfig.model}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setAiConfig(prev => ({ ...prev, model: val }));
+                          localStorage.setItem('gemini_api_model', val);
+                        }}
+                        className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:outline-none"
+                      >
+                        <option value="gemini-2.5-flash">Gemini 2.5 Flash (Sangat Cepat & Stabil - Direkomendasikan)</option>
+                        <option value="gemini-2.0-flash">Gemini 2.0 Flash (Alternatif Cepat)</option>
+                        <option value="gemini-2.5-pro">Gemini 2.5 Pro (Penalaran Sangat Dalam)</option>
+                      </select>
+                      <p className="text-[10px] text-slate-500 leading-relaxed">
+                        💡 <b>Sistem Fallback & Rotasi API Key:</b> Jika model utama atau API Key pertama mengalami limit (429/503), sistem akan otomatis merotasi ke API Key berikutnya dan mencoba model alternatif secara otomatis.
                       </p>
                     </div>
-                  )}
+
+                    <p className="text-[10px] text-slate-500 pt-1 border-t border-indigo-100">
+                      🔒 Kunci API disimpan secara lokal di browser Anda / akun Cloud Anda secara aman.
+                    </p>
+                  </div>
                 </div>
               </section>
 
@@ -6021,11 +6056,44 @@ PANDUAN EKSTRA:
             </div>
 
             {/* Manually Add / Edit Row Form */}
-            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 no-print">
-              <h3 className="text-sm font-bold text-slate-800 mb-4 uppercase tracking-wider flex items-center gap-2">
-                <Plus className="h-4 w-4 text-blue-600" />
-                {isEditingKisi ? 'Edit Baris Kisi-Kisi' : 'Tambah Baris Kisi-Kisi Manually'}
-              </h3>
+            <div 
+              id="kisi-form-section" 
+              className={`rounded-2xl shadow-md p-6 no-print transition-all duration-300 ${
+                isEditingKisi 
+                  ? 'bg-gradient-to-r from-amber-50/90 via-orange-50/50 to-white border-2 border-amber-400 ring-4 ring-amber-200/60' 
+                  : 'bg-gradient-to-r from-blue-50/80 via-indigo-50/40 to-white border-2 border-blue-400 ring-4 ring-blue-100'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-200/80">
+                <h3 className="text-sm font-extrabold uppercase tracking-wider flex items-center gap-2.5">
+                  {isEditingKisi ? (
+                    <>
+                      <span className="p-1.5 bg-amber-500 text-white rounded-lg shadow-sm shadow-amber-500/30 animate-pulse">
+                        <Edit className="h-4 w-4" />
+                      </span>
+                      <span className="text-amber-900">Edit Baris Kisi-Kisi (No. {kisiList.find(k => k.id === editingKisiId)?.no || ''})</span>
+                      <span className="text-[10px] bg-amber-500 text-white font-mono px-2.5 py-0.5 rounded-full font-bold shadow-sm">
+                        Mode Edit Aktif
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="p-1.5 bg-blue-600 text-white rounded-lg shadow-sm shadow-blue-500/30">
+                        <Plus className="h-4 w-4" />
+                      </span>
+                      <span className="text-blue-950 font-black">Tambah Baris Kisi-Kisi Manual</span>
+                      <span className="text-[10px] bg-blue-100 text-blue-800 border border-blue-300 font-extrabold px-2.5 py-0.5 rounded-full">
+                        Form Input Manual
+                      </span>
+                    </>
+                  )}
+                </h3>
+                {isEditingKisi && (
+                  <span className="text-xs text-amber-800 bg-amber-100/90 px-3 py-1 rounded-lg border border-amber-300 font-bold hidden sm:inline-block">
+                    ✏️ Silakan perbarui data di bawah lalu klik tombol <b>Update</b>
+                  </span>
+                )}
+              </div>
               <form onSubmit={handleSaveKisiForm} className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div className="md:col-span-1">
                   <label className="block text-[11px] font-bold text-indigo-600 mb-1">Mata Pelajaran</label>
@@ -6326,7 +6394,14 @@ PANDUAN EKSTRA:
                       </tr>
                     ) : (
                       kisiList.map((item) => (
-                        <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50 transition-all text-xs">
+                        <tr 
+                          key={item.id} 
+                          className={`border-b border-slate-100 transition-all duration-300 text-xs ${
+                            editingKisiId === item.id 
+                              ? 'bg-amber-50/90 ring-2 ring-amber-400 font-medium' 
+                              : 'hover:bg-slate-50'
+                          }`}
+                        >
                           <td className="py-4 px-4 text-center font-bold text-slate-700">{item.no}</td>
                           <td className="py-4 px-4">
                             <span className={`inline-block px-2.5 py-1 rounded-full font-semibold text-[10px] ${
@@ -6472,17 +6547,32 @@ PANDUAN EKSTRA:
                               </div>
                             ) : (
                               <>
-                                <div className="flex justify-center gap-1.5">
+                                <div className="flex justify-center gap-1.5 items-center">
                                   <button
                                     onClick={() => handleEditKisi(item)}
-                                    className="text-slate-600 hover:text-indigo-600 p-1.5 hover:bg-slate-100 rounded transition"
-                                    title="Edit baris"
+                                    className={`group relative px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold flex items-center justify-center gap-1.5 transition-all duration-300 shadow-sm cursor-pointer ${
+                                      editingKisiId === item.id
+                                        ? 'bg-amber-500 text-white ring-2 ring-amber-300 shadow-amber-500/40 animate-pulse'
+                                        : 'bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600 border border-amber-300 shadow-amber-500/20 hover:shadow-md hover:scale-105 active:scale-95'
+                                    }`}
+                                    title="Edit baris kisi-kisi ini"
                                   >
-                                    <Sliders className="h-4 w-4" />
+                                    <Edit className={`h-3.5 w-3.5 transition-transform duration-300 ${
+                                      editingKisiId === item.id 
+                                        ? 'animate-spin' 
+                                        : 'group-hover:-rotate-12 group-hover:scale-125'
+                                    }`} />
+                                    <span>{editingKisiId === item.id ? 'Di-edit' : 'Edit'}</span>
+                                    {editingKisiId !== item.id && (
+                                      <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-300 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-400"></span>
+                                      </span>
+                                    )}
                                   </button>
                                   <button
                                     onClick={() => setDeletingKisiId(item.id)}
-                                    className="text-slate-600 hover:text-red-600 p-1.5 hover:bg-slate-100 rounded transition"
+                                    className="text-slate-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded-lg transition-all duration-200"
                                     title="Hapus baris"
                                   >
                                     <Trash2 className="h-4 w-4" />

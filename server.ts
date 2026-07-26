@@ -12,42 +12,40 @@ const PORT = 3000;
 // Enable JSON parsing
 app.use(express.json({ limit: "10mb" }));
 
-// Lazy init Gemini client to avoid crashes if GEMINI_API_KEY is not yet present
-let aiInstance: GoogleGenAI | null = null;
-
-function getGeminiClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "GEMINI_API_KEY tidak ditemukan di environment variables. Hubungi admin atau atur di tab Secrets."
-    );
-  }
-  if (!aiInstance) {
-    aiInstance = new GoogleGenAI({
-      apiKey: apiKey,
-      httpOptions: {
-        headers: {
-          "User-Agent": "aistudio-build",
-        },
-      },
-    });
-  }
-  return aiInstance;
+// Helper to extract and deduplicate multiple API keys (supports newline, comma, or semicolon)
+function parseApiKeys(rawInput?: string): string[] {
+  const combined = [rawInput, process.env.GEMINI_API_KEY]
+    .filter(Boolean)
+    .join('\n');
+  const keys = Array.from(new Set(
+    combined
+      .split(/[\n,;]+/)
+      .map(k => k.trim())
+      .filter(k => k.length > 5)
+  ));
+  return keys;
 }
 
 // Circuit breaker to avoid spamming rate-limited or quota-exhausted models
 const coolOffModels = new Map<string, number>();
 const COOL_OFF_DURATION = 180 * 1000; // 3 minutes cool-off
 
-// Robust content generation with retries and model fallbacks (e.g. gemini-3.1-flash-lite)
+// Robust content generation with retries, API Key rotation, and model fallbacks
 async function generateContentWithFallbackAndRetry(
-  ai: GoogleGenAI,
   params: {
     contents: any;
     config?: any;
+    apiKeysRaw?: string;
   }
 ): Promise<any> {
-  // Ordered by preferred + high availability (only valid supported models)
+  const keysToTry = parseApiKeys(params.apiKeysRaw);
+  if (keysToTry.length === 0) {
+    throw new Error(
+      "GEMINI_API_KEY tidak ditemukan. Silakan masukkan Kunci API Gemini pada Pengaturan Koneksi AI (Langkah 1)."
+    );
+  }
+
+  // Ordered by preferred + high availability
   const modelsToTry = [
     "gemini-2.5-flash",
     "gemini-2.0-flash",
@@ -71,59 +69,76 @@ async function generateContentWithFallbackAndRetry(
   const orderedModels = [...activeModels, ...deferredModels];
   let lastError: any = null;
 
-  for (const model of orderedModels) {
-    const isCoolOff = coolOffModels.has(model) && (now - (coolOffModels.get(model) || 0) <= COOL_OFF_DURATION);
-    console.log(`Calling Gemini API using model ${model}${isCoolOff ? ' (deferred fallback)' : ''}...`);
+  // Key Rotation Loop: Rotates across all provided user API Keys
+  for (let keyIdx = 0; keyIdx < keysToTry.length; keyIdx++) {
+    const apiKey = keysToTry[keyIdx];
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
+    });
 
-    // Retry loop per model (up to 2 attempts with a short delay for transient rate limits)
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        // 90-second timeout per model call
-        let timeoutId: any;
-        const apiCall = ai.models.generateContent({
-          model,
-          contents: params.contents,
-          config: params.config,
-        });
+    console.log(`[API Key Rotation] Trying Key #${keyIdx + 1} of ${keysToTry.length}...`);
 
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(() => reject(new Error(`Timeout waiting for model ${model}`)), 90000);
-        });
+    for (const model of orderedModels) {
+      const isCoolOff = coolOffModels.has(model) && (now - (coolOffModels.get(model) || 0) <= COOL_OFF_DURATION);
+      console.log(`Calling Gemini API (Key #${keyIdx + 1}) model ${model}${isCoolOff ? ' (deferred fallback)' : ''}...`);
 
+      for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-          const response = await Promise.race([apiCall, timeoutPromise]);
-          return response;
-        } finally {
-          if (timeoutId) clearTimeout(timeoutId);
-        }
-      } catch (error: any) {
-        lastError = error;
-        console.error(`Model ${model} (attempt ${attempt}) failed with error:`, error?.message || error);
+          let timeoutId: any;
+          const apiCall = ai.models.generateContent({
+            model,
+            contents: params.contents,
+            config: params.config,
+          });
 
-        const errorString = typeof error === 'string' ? error : (error?.message || JSON.stringify(error) || '');
-        const isQuotaOrDemandError = 
-          error?.status === 429 || 
-          error?.statusCode === 429 || 
-          error?.status === 503 ||
-          error?.statusCode === 503 ||
-          error?.code === 429 ||
-          error?.code === 503 ||
-          /quota|limit|429|exhausted|503|demand|unavailable/i.test(errorString);
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error(`Timeout waiting for model ${model}`)), 90000);
+          });
 
-        if (isQuotaOrDemandError) {
-          coolOffModels.set(model, Date.now());
-          if (attempt < 2) {
-            console.log(`Rate limit encountered on ${model}. Waiting 2.5s before retry...`);
-            await new Promise(r => setTimeout(r, 2500));
-            continue; // Retry same model once
+          try {
+            const response = await Promise.race([apiCall, timeoutPromise]);
+            return response;
+          } finally {
+            if (timeoutId) clearTimeout(timeoutId);
           }
+        } catch (error: any) {
+          lastError = error;
+          console.error(`Key #${keyIdx + 1} Model ${model} (attempt ${attempt}) failed with error:`, error?.message || error);
+
+          const errorString = typeof error === 'string' ? error : (error?.message || JSON.stringify(error) || '');
+          const isQuotaOrDemandError = 
+            error?.status === 429 || 
+            error?.statusCode === 429 || 
+            error?.status === 503 ||
+            error?.statusCode === 503 ||
+            error?.code === 429 ||
+            error?.code === 503 ||
+            /quota|limit|429|exhausted|503|demand|unavailable/i.test(errorString);
+
+          if (isQuotaOrDemandError) {
+            coolOffModels.set(model, Date.now());
+            if (keysToTry.length > 1) {
+              console.log(`Rate limit/quota on Key #${keyIdx + 1}. Rotating to next API Key...`);
+              break; // Break model loop to immediately switch to the next API Key
+            }
+            if (attempt < 2) {
+              console.log(`Rate limit encountered on ${model}. Waiting 2.5s before retry...`);
+              await new Promise(r => setTimeout(r, 2500));
+              continue;
+            }
+          }
+          break; // Move to next model if not 429 or if attempt 2 failed
         }
-        break; // Move to next model if not 429 or if attempt 2 failed
       }
     }
   }
 
-  throw lastError || new Error("Gagal memproses AI setelah mencoba beberapa model.");
+  throw lastError || new Error("Gagal memproses AI setelah merotasi seluruh API Key dan model.");
 }
 
 // API Routes
@@ -150,7 +165,7 @@ apiRouter.post("/generate-kisi", async (req, res) => {
       return res.status(400).json({ error: "Mata Pelajaran harus diisi" });
     }
 
-    const ai = getGeminiClient();
+    const apiKeysRaw = (req.headers['x-api-key'] as string) || req.body.apiKey || undefined;
 
     const systemInstruction = `Anda adalah ahli kurikulum pendidikan menengah SMA di Indonesia (khususnya untuk penyusunan Tes Kemampuan Akademik / TKA). 
 Tugas Anda adalah membuat rancangan KISI-KISI SOAL dalam bentuk MATRIKS ASESMEN sesuai dengan Kurikulum Merdeka atau K-13 tingkat SMA kelas X, XI, atau XII.
@@ -171,8 +186,9 @@ Aturan Penyusunan Matriks:
 4. Distribusikan jumlah soal per kisi-kisi (misalnya antara 3-10 soal per baris).
 5. Hasilkan juga 'konteksNusantara' (rencana integrasi konteks lokal Nusantara/Indonesia yang spesifik dan relevan dengan materi ini, misal adat daerah, keragaman etnis, geografi kepulauan, sejarah lokal, dsb) serta 'stimulusTambahan' (rencana bentuk stimulus seperti teks bacaan, studi kasus riil, berita, data tabel, atau peristiwa konkret khas Indonesia) untuk meningkatkan kualitas stimulus soal.`;
 
-    const response = await generateContentWithFallbackAndRetry(ai, {
+    const response = await generateContentWithFallbackAndRetry({
       contents: prompt,
+      apiKeysRaw,
       config: {
         systemInstruction,
         responseMimeType: "application/json",
@@ -243,7 +259,7 @@ apiRouter.post("/generate-soal", async (req, res) => {
       return res.status(400).json({ error: "Data Kisi-Kisi wajib dilampirkan" });
     }
 
-    const ai = getGeminiClient();
+    const apiKeysRaw = (req.headers['x-api-key'] as string) || req.body.apiKey || undefined;
 
     const systemInstruction = `Anda adalah ahli pembuat soal ujian nasional dan TKA (Tes Kemampuan Akademik) SMA di Indonesia.
 Anda sangat terampil menyusun soal tingkat tinggi (HOTS - Higher Order Thinking Skills), bervariasi, mendalam, dan bebas dari bias.
@@ -330,8 +346,9 @@ PANDUAN EKSTRA:
 7. Hasilkan tepat ${countRequired} objek soal di dalam array hasil.
 8. SANGAT PENTING (MANDATORI): Gabungkan paragraf stimulus/pengantar/studi kasus (bila ada) langsung ke bagian awal field 'soal' (diikuti pertanyaan utama di bawahnya), dan kosongkan field 'stimulus' (isi dengan string kosong ""). Jangan memisahkannya agar struktur soal konsisten dengan prompt.`;
 
-    const response = await generateContentWithFallbackAndRetry(ai, {
+    const response = await generateContentWithFallbackAndRetry({
       contents: prompt,
+      apiKeysRaw,
       config: {
         systemInstruction,
         responseMimeType: "application/json",
@@ -378,7 +395,7 @@ apiRouter.post("/generate-illustration", async (req, res) => {
       return res.status(400).json({ error: "Permintaan ilustrasi (prompt) harus diisi." });
     }
 
-    const ai = getGeminiClient();
+    const apiKeysRaw = (req.headers['x-api-key'] as string) || req.body.apiKey || undefined;
     const systemInstruction = `Anda adalah desainer grafis dan ahli ilustrasi ilmiah/edukatif profesional untuk soal ujian SMA.
 Tugas Anda adalah menghasilkan kode inline SVG (<svg> ... </svg>) yang valid, indah, bersih, modern, dan sangat responsif untuk mendukung pemahaman soal ujian.
 
@@ -399,8 +416,9 @@ ${context ? `Konteks Soal yang berkaitan: "${context}"` : ""}
 
 Ingat, hanya hasilkan kode SVG langsung tanpa penanda kode atau pembungkus markdown apapun. Dimulai dari '<svg' sampai '</svg>'.`;
 
-    const response = await generateContentWithFallbackAndRetry(ai, {
+    const response = await generateContentWithFallbackAndRetry({
       contents: userPrompt,
+      apiKeysRaw,
       config: {
         systemInstruction,
         temperature: 0.2,
@@ -429,7 +447,7 @@ apiRouter.post("/optimize-prompt", async (req, res) => {
       return res.status(400).json({ error: "Data kisi-kisi harus disediakan." });
     }
 
-    const ai = getGeminiClient();
+    const apiKeysRaw = (req.headers['x-api-key'] as string) || req.body.apiKey || undefined;
     const systemInstruction = `Anda adalah ahli Rekayasa Prompt (Prompt Engineer) profesional dan spesialis Kurikulum & Evaluasi Pendidikan Indonesia.
 Tugas Anda adalah merumuskan Prompt AI yang sangat detail, spesifik, dan efektif (Megaprompt) agar guru atau akademisi dapat menyalin prompt tersebut ke LLM lain (seperti Gemini, ChatGPT, Claude) untuk menghasilkan butir soal HOTS yang luar biasa.
 
@@ -457,8 +475,9 @@ Draf Megaprompt yang Anda buat harus memuat:
 
 Tulis draf prompt tersebut langsung dalam format Markdown yang elegan, berwibawa, rapi, dan langsung bisa dicopy oleh pengguna. Jangan tambahkan penjelasan pembuka dari Anda sendiri seperti "Berikut adalah prompt yang Anda minta", melainkan langsung mulailah isi prompt tersebut dengan judul atau teks instruksi utama yang siap disalin.`;
 
-    const response = await generateContentWithFallbackAndRetry(ai, {
+    const response = await generateContentWithFallbackAndRetry({
       contents: userPrompt,
+      apiKeysRaw,
       config: {
         systemInstruction,
         temperature: 0.7,
@@ -481,7 +500,7 @@ apiRouter.post("/generate-materi", async (req, res) => {
       return res.status(400).json({ error: "Data kisi-kisi harus disediakan." });
     }
 
-    const ai = getGeminiClient();
+    const apiKeysRaw = (req.headers['x-api-key'] as string) || req.body.apiKey || undefined;
     
     let systemInstruction = "";
     let userPrompt = "";
@@ -546,8 +565,9 @@ Batasan & Catatan Kurikulum: ${kisi.batasanCatatan || "Tidak ada batasan khusus"
 Sediakan di dalam prompt tersebut uraian materi yang sangat kaya, komprehensif, dan detail terkait topik ini (termasuk definisi tokoh, teori, dimensi sosiologis/ilmiah, serta studi kasus nyata sosiologis/kontekstual Indonesia yang sedang hangat) agar konten presentasi/infografisnya memiliki bobot akademis tinggi dan tidak superfisial. Sajikan langsung dalam bentuk MEGA-PROMPT utuh siap salin dalam format Markdown lengkap tanpa teks pengantar atau penutup dari Anda.`;
     }
 
-    const response = await generateContentWithFallbackAndRetry(ai, {
+    const response = await generateContentWithFallbackAndRetry({
       contents: userPrompt,
+      apiKeysRaw,
       config: {
         systemInstruction,
         temperature: 0.7,
