@@ -3330,7 +3330,7 @@ Pembahasan:
     return `[PROMPT UTUH APLIKASI QUIZ INTERAKTIF & CBT KOMPLEKS UNTUK CANVAS GEMINI AI]
 
 Anda adalah Pakar Evaluasi Kurikulum Pendidikan SMA, Lead EdTech Software Engineer, dan Specialist Cyber Security Education.
-Tugas Anda adalah merancang SATU FILE HTML UTUH TERINTEGRASI (HTML + CSS + JavaScript Interaktif) untuk Aplikasi Computer Based Test (CBT) Komprehensif yang siap dijalankan langsung di CANVAS Gemini AI.
+Tugas Anda adalah merancang SATU FILE HTML UTUH TERINTEGRASI (HTML + CSS + JavaScript Interaktif Standalone) untuk Aplikasi Computer Based Test (CBT) Komprehensif yang siap dijalankan langsung di CANVAS Gemini AI.
 
 ==================================================
 1. SPESIFIKASI DAN PARAMETER UJIAN CBT:
@@ -3341,40 +3341,53 @@ Tugas Anda adalah merancang SATU FILE HTML UTUH TERINTEGRASI (HTML + CSS + JavaS
 - Sub-Materi / Indikator  : ${form.subMateri}
 - Level Kognitif          : ${form.levelKognitif}
 - Bentuk Soal             : ${form.bentukSoal}
-- Target Jumlah Soal      : ${jumlahSoal} Butir Soal HOTS (C4–C6) (Minimal 10 - Maksimal 50 Soal)
+- Target Jumlah Soal      : ${jumlahSoal} Butir Soal HOTS (C4–C6) Lengkap dengan Stimulus, Opsi A–E, Kunci & Pembahasan (Minimal 10 - Maksimal 50 Soal)
 - Durasi Ujian            : ${form.durasiMenit} Menit
 
 ==================================================
-2. SISTEM OTENTIKASI CBT (USER & PASSWORD):
+2. SISTEM OTENTIKASI & PROFIL PESERTA CBT:
 ==================================================
 - Sebelum masuk ke lembar soal, aplikasi WAJIB menampilkan Portal Login CBT Mandiri.
 - Kredensial Akses Ujian Wajib:
   * Username CBT : ${form.usernameCbt}
   * Password CBT : ${form.passwordCbt}
 - Validasi Ketat: Jika Username atau Password salah, munculkan notifikasi kesalahan "Kredensial Login CBT Tidak Valid!" dengan animasi shake.
-- Setelah login berhasil, tampilkan Nama Siswa, Nomor Peserta, Mata Pelajaran, dan Tombol "Mulai Mengerjakan Ujian".
+- Setelah login berhasil, tampilkan Kartu Profil Siswa (Nama Siswa, Nomor Peserta, Mata Pelajaran, Jumlah Soal, Durasi) dan Tombol "Mulai Mengerjakan Ujian".
 
 ==================================================
 3. SISTEM KEAMANAN KOMPLEKS (ANTI-CONTEK & ANTI-CURANG):
 ==================================================
 - Pengacakan Dinamis (Randomization Engine): Urutan ${jumlahSoal} butir soal dan pilihan jawaban A, B, C, D, E diacak secara otomatis (Fisher-Yates Shuffle) untuk tiap sesi pengerjaan siswa.
 - Focus Guard & Anti Tab-Switching: Pantau event 'visibilitychange' & 'blur'. Jika siswa berpindah tab/layar, tampilkan Peringatan Pelanggaran. Batas melanggar 3 kali; jika dilanggar 3x, sistem akan OTOMATIS MENGUMPULKAN (AUTO-SUBMIT) lembar jawaban secara paksa.
+- Audit Trail Log Pelanggaran: Catat tanggal & waktu saat siswa terdeteksi berpindah tab (misal: "Pelanggaran #1: Pindah Tab/Layar jam 10:15:22").
 - Proteksi Pemblokiran Konten (Anti Copy-Paste & Anti Inspect): Blokir Klik Kanan (contextmenu), fungsi Copy, Cut, Paste, dan Seleksi Teks. Blokir shortcut keyboard: F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U, Ctrl+C, Ctrl+V, Alt+Tab, PrtScr.
 - Fullscreen Lock Requirement: Wajibkan mode Layar Penuh (Fullscreen) sebelum soal terbuka. Ujian terkunci jika keluar dari mode Fullscreen.
 - Timer Countdown Realtime & Auto-Submit: Hitung mundur durasi ${form.durasiMenit} menit. Ketika waktu habis (00:00), jawaban siswa otomatis terkirim.
 
 ==================================================
-4. FITUR NAVIGASI & EVALUASI AKHIR:
+4. FITUR NAVIGASI, AKSESIBILITAS & DUKUNGAN PENGERJAAN:
 ==================================================
-- Header Judul, Indikator Sisa Waktu, dan Tombol "Selesaikan Ujian".
-- Grid Navigasi Nomor Soal (1–${jumlahSoal}) dengan status: Hijau (Terjawab), Abu-abu (Belum), Kuning (Ragu-ragu).
-- Kartu Skor Akhir (Nilai 0–100, Jumlah Benar/Salah, Persentase Kelulusan).
-- Pembahasan Ilmiah HOTS Langkah Demi Langkah untuk setiap butir soal (baru dapat dibuka setelah disubmit).
+- Header Dashboard: Judul Mata Pelajaran, Sisa Waktu (Countdown Clock), Profil Siswa, dan Pengatur Ukuran Font Soal (A- / A / A+).
+- Fitur "Ragu-Ragu" (Mark for Review): Siswa dapat menandai soal ragu-ragu sehingga indikator nomor soal di grid berubah warna menjadi Kuning.
+- Auto-Save Progress (localStorage): Setiap jawaban dan penandaan ragu-ragu tersimpan otomatis di localStorage agar data tidak hilang jika halaman ter-refresh secara tidak sengaja.
+- Grid Navigasi Nomor Soal (1–${jumlahSoal}): Indikator visual real-time:
+  * Hijau : Soal Sudah Terjawab
+  * Kuning: Soal Terjawab / Belum dengan Penanda Ragu-Ragu
+  * Abu-abu: Soal Belum Terjawab
+
+==================================================
+5. EVALUASI AKHIR & LAPORAN HASIL UJIAN:
+==================================================
+- Modal Konfirmasi Selesai Ujian: Tampilkan ringkasan (Terjawab, Ragu-Ragu, Belum Terjawab) sebelum kirim final.
+- Kartu Skor Akhir: Skor (0–100), Jumlah Benar, Salah, Kosong, Waktu Pengerjaan, dan Status Kelulusan KKM.
+- Rekap Audit Pelanggaran: Menampilkan catatan total pelanggaran pindah tab jika ada.
+- Fitur Cetak / Unduh Laporan: Tombol "Cetak Laporan / Unduh Hasil Ujian" untuk diarsipkan oleh Guru/Pengawas.
+- Pembahasan Ilmiah HOTS Langkah Demi Langkah: Pembahasan analitis lengkap beserta kunci jawaban untuk seluruh ${jumlahSoal} butir soal yang dapat dibuka setelah ujian selesai.
 
 ==================================================
 PETUNJUK EKSEKUSI PADA CANVAS GEMINI AI:
 ==================================================
-Tolong buka fitur CANVAS di Gemini AI dan buatkan SATU KESATUAN KODE HTML, CSS, dan JAVASCRIPT UTUH untuk Aplikasi CBT Interaktif sesuai spesifikasi di atas. Tampilan UI harus bersih, modern, kontras tinggi, dan nyaman untuk siswa SMA.
+Tolong buka fitur CANVAS di Gemini AI dan buatkan SATU KESATUAN KODE HTML, CSS, dan JAVASCRIPT UTUH TERINTEGRASI untuk Aplikasi CBT Interaktif sesuai spesifikasi di atas. Tampilan UI harus bersih, modern, kontras tinggi, dan nyaman untuk siswa SMA.
 
 © 2026 @AJISOSIOLOGI - Assessment TKA SMA & CBT System`;
   };
