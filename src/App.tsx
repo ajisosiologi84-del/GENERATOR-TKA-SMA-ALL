@@ -51,7 +51,9 @@ import {
   ExternalLink,
   Send,
   Zap,
-  ShieldAlert
+  ShieldAlert,
+  Key,
+  UserCheck
 } from 'lucide-react';
 import { KisiKisiItem, Question, GeneratorConfig, BentukSoal, LevelKognitif, JumlahOpsi, JenisSoal, JadwalItem } from './types';
 import { auth, db, createNewUserByAdmin } from './lib/firebase';
@@ -1585,16 +1587,54 @@ export default function App() {
     materiPokok: 'Perubahan Sosial dan Globalisasi',
     lingkupMateri: 'Mengidentifikasi bentuk-bentuk perubahan sosial dan menganalisis dampak perubahan sosial.',
     subMateri: 'Bentuk-bentuk perubahan sosial dan dampaknya.',
+    kompetensiYangDiuji: 'Peserta didik mampu menganalisis dampak globalisasi terhadap kearifan lokal masyarakat Nusantara.',
+    batasanCatatan: 'Sajikan soal berorientasi HOTS (C4-C6) dengan stimulus studi kasus kontekstual.',
     levelKognitif: 'Penalaran HOTS (Reasoning) (level_3)',
     bentukSoal: 'Pilihan Ganda Sederhana (A-E)',
     jumlahSoal: 20, // Min 10, Max 50
     durasiMenit: 60,
+    adminUsername: 'admin_cbt',
+    adminPassword: 'admin_proktor2026',
+    guruUsername: 'guru_sosiologi',
+    guruPassword: 'guru_pass2026',
     usernameCbt: 'peserta_tka',
     passwordCbt: 'cbt2026_sosiologi',
     enableSecurity: true,
     randomizeOrder: true,
     antiTabSwitch: true,
-    disableCopyPaste: true
+    disableCopyPaste: true,
+    konteksLokal: [
+      '🎭 Budaya Nusantara',
+      '🗺️ Geografis Indonesia',
+      '👥 Kehidupan Sosial',
+      '💰 Ekonomi Rakyat',
+      '⚙️ Teknologi Tradisional',
+      '🏛️ Kearifan Lokal',
+      '🌈 Keragaman Etnis'
+    ],
+    stimulusKonten: [
+      '📖 Teks Bacaan',
+      '🖼️ Gambar/Ilustrasi',
+      '📊 Data/Tabel',
+      '📈 Grafik/Diagram',
+      '🔍 Kasus Nyata',
+      '📚 Cerita Pendek',
+      '📰 Berita/Artikel'
+    ],
+    standarKualitas: [
+      'Validasi Bahasa',
+      'Konstruksi Soal',
+      'Kesesuaian Materi',
+      'Level Kognitif',
+      'Konteks Relevan',
+      'Tidak Bias',
+      'Kejelasan Instruksi',
+      'Kunci Jawaban Tepat',
+      'Distractor Berkualitas',
+      'Sesuai Kurikulum',
+      'Waktu Pengerjaan',
+      'Inklusivitas'
+    ]
   });
 
   const [promptWadah1Text, setPromptWadah1Text] = useState<string>('');
@@ -1842,7 +1882,7 @@ export default function App() {
     });
   };
 
-  const executeImportAllJadwalPresets = (presets: any[]) => {
+  const executeImportAllJadwalPresets = async (presets: any[]) => {
     const months: ('Juli' | 'Agustus' | 'September' | 'Oktober')[] = ['Juli', 'Agustus', 'September', 'Oktober'];
     const newItems: JadwalItem[] = presets.map((preset, index) => {
       const slotIndex = index;
@@ -1850,6 +1890,7 @@ export default function App() {
       const weekNum = (slotIndex % 4) + 1;
       return {
         id: `jadwal-preset-${Date.now()}-${index}`,
+        userId: currentUser?.uid,
         bulan: months[monthIndex],
         mingguKe: weekNum,
         elemenMateri: preset.elemenMateri,
@@ -1858,17 +1899,35 @@ export default function App() {
       };
     });
 
-    setJadwalList(prev => [...prev, ...newItems]);
+    try {
+      const batch = writeBatch(db);
+      newItems.forEach((item) => {
+        batch.set(doc(db, 'jadwal_pembelajaran', item.id), item);
+      });
+      await batch.commit();
+    } catch (err: any) {
+      console.error("Gagal mengimpor jadwal preset ke Firestore:", err);
+      alert(`Gagal menyimpan jadwal: ${err.message}`);
+    }
+
     setShowImportPresetsConfirm(null);
   };
 
-  const handleAddJadwal = (e: React.FormEvent) => {
+  const handleAddJadwal = async (e: React.FormEvent) => {
     e.preventDefault();
     const item: JadwalItem = {
       ...newJadwal,
-      id: `jadwal-${Date.now()}`
+      id: `jadwal-${Date.now()}`,
+      userId: currentUser?.uid
     };
-    setJadwalList(prev => [...prev, item]);
+    
+    try {
+      await setDoc(doc(db, 'jadwal_pembelajaran', item.id), item);
+    } catch (err: any) {
+      console.error("Gagal menambah jadwal ke Firestore:", err);
+      alert(`Gagal menambah jadwal: ${err.message}`);
+    }
+
     setNewJadwal({
       bulan: 'Juli',
       mingguKe: 1,
@@ -1884,9 +1943,14 @@ export default function App() {
     setEditingJadwalData({ ...item });
   };
 
-  const handleSaveEditJadwal = () => {
+  const handleSaveEditJadwal = async () => {
     if (!editingJadwalData) return;
-    setJadwalList(prev => prev.map(item => item.id === editingJadwalData.id ? editingJadwalData : item));
+    try {
+      await setDoc(doc(db, 'jadwal_pembelajaran', editingJadwalData.id), editingJadwalData);
+    } catch (err: any) {
+      console.error("Gagal memperbarui jadwal di Firestore:", err);
+      alert(`Gagal memperbarui jadwal: ${err.message}`);
+    }
     setEditingJadwalId(null);
     setEditingJadwalData(null);
   };
@@ -1897,9 +1961,14 @@ export default function App() {
     setJadwalToDelete(itemToDelete);
   };
 
-  const executeDeleteJadwal = () => {
+  const executeDeleteJadwal = async () => {
     if (!jadwalToDelete) return;
-    setJadwalList(prev => prev.filter(item => item.id !== jadwalToDelete.id));
+    try {
+      await deleteDoc(doc(db, 'jadwal_pembelajaran', jadwalToDelete.id));
+    } catch (err: any) {
+      console.error("Gagal menghapus jadwal dari Firestore:", err);
+      alert(`Gagal menghapus jadwal: ${err.message}`);
+    }
     setJadwalToDelete(null);
   };
 
@@ -1907,7 +1976,7 @@ export default function App() {
     setShowClearJadwalConfirm(true);
   };
 
-  const handleSortJadwal = () => {
+  const handleSortJadwal = async () => {
     if (jadwalList.length === 0) return;
 
     const monthOrder: Record<string, number> = {
@@ -1934,15 +2003,33 @@ export default function App() {
       return (Number(a.mingguKe) || 0) - (Number(b.mingguKe) || 0);
     });
 
-    setJadwalList(sorted);
+    try {
+      const batch = writeBatch(db);
+      sorted.forEach((item, index) => {
+        batch.set(doc(db, 'jadwal_pembelajaran', item.id), { ...item, no: index + 1 });
+      });
+      await batch.commit();
+    } catch (err: any) {
+      console.error("Gagal mengurutkan jadwal di Firestore:", err);
+    }
+
     setJadwalSortNotification('Jadwal Rencana Pembelajaran TKA Kelas XII berhasil diurutkan berdasarkan Bulan dan Minggu ke-!');
     setTimeout(() => {
       setJadwalSortNotification(null);
     }, 4000);
   };
 
-  const executeClearJadwal = () => {
-    setJadwalList([]);
+  const executeClearJadwal = async () => {
+    try {
+      const batch = writeBatch(db);
+      jadwalList.forEach((item) => {
+        batch.delete(doc(db, 'jadwal_pembelajaran', item.id));
+      });
+      await batch.commit();
+    } catch (err: any) {
+      console.error("Gagal mengosongkan jadwal di Firestore:", err);
+      alert(`Gagal mengosongkan jadwal: ${err.message}`);
+    }
     setShowClearJadwalConfirm(false);
   };
 
@@ -1989,6 +2076,14 @@ export default function App() {
 
   const seedDefaultData = async (userId: string, targetSubject: string = 'Sosiologi') => {
     try {
+      const kisiSnap = await getDocs(query(collection(db, 'kisi_kisi'), where('userId', '==', userId)));
+      
+      // If kisi_kisi is already seeded for this user, return
+      if (!kisiSnap.empty) {
+        await updateDoc(doc(db, 'users', userId), { isSeeded: true });
+        return;
+      }
+
       const batch = writeBatch(db);
       
       let defaultKisiList: KisiKisiItem[] = [];
@@ -2207,24 +2302,28 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Firestore sync and automated seed hook
+  // Firestore sync and automated seed hook for all 6 sections (Per-user isolated)
   useEffect(() => {
     if (!currentUser) return;
 
-    // Listen to Kisi-Kisi
+    // Listen to Kisi-Kisi (Bagian 2 - Isolated per user)
     const qKisi = query(collection(db, 'kisi_kisi'), where('userId', '==', currentUser.uid));
     const unsubscribeKisi = onSnapshot(qKisi, async (snapshot) => {
-      const list: KisiKisiItem[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as KisiKisiItem);
-      });
-      list.sort((a, b) => (a.no || 0) - (b.no || 0));
-      setKisiList(list);
+      if (snapshot.empty) {
+        await seedDefaultData(currentUser.uid, config.mataPelajaran || 'Sosiologi');
+      } else {
+        const list: KisiKisiItem[] = [];
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() } as KisiKisiItem);
+        });
+        list.sort((a, b) => (a.no || 0) - (b.no || 0));
+        setKisiList(list);
+      }
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'kisi_kisi');
     });
 
-    // Listen to Questions
+    // Listen to Questions (Bagian 3 - Isolated per user)
     const qQuestions = query(collection(db, 'questions'), where('userId', '==', currentUser.uid));
     const unsubscribeQuestions = onSnapshot(qQuestions, async (snapshot) => {
       const list: Question[] = [];
@@ -2237,7 +2336,7 @@ export default function App() {
       handleFirestoreError(error, OperationType.GET, 'questions');
     });
 
-    // Listen to Materials
+    // Listen to Materials (Bagian 5 - Isolated per user)
     const qMaterials = query(collection(db, 'materials'), where('userId', '==', currentUser.uid));
     const unsubscribeMaterials = onSnapshot(qMaterials, (snapshot) => {
       const mats: Record<string, { content?: string; prompt?: string }> = {};
@@ -2251,6 +2350,51 @@ export default function App() {
       setGeneratedMaterials(mats);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, 'materials');
+    });
+
+    // Listen to User Generator Config (Bagian 1 - Isolated per user)
+    const unsubscribeConfig = onSnapshot(doc(db, 'user_settings', `${currentUser.uid}_generator_config`), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setConfig(prev => ({ ...prev, ...data }));
+      }
+    }, (error) => {
+      console.error("Gagal menyinkronkan generator config:", error);
+    });
+
+    // Listen to User CBT Config (Bagian 4 - Isolated per user)
+    const unsubscribeCbt = onSnapshot(doc(db, 'user_settings', `${currentUser.uid}_cbt_config`), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setCbtForm(prev => ({ ...prev, ...data }));
+      }
+    }, (error) => {
+      console.error("Gagal menyinkronkan CBT config:", error);
+    });
+
+    // Listen to User Jadwal Pembelajaran XII (Bagian 6 - Isolated per user)
+    const qJadwal = query(collection(db, 'jadwal_pembelajaran'), where('userId', '==', currentUser.uid));
+    const unsubscribeJadwal = onSnapshot(qJadwal, async (snapshot) => {
+      if (snapshot.empty) {
+        try {
+          const batch = writeBatch(db);
+          DEFAULT_JADWAL_LIST.forEach((item) => {
+            const userJadwalId = `${item.id}-${currentUser.uid}`;
+            batch.set(doc(db, 'jadwal_pembelajaran', userJadwalId), { ...item, id: userJadwalId, userId: currentUser.uid });
+          });
+          await batch.commit();
+        } catch (e) {
+          console.error("Gagal seeding default jadwal per-user:", e);
+        }
+      } else {
+        const list: JadwalItem[] = [];
+        snapshot.forEach((doc) => {
+          list.push({ id: doc.id, ...doc.data() } as JadwalItem);
+        });
+        setJadwalList(list);
+      }
+    }, (error) => {
+      console.error("Gagal menyinkronkan jadwal pembelajaran:", error);
     });
 
     // Listen to Users (Admin only)
@@ -2277,9 +2421,34 @@ export default function App() {
       unsubscribeKisi();
       unsubscribeQuestions();
       unsubscribeMaterials();
+      unsubscribeConfig();
+      unsubscribeCbt();
+      unsubscribeJadwal();
       unsubscribeUsers();
     };
   }, [currentUser, userRole]);
+
+  // Debounced auto-sync for Generator Config (Bagian 1) to user-specific Firestore document
+  useEffect(() => {
+    if (!currentUser) return;
+    const timeout = setTimeout(() => {
+      setDoc(doc(db, 'user_settings', `${currentUser.uid}_generator_config`), config, { merge: true }).catch((err) => {
+        console.error("Gagal menyinkronkan generator_config ke Cloud:", err);
+      });
+    }, 600);
+    return () => clearTimeout(timeout);
+  }, [config, currentUser]);
+
+  // Debounced auto-sync for CBT Config (Bagian 4) to user-specific Firestore document
+  useEffect(() => {
+    if (!currentUser) return;
+    const timeout = setTimeout(() => {
+      setDoc(doc(db, 'user_settings', `${currentUser.uid}_cbt_config`), cbtForm, { merge: true }).catch((err) => {
+        console.error("Gagal menyinkronkan cbt_config ke Cloud:", err);
+      });
+    }, 600);
+    return () => clearTimeout(timeout);
+  }, [cbtForm, currentUser]);
 
   const handleSignOut = async () => {
     setShowSignOutConfirm(true);
@@ -3324,9 +3493,19 @@ Pembahasan:
     setGeneratedSoalPrompt(promptSoalText);
   }, [config]);
 
-  // Generator Prompt Wadah 2 (CBT Kompleks, Login User/Password, Anti-Contek)
+  // Generator Prompt Wadah 2 (CBT Kompleks, Login User/Password, Anti-Contek, Konteks Lokal & Kualitas TKA)
   const buildPromptWadah2 = (form = cbtForm) => {
     const jumlahSoal = Math.min(Math.max(Number(form.jumlahSoal) || 20, 10), 50);
+    const konteksText = form.konteksLokal && form.konteksLokal.length > 0
+      ? form.konteksLokal.join(', ')
+      : 'Budaya Nusantara, Geografis Indonesia, Kehidupan Sosial';
+    const stimulusText = form.stimulusKonten && form.stimulusKonten.length > 0
+      ? form.stimulusKonten.join(', ')
+      : 'Teks Bacaan, Data/Tabel, Kasus Nyata';
+    const kualitasText = form.standarKualitas && form.standarKualitas.length > 0
+      ? form.standarKualitas.join(', ')
+      : 'Validasi Bahasa, Konstruksi Soal, Kesesuaian Materi, Level Kognitif, Konteks Relevan, Tidak Bias, Kejelasan Instruksi, Kunci Jawaban Tepat, Distractor Berkualitas, Sesuai Kurikulum, Waktu Pengerjaan, Inklusivitas';
+
     return `[PROMPT UTUH APLIKASI QUIZ INTERAKTIF & CBT KOMPLEKS UNTUK CANVAS GEMINI AI]
 
 Anda adalah Pakar Evaluasi Kurikulum Pendidikan SMA, Lead EdTech Software Engineer, dan Specialist Cyber Security Education.
@@ -3339,25 +3518,56 @@ Tugas Anda adalah merancang SATU FILE HTML UTUH TERINTEGRASI (HTML + CSS + JavaS
 - Lingkup Materi          : ${form.lingkupMateri}
 - Elemen / Materi Pokok   : ${form.materiPokok}
 - Sub-Materi / Indikator  : ${form.subMateri}
+- Kompetensi yang Diuji   : ${form.kompetensiYangDiuji || 'Peserta didik mampu menganalisis fenomena sosial secara kritis dan terstruktur.'}
+- Batasan / Catatan Khusus: ${form.batasanCatatan || 'Sajikan soal berorientasi HOTS (C4-C6), hindari hafalan tekstual.'}
 - Level Kognitif          : ${form.levelKognitif}
 - Bentuk Soal             : ${form.bentukSoal}
-- Target Jumlah Soal      : ${jumlahSoal} Butir Soal HOTS (C4–C6) Lengkap dengan Stimulus, Opsi A–E, Kunci & Pembahasan (Minimal 10 - Maksimal 50 Soal)
+- Target Jumlah Soal      : ${jumlahSoal} Butir Soal HOTS (C4–C6) Lengkap dengan Stimulus, Opsi/Pernyataan, Kunci & Pembahasan (Minimal 10 - Maksimal 50 Soal)
 - Durasi Ujian            : ${form.durasiMenit} Menit
 
 ==================================================
-2. SISTEM OTENTIKASI & PROFIL PESERTA CBT:
+2. 🎭 KONTEKS LOKAL INDONESIA & STIMULUS KONTEN:
 ==================================================
-- Sebelum masuk ke lembar soal, aplikasi WAJIB menampilkan Portal Login CBT Mandiri.
-- Kredensial Akses Ujian Wajib:
-  * Username CBT : ${form.usernameCbt}
-  * Password CBT : ${form.passwordCbt}
-- Validasi Ketat: Jika Username atau Password salah, munculkan notifikasi kesalahan "Kredensial Login CBT Tidak Valid!" dengan animasi shake.
-- Setelah login berhasil, tampilkan Kartu Profil Siswa (Nama Siswa, Nomor Peserta, Mata Pelajaran, Jumlah Soal, Durasi) dan Tombol "Mulai Mengerjakan Ujian".
+- Integrasi Konteks Lokal Nusantara:
+  Wajib mengintegrasikan konteks: ${konteksText}
+- Ragam Stimulus & Pengembangan Konten:
+  Menggunakan stimulus berupa: ${stimulusText}
+  (Pastikan stimulus kontekstual, berbasis data/kasus nyata di Indonesia, dan disajikan secara utuh sebelum pertanyaan).
 
 ==================================================
-3. SISTEM KEAMANAN KOMPLEKS (ANTI-CONTEK & ANTI-CURANG):
+3. 📋 STANDAR KUALITAS SOAL TKA (TES KEMAMPUAN AKADEMIK):
 ==================================================
-- Pengacakan Dinamis (Randomization Engine): Urutan ${jumlahSoal} butir soal dan pilihan jawaban A, B, C, D, E diacak secara otomatis (Fisher-Yates Shuffle) untuk tiap sesi pengerjaan siswa.
+Setiap butir soal wajib memenuhi 12 standar kualitas:
+${kualitasText}
+
+==================================================
+4. SISTEM OTENTIKASI & KEAMANAN ROLE BERTINGKAT (ADMIN, GURU, PESERTA):
+==================================================
+- Sebelum masuk ke lembar soal, aplikasi WAJIB menampilkan Portal Login CBT Mandiri dengan Dukungan Multi-Role (Admin/Proktor, Guru/Pengampu, Peserta/Siswa).
+- Kredensial Akses Ujian & Role Management:
+  1. 🔑 ROLE ADMINISTRATOR / PROKTOR UJIAN:
+     - Username Admin : ${form.adminUsername || 'admin_cbt'}
+     - Password Admin : ${form.adminPassword || 'admin_proktor2026'}
+     - Hak Akses Khusus: Panel Proktor untuk Reset Sesi/Token Siswa, Monitor Log Pelanggaran Tab-Switching Realtime, Pengaturan Durasi/Kunci Ujian, serta Ekspor Rekap Nilai Ujian (PDF/Excel).
+  2. 👨‍🏫 ROLE GURU PENGAMPU / PEMBUAT SOAL:
+     - Username Guru  : ${form.guruUsername || 'guru_sosiologi'}
+     - Password Guru  : ${form.guruPassword || 'guru_pass2026'}
+     - Hak Akses Khusus: Dashboard Guru untuk Preview & Validasi Butir Soal, Edit Pembahasan & Kunci Jawaban, serta Analisis Statistik Tingkat Kesukaran Soal.
+  3. 🎓 ROLE PESERTA UJIAN / SISWA:
+     - Username Peserta : ${form.usernameCbt || 'peserta_tka'}
+     - Password Peserta : ${form.passwordCbt || 'cbt2026_sosiologi'}
+     - Hak Akses Khusus: Sesi Pengerjaan Ujian CBT Mandiri Terlindungi Proteksi Anti-Contek, Anti Tab-Switching, dan Timer Auto-Submit.
+
+- Proteksi Keamanan Kredensial & Validasi Otentikasi:
+  * Validasi Ketat: Jika Username atau Password salah/tidak cocok dengan role yang dipilih, tampilkan notifikasi "Kredensial Login Tidak Valid atau Akses Ditolak!" dengan animasi shake.
+  * Proteksi Anti Brute-Force: Maksimal 5 kali percobaan gagal berturut-turut, sistem akan mengunci sementara form login selama 60 detik.
+  * Keamanan Sandi & Enkripsi Sesi: Masking input password dengan tombol Toggle Show/Hide, enkripsi token sesi lokal (Session Storage), serta perlindungan dari bypass console F12.
+  * Kartu Profil Setelah Login: Tampilkan Kartu Profil (Nama User, Role Akses, Nomor Peserta/NIP, Mata Pelajaran, Jumlah Soal, Durasi) dan Tombol "Mulai Sesi Ujian".
+
+==================================================
+5. SISTEM KEAMANAN KOMPLEKS (ANTI-CONTEK & ANTI-CURANG):
+==================================================
+- Pengacakan Dinamis (Randomization Engine): Urutan ${jumlahSoal} butir soal dan pilihan jawaban/opsi diacak secara otomatis (Fisher-Yates Shuffle) untuk tiap sesi pengerjaan siswa.
 - Focus Guard & Anti Tab-Switching: Pantau event 'visibilitychange' & 'blur'. Jika siswa berpindah tab/layar, tampilkan Peringatan Pelanggaran. Batas melanggar 3 kali; jika dilanggar 3x, sistem akan OTOMATIS MENGUMPULKAN (AUTO-SUBMIT) lembar jawaban secara paksa.
 - Audit Trail Log Pelanggaran: Catat tanggal & waktu saat siswa terdeteksi berpindah tab (misal: "Pelanggaran #1: Pindah Tab/Layar jam 10:15:22").
 - Proteksi Pemblokiran Konten (Anti Copy-Paste & Anti Inspect): Blokir Klik Kanan (contextmenu), fungsi Copy, Cut, Paste, dan Seleksi Teks. Blokir shortcut keyboard: F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U, Ctrl+C, Ctrl+V, Alt+Tab, PrtScr.
@@ -3365,7 +3575,7 @@ Tugas Anda adalah merancang SATU FILE HTML UTUH TERINTEGRASI (HTML + CSS + JavaS
 - Timer Countdown Realtime & Auto-Submit: Hitung mundur durasi ${form.durasiMenit} menit. Ketika waktu habis (00:00), jawaban siswa otomatis terkirim.
 
 ==================================================
-4. FITUR NAVIGASI, AKSESIBILITAS & DUKUNGAN PENGERJAAN:
+6. FITUR NAVIGASI, AKSESIBILITAS & DUKUNGAN PENGERJAAN:
 ==================================================
 - Header Dashboard: Judul Mata Pelajaran, Sisa Waktu (Countdown Clock), Profil Siswa, dan Pengatur Ukuran Font Soal (A- / A / A+).
 - Fitur "Ragu-Ragu" (Mark for Review): Siswa dapat menandai soal ragu-ragu sehingga indikator nomor soal di grid berubah warna menjadi Kuning.
@@ -3376,7 +3586,7 @@ Tugas Anda adalah merancang SATU FILE HTML UTUH TERINTEGRASI (HTML + CSS + JavaS
   * Abu-abu: Soal Belum Terjawab
 
 ==================================================
-5. EVALUASI AKHIR & LAPORAN HASIL UJIAN:
+7. EVALUASI AKHIR & LAPORAN HASIL UJIAN:
 ==================================================
 - Modal Konfirmasi Selesai Ujian: Tampilkan ringkasan (Terjawab, Ragu-Ragu, Belum Terjawab) sebelum kirim final.
 - Kartu Skor Akhir: Skor (0–100), Jumlah Benar, Salah, Kosong, Waktu Pengerjaan, dan Status Kelulusan KKM.
@@ -3464,6 +3674,39 @@ PETUNJUK EKSEKUSI PADA CANVAS GEMINI AI:
         ? prev.kualitasChecklist.filter(x => x !== item) 
         : [...prev.kualitasChecklist, item];
       return { ...prev, kualitasChecklist: updated };
+    });
+  };
+
+  // Toggle CBT Wadah 2 Context Checkboxes
+  const handleToggleCbtContext = (item: string) => {
+    setCbtForm(prev => {
+      const current = prev.konteksLokal || [];
+      const updated = current.includes(item)
+        ? current.filter(x => x !== item)
+        : [...current, item];
+      return { ...prev, konteksLokal: updated };
+    });
+  };
+
+  // Toggle CBT Wadah 2 Stimulus Checkboxes
+  const handleToggleCbtStimulus = (item: string) => {
+    setCbtForm(prev => {
+      const current = prev.stimulusKonten || [];
+      const updated = current.includes(item)
+        ? current.filter(x => x !== item)
+        : [...current, item];
+      return { ...prev, stimulusKonten: updated };
+    });
+  };
+
+  // Toggle CBT Wadah 2 Quality Checkboxes
+  const handleToggleCbtQuality = (item: string) => {
+    setCbtForm(prev => {
+      const current = prev.standarKualitas || [];
+      const updated = current.includes(item)
+        ? current.filter(x => x !== item)
+        : [...current, item];
+      return { ...prev, standarKualitas: updated };
     });
   };
 
@@ -8196,7 +8439,7 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                           <span>Pengaturan Parameter Prompt CBT Wadah 2</span>
                         </h4>
                         <span className="text-[11px] text-slate-500 font-medium">
-                          Konfigurasi Jumlah Soal (10–50), Login & Keamanan
+                          Konfigurasi Bentuk Soal, Jumlah Soal (10–50), Konteks Lokal, Stimulus & Kualitas TKA
                         </span>
                       </div>
                       <button
@@ -8206,10 +8449,15 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                             ...prev,
                             mataPelajaran: config.mataPelajaran || prev.mataPelajaran,
                             materiPokok: config.materiPokok || prev.materiPokok,
-                            lingkupMateri: config.lingkupMateri || prev.lingkupMateri,
-                            subMateri: config.subMateri || prev.subMateri,
+                            lingkupMateri: config.definisi || prev.lingkupMateri,
+                            subMateri: config.subElemenMateri || prev.subMateri,
+                            kompetensiYangDiuji: config.kompetensi || prev.kompetensiYangDiuji,
+                            batasanCatatan: config.batasanCatatan || prev.batasanCatatan,
                             levelKognitif: config.levelKognitif || prev.levelKognitif,
-                            jumlahSoal: config.jumlahSoal || prev.jumlahSoal
+                            jumlahSoal: config.jumlahSoal || prev.jumlahSoal,
+                            konteksLokal: config.konteksLokal && config.konteksLokal.length > 0 ? config.konteksLokal : prev.konteksLokal,
+                            stimulusKonten: config.stimulusKonten && config.stimulusKonten.length > 0 ? config.stimulusKonten : prev.stimulusKonten,
+                            standarKualitas: config.kualitasChecklist && config.kualitasChecklist.length > 0 ? config.kualitasChecklist : prev.standarKualitas
                           }));
                           setWadah2SuccessMsg('✅ Parameter CBT berhasil disinkronkan dari Generator Utama!');
                           setTimeout(() => setWadah2SuccessMsg(''), 3500);
@@ -8256,11 +8504,52 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                         />
                       </div>
 
+                      {/* Bentuk Soal */}
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1">Bentuk Soal CBT</label>
+                        <select
+                          value={cbtForm.bentukSoal}
+                          onChange={(e) => setCbtForm({ ...cbtForm, bentukSoal: e.target.value })}
+                          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        >
+                          <option value="Pilihan Ganda Sederhana (A-E)">PG Sederhana (Pilihan Ganda A-E)</option>
+                          <option value="Pilihan Ganda Kompleks (MCMA - Jawaban Lebih Dari Satu)">PG Kompleks (MCMA - Jawaban Lebih Dari Satu)</option>
+                          <option value="Pilihan Ganda Kompleks (Kategori / Benar-Salah / Ya-Tidak)">PG Kompleks (Kategori / Benar-Salah / Ya-Tidak)</option>
+                        </select>
+                      </div>
+
+                      {/* Level Kognitif */}
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1">Level Kognitif</label>
+                        <select
+                          value={cbtForm.levelKognitif}
+                          onChange={(e) => setCbtForm({ ...cbtForm, levelKognitif: e.target.value })}
+                          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        >
+                          <option value="Penalaran HOTS (Reasoning) (level_3)">L3 - Penalaran HOTS (Reasoning)</option>
+                          <option value="Penerapan (Applying) (level_2)">L2 - Penerapan (Applying)</option>
+                          <option value="Pemahaman (Knowing) (level_1)">L1 - Pemahaman (Knowing)</option>
+                        </select>
+                      </div>
+
+                      {/* Durasi Ujian */}
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1">Durasi Ujian (Menit)</label>
+                        <input
+                          type="number"
+                          min={10}
+                          max={180}
+                          value={cbtForm.durasiMenit}
+                          onChange={(e) => setCbtForm({ ...cbtForm, durasiMenit: parseInt(e.target.value) || 60 })}
+                          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                      </div>
+
                       {/* Jumlah Soal (10 - 50 Slider & Buttons) */}
-                      <div className="md:col-span-2 lg:col-span-1 bg-purple-50/70 border border-purple-200/80 p-3 rounded-xl space-y-2">
+                      <div className="md:col-span-2 lg:col-span-3 bg-purple-50/70 border border-purple-200/80 p-3.5 rounded-xl space-y-2">
                         <div className="flex items-center justify-between">
-                          <label className="font-extrabold text-purple-950 text-xs">
-                            Jumlah Soal Ujian (Min 10 - Max 50)
+                          <label className="font-extrabold text-purple-950 text-xs flex items-center gap-2">
+                            <span>Target Jumlah Soal Ujian (Min 10 - Max 50)</span>
                           </label>
                           <span className="bg-purple-600 text-white font-mono font-black text-xs px-2.5 py-0.5 rounded-lg shadow">
                             {cbtForm.jumlahSoal} Soal
@@ -8281,9 +8570,9 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                               key={num}
                               type="button"
                               onClick={() => setCbtForm({ ...cbtForm, jumlahSoal: num })}
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer transition ${
+                              className={`px-3 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition ${
                                 cbtForm.jumlahSoal === num
-                                  ? 'bg-purple-600 text-white'
+                                  ? 'bg-purple-600 text-white shadow'
                                   : 'bg-white text-purple-900 border border-purple-200 hover:bg-purple-100'
                               }`}
                             >
@@ -8293,61 +8582,252 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                         </div>
                       </div>
 
-                      {/* Durasi Ujian */}
-                      <div>
-                        <label className="font-bold text-slate-700 block mb-1">Durasi Ujian (Menit)</label>
-                        <input
-                          type="number"
-                          min={10}
-                          max={180}
-                          value={cbtForm.durasiMenit}
-                          onChange={(e) => setCbtForm({ ...cbtForm, durasiMenit: parseInt(e.target.value) || 60 })}
-                          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-800 font-bold focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      {/* Kompetensi yang Diuji */}
+                      <div className="md:col-span-2 lg:col-span-3">
+                        <label className="font-bold text-slate-700 block mb-1">Kompetensi yang Diuji</label>
+                        <textarea
+                          rows={2}
+                          value={cbtForm.kompetensiYangDiuji}
+                          onChange={(e) => setCbtForm({ ...cbtForm, kompetensiYangDiuji: e.target.value })}
+                          placeholder="Contoh: Peserta didik mampu menganalisis dampak perubahan sosial budaya terhadap kearifan lokal..."
+                          className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
                         />
                       </div>
 
-                      {/* Level Kognitif & Bentuk Soal */}
-                      <div>
-                        <label className="font-bold text-slate-700 block mb-1">Level Kognitif & Bentuk</label>
-                        <select
-                          value={cbtForm.levelKognitif}
-                          onChange={(e) => setCbtForm({ ...cbtForm, levelKognitif: e.target.value })}
-                          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                        >
-                          <option value="Penalaran HOTS (Reasoning) (level_3)">L3 - Penalaran HOTS (Reasoning)</option>
-                          <option value="Penerapan (Applying) (level_2)">L2 - Penerapan (Applying)</option>
-                          <option value="Pemahaman (Knowing) (level_1)">L1 - Pemahaman (Knowing)</option>
-                        </select>
+                      {/* Batasan / Catatan Khusus */}
+                      <div className="md:col-span-2 lg:col-span-3">
+                        <label className="font-bold text-slate-700 block mb-1">Batasan / Catatan Khusus Ujian</label>
+                        <textarea
+                          rows={2}
+                          value={cbtForm.batasanCatatan}
+                          onChange={(e) => setCbtForm({ ...cbtForm, batasanCatatan: e.target.value })}
+                          placeholder="Contoh: Sajikan stimulus berbasis data aktual dan studi kasus kontekstual di Indonesia..."
+                          className="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        />
                       </div>
 
                     </div>
 
-                    {/* Authentication CBT Section */}
-                    <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-4 space-y-3">
-                      <div className="flex items-center gap-2">
-                        <Lock className="h-4 w-4 text-amber-700" />
-                        <h5 className="font-extrabold text-amber-950 text-xs uppercase tracking-wider">
-                          Sistem Otentikasi & Login CBT Mandiri
+                    {/* 🎭 KONTEKS LOKAL INDONESIA */}
+                    <div className="bg-emerald-50/70 border border-emerald-200/90 rounded-2xl p-4 space-y-3">
+                      <div className="flex items-center justify-between border-b border-emerald-200/80 pb-2">
+                        <h5 className="font-extrabold text-emerald-950 text-xs flex items-center gap-2 uppercase tracking-wider">
+                          <span>🎭 KONTEKS LOKAL INDONESIA</span>
                         </h5>
+                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md">
+                          {cbtForm.konteksLokal?.length || 0} Terpilih
+                        </span>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                          <label className="font-bold text-amber-900 block mb-1 text-[11px]">Username CBT Ujian</label>
-                          <input
-                            type="text"
-                            value={cbtForm.usernameCbt}
-                            onChange={(e) => setCbtForm({ ...cbtForm, usernameCbt: e.target.value })}
-                            className="w-full bg-white border border-amber-300 rounded-lg px-3 py-1.5 font-mono text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                          />
+                      <div className="flex flex-wrap gap-2 text-xs">
+                        {[
+                          '🎭 Budaya Nusantara',
+                          '🗺️ Geografis Indonesia',
+                          '👥 Kehidupan Sosial',
+                          '💰 Ekonomi Rakyat',
+                          '⚙️ Teknologi Tradisional',
+                          '🏛️ Kearifan Lokal',
+                          '🌈 Keragaman Etnis'
+                        ].map((item) => {
+                          const isSelected = (cbtForm.konteksLokal || []).includes(item);
+                          return (
+                            <button
+                              key={item}
+                              type="button"
+                              onClick={() => handleToggleCbtContext(item)}
+                              className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 cursor-pointer text-[11px] ${
+                                isSelected
+                                  ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-300'
+                                  : 'bg-white text-emerald-900 border border-emerald-200 hover:bg-emerald-100'
+                              }`}
+                            >
+                              <span>{item}</span>
+                              {isSelected && <Check className="h-3 w-3" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 📖 STIMULUS & PENGEMBANGAN KONTEN */}
+                    <div className="bg-sky-50/70 border border-sky-200/90 rounded-2xl p-4 space-y-3">
+                      <div className="flex items-center justify-between border-b border-sky-200/80 pb-2">
+                        <h5 className="font-extrabold text-sky-950 text-xs flex items-center gap-2 uppercase tracking-wider">
+                          <span>📖 STIMULUS & PENGEMBANGAN KONTEN</span>
+                        </h5>
+                        <span className="text-[10px] font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-md">
+                          {cbtForm.stimulusKonten?.length || 0} Terpilih
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2 text-xs">
+                        {[
+                          '📖 Teks Bacaan',
+                          '🖼️ Gambar/Ilustrasi',
+                          '📊 Data/Tabel',
+                          '📈 Grafik/Diagram',
+                          '🔍 Kasus Nyata',
+                          '📚 Cerita Pendek',
+                          '📰 Berita/Artikel'
+                        ].map((item) => {
+                          const isSelected = (cbtForm.stimulusKonten || []).includes(item);
+                          return (
+                            <button
+                              key={item}
+                              type="button"
+                              onClick={() => handleToggleCbtStimulus(item)}
+                              className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1.5 cursor-pointer text-[11px] ${
+                                isSelected
+                                  ? 'bg-sky-600 text-white shadow-sm ring-2 ring-sky-300'
+                                  : 'bg-white text-sky-900 border border-sky-200 hover:bg-sky-100'
+                              }`}
+                            >
+                              <span>{item}</span>
+                              {isSelected && <Check className="h-3 w-3" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 📋 STANDAR KUALITAS SOAL TKA */}
+                    <div className="bg-indigo-50/70 border border-indigo-200/90 rounded-2xl p-4 space-y-3">
+                      <div className="flex items-center justify-between border-b border-indigo-200/80 pb-2">
+                        <h5 className="font-extrabold text-indigo-950 text-xs flex items-center gap-2 uppercase tracking-wider">
+                          <span>📋 STANDAR KUALITAS SOAL TKA</span>
+                        </h5>
+                        <span className="text-[10px] font-bold text-indigo-800 bg-indigo-100 px-2 py-0.5 rounded-md">
+                          {cbtForm.standarKualitas?.length || 0} / 12 Terpenuhi
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 text-xs">
+                        {[
+                          'Validasi Bahasa',
+                          'Konstruksi Soal',
+                          'Kesesuaian Materi',
+                          'Level Kognitif',
+                          'Konteks Relevan',
+                          'Tidak Bias',
+                          'Kejelasan Instruksi',
+                          'Kunci Jawaban Tepat',
+                          'Distractor Berkualitas',
+                          'Sesuai Kurikulum',
+                          'Waktu Pengerjaan',
+                          'Inklusivitas'
+                        ].map((item) => {
+                          const isSelected = (cbtForm.standarKualitas || []).includes(item);
+                          return (
+                            <button
+                              key={item}
+                              type="button"
+                              onClick={() => handleToggleCbtQuality(item)}
+                              className={`px-2.5 py-1.5 rounded-xl font-bold transition flex items-center justify-between gap-1 cursor-pointer text-[11px] ${
+                                isSelected
+                                  ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400'
+                                  : 'bg-white text-indigo-900 border border-indigo-200 hover:bg-indigo-100'
+                              }`}
+                            >
+                              <span className="truncate">{item}</span>
+                              {isSelected ? <Check className="h-3 w-3 flex-shrink-0" /> : <div className="h-3 w-3 rounded-full border border-indigo-300 flex-shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Authentication CBT Section */}
+                    <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-4 space-y-4">
+                      <div className="flex items-center justify-between border-b border-amber-200/80 pb-2">
+                        <div className="flex items-center gap-2">
+                          <Lock className="h-4 w-4 text-amber-700" />
+                          <h5 className="font-extrabold text-amber-950 text-xs uppercase tracking-wider">
+                            Sistem Otentikasi & Keamanan Role Bertingkat (Admin, Guru, Peserta)
+                          </h5>
                         </div>
-                        <div>
-                          <label className="font-bold text-amber-900 block mb-1 text-[11px]">Password CBT Ujian</label>
-                          <input
-                            type="text"
-                            value={cbtForm.passwordCbt}
-                            onChange={(e) => setCbtForm({ ...cbtForm, passwordCbt: e.target.value })}
-                            className="w-full bg-white border border-amber-300 rounded-lg px-3 py-1.5 font-mono text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                          />
+                        <span className="text-[10px] font-extrabold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-md border border-amber-200">
+                          🔐 Multi-Role Secured
+                        </span>
+                      </div>
+
+                      {/* Role 1: Admin / Proktor */}
+                      <div className="bg-white/80 p-3 rounded-xl border border-amber-200 space-y-2">
+                        <div className="flex items-center gap-1.5 font-extrabold text-amber-950 text-xs">
+                          <Key className="h-3.5 w-3.5 text-purple-600" />
+                          <span>1. Kredensial Administrator / Proktor Ujian</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="font-bold text-amber-900 block mb-1 text-[11px]">Username Admin</label>
+                            <input
+                              type="text"
+                              value={cbtForm.adminUsername || 'admin_cbt'}
+                              onChange={(e) => setCbtForm({ ...cbtForm, adminUsername: e.target.value })}
+                              className="w-full bg-white border border-amber-300 rounded-lg px-3 py-1.5 font-mono text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="font-bold text-amber-900 block mb-1 text-[11px]">Password Admin</label>
+                            <input
+                              type="text"
+                              value={cbtForm.adminPassword || 'admin_proktor2026'}
+                              onChange={(e) => setCbtForm({ ...cbtForm, adminPassword: e.target.value })}
+                              className="w-full bg-white border border-amber-300 rounded-lg px-3 py-1.5 font-mono text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Role 2: Guru / Pengampu */}
+                      <div className="bg-white/80 p-3 rounded-xl border border-amber-200 space-y-2">
+                        <div className="flex items-center gap-1.5 font-extrabold text-amber-950 text-xs">
+                          <UserCheck className="h-3.5 w-3.5 text-indigo-600" />
+                          <span>2. Kredensial Guru Pengampu / Pembuat Soal</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="font-bold text-amber-900 block mb-1 text-[11px]">Username Guru</label>
+                            <input
+                              type="text"
+                              value={cbtForm.guruUsername || 'guru_sosiologi'}
+                              onChange={(e) => setCbtForm({ ...cbtForm, guruUsername: e.target.value })}
+                              className="w-full bg-white border border-amber-300 rounded-lg px-3 py-1.5 font-mono text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="font-bold text-amber-900 block mb-1 text-[11px]">Password Guru</label>
+                            <input
+                              type="text"
+                              value={cbtForm.guruPassword || 'guru_pass2026'}
+                              onChange={(e) => setCbtForm({ ...cbtForm, guruPassword: e.target.value })}
+                              className="w-full bg-white border border-amber-300 rounded-lg px-3 py-1.5 font-mono text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Role 3: Peserta / Siswa */}
+                      <div className="bg-white/80 p-3 rounded-xl border border-amber-200 space-y-2">
+                        <div className="flex items-center gap-1.5 font-extrabold text-amber-950 text-xs">
+                          <Users className="h-3.5 w-3.5 text-emerald-600" />
+                          <span>3. Kredensial Peserta Ujian / Siswa</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="font-bold text-amber-900 block mb-1 text-[11px]">Username Peserta</label>
+                            <input
+                              type="text"
+                              value={cbtForm.usernameCbt}
+                              onChange={(e) => setCbtForm({ ...cbtForm, usernameCbt: e.target.value })}
+                              className="w-full bg-white border border-amber-300 rounded-lg px-3 py-1.5 font-mono text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="font-bold text-amber-900 block mb-1 text-[11px]">Password Peserta</label>
+                            <input
+                              type="text"
+                              value={cbtForm.passwordCbt}
+                              onChange={(e) => setCbtForm({ ...cbtForm, passwordCbt: e.target.value })}
+                              className="w-full bg-white border border-amber-300 rounded-lg px-3 py-1.5 font-mono text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            />
+                          </div>
                         </div>
                       </div>
                     </div>

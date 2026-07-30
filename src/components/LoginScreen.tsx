@@ -94,7 +94,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
       await handleFetchUserProfileAndCallback(userCredential.user.uid, userCredential.user.email || email);
     } catch (err: any) {
-      console.error(err);
+      console.warn("Login attempt error:", err?.code || err?.message);
       const isInvalidCred = 
         err.code === 'auth/user-not-found' || 
         err.code === 'auth/wrong-password' || 
@@ -108,7 +108,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         ));
 
       if (isInvalidCred) {
-        setError("Email atau Password yang Anda masukkan salah.");
+        setError("Email atau Password yang Anda masukkan salah. Belum punya akun? Silakan klik 'Daftar Baru' untuk membuat akun.");
       } else {
         setError(`Gagal Masuk: ${err.message || err}`);
       }
@@ -235,48 +235,39 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           <p className="text-xs text-slate-400 mt-0.5">Sistem Manajemen Kisi-Kisi & Soal TKA SMA berbasis AI</p>
         </div>
 
-        {/* Conditional Tab Selector for Registration */}
-        {isRegisterParamPresent && (
-          <div className="flex border border-slate-800 mb-6 bg-slate-950/40 p-1 rounded-2xl">
-            <button
-              onClick={() => {
-                setActiveTab('signin');
-                setError(null);
-                setSuccessMsg(null);
-              }}
-              className={`flex-1 py-2 px-3 text-center rounded-xl font-bold text-xs transition-all ${
-                activeTab === 'signin'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Masuk
-            </button>
-            <button
-              onClick={() => {
-                setActiveTab('signup');
-                setError(null);
-                setSuccessMsg(null);
-              }}
-              className={`flex-1 py-2 px-3 text-center rounded-xl font-bold text-xs transition-all ${
-                activeTab === 'signup'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              Daftar Baru
-            </button>
-          </div>
-        )}
-
-        {/* Portal Header when registration tab isn't shown */}
-        {!isRegisterParamPresent && (
-          <div className="bg-indigo-600/10 border border-indigo-500/20 py-2.5 px-4 rounded-xl mb-6 text-center">
-            <span className="text-[11px] font-extrabold text-indigo-400 uppercase tracking-widest flex items-center justify-center gap-1.5">
-              <Lock className="h-3.5 w-3.5" /> Portal Masuk Pengguna Resmi
-            </span>
-          </div>
-        )}
+        {/* Tab Selector for Sign In / Sign Up */}
+        <div className="flex border border-slate-800 mb-5 bg-slate-950/60 p-1 rounded-2xl">
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('signin');
+              setError(null);
+              setSuccessMsg(null);
+            }}
+            className={`flex-1 py-2 px-3 text-center rounded-xl font-bold text-xs transition-all cursor-pointer ${
+              activeTab === 'signin'
+                ? 'bg-indigo-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Masuk
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('signup');
+              setError(null);
+              setSuccessMsg(null);
+            }}
+            className={`flex-1 py-2 px-3 text-center rounded-xl font-bold text-xs transition-all cursor-pointer ${
+              activeTab === 'signup'
+                ? 'bg-indigo-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Daftar Baru
+          </button>
+        </div>
 
         {/* Alert Messages */}
         {error && (
@@ -349,12 +340,26 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             {/* Action Button */}
             <button
               type="submit"
-              className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-extrabold py-3 px-4 rounded-xl shadow-lg transition-all duration-200 flex items-center justify-center gap-2 text-xs mt-2 disabled:opacity-50"
+              className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-extrabold py-3 px-4 rounded-xl shadow-lg transition-all duration-200 flex items-center justify-center gap-2 text-xs mt-2 disabled:opacity-50 cursor-pointer"
               disabled={loading}
             >
               {loading ? "Memproses..." : "Masuk ke Aplikasi"}
               {!loading && <ArrowRight className="h-4 w-4" />}
             </button>
+
+            <div className="text-center pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('signup');
+                  setError(null);
+                  setSuccessMsg(null);
+                }}
+                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium transition cursor-pointer"
+              >
+                Belum memiliki akun? <span className="underline font-bold">Daftar Akun Baru di sini</span>
+              </button>
+            </div>
           </form>
         ) : (
           <form onSubmit={handleSignUp} className="space-y-4">
@@ -475,12 +480,26 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
             {/* Action Button */}
             <button
               type="submit"
-              className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-extrabold py-3 px-4 rounded-xl shadow-lg transition-all duration-200 flex items-center justify-center gap-2 text-xs mt-2 disabled:opacity-50"
+              className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-extrabold py-3 px-4 rounded-xl shadow-lg transition-all duration-200 flex items-center justify-center gap-2 text-xs mt-2 disabled:opacity-50 cursor-pointer"
               disabled={loading}
             >
               {loading ? "Mendaftarkan..." : "Selesaikan Pendaftaran"}
               {!loading && <ArrowRight className="h-4 w-4" />}
             </button>
+
+            <div className="text-center pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('signin');
+                  setError(null);
+                  setSuccessMsg(null);
+                }}
+                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium transition cursor-pointer"
+              >
+                Sudah memiliki akun? <span className="underline font-bold">Masuk di sini</span>
+              </button>
+            </div>
           </form>
         )}
 
