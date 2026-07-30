@@ -2960,6 +2960,148 @@ export default function App() {
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
 
+  // Master Megaprompt Generator States (For entire Kisi-Kisi matrix)
+  const [isMasterMegapromptModalOpen, setIsMasterMegapromptModalOpen] = useState(false);
+  const [masterMegapromptStyle, setMasterMegapromptStyle] = useState<'pusmendik' | 'hots' | 'snbt' | 'variasi'>('pusmendik');
+  const [masterMegapromptText, setMasterMegapromptText] = useState('');
+  const [copiedMasterMegaprompt, setCopiedMasterMegaprompt] = useState(false);
+  const [syncedToWadah1, setSyncedToWadah1] = useState(false);
+
+  const buildMasterMegaprompt = (
+    items: KisiKisiItem[], 
+    cfg: GeneratorConfig, 
+    stylePreset: 'pusmendik' | 'hots' | 'snbt' | 'variasi' = 'pusmendik'
+  ) => {
+    if (!items || items.length === 0) return '';
+
+    const totalBaris = items.length;
+    const totalSoal = items.reduce((acc, k) => acc + (k.jumlahSoal || 1), 0);
+    
+    // Counts
+    const countPG = items.filter(k => k.bentukSoal === 'pilihan_ganda_sederhana').reduce((acc, k) => acc + (k.jumlahSoal || 1), 0);
+    const countMCMA = items.filter(k => k.bentukSoal === 'mcma').reduce((acc, k) => acc + (k.jumlahSoal || 1), 0);
+    const countKategori = items.filter(k => k.bentukSoal === 'kategori').reduce((acc, k) => acc + (k.jumlahSoal || 1), 0);
+
+    const countL1 = items.filter(k => k.levelKognitif === 'level_1').length;
+    const countL2 = items.filter(k => k.levelKognitif === 'level_2').length;
+    const countL3 = items.filter(k => k.levelKognitif === 'level_3').length;
+
+    let styleInstruction = "";
+    if (stylePreset === 'pusmendik') {
+      styleInstruction = "Gunakan standar baku Pusmendik Kemendikbudristek: Stimulus edukatif, opsi pilihan ganda berimbang, dan bahasa Indonesia baku sesuai PUEBI.";
+    } else if (stylePreset === 'hots') {
+      styleInstruction = "Fokus pada Higher Order Thinking Skills (HOTS): Sajikan studi kasus empiris, grafik/data nyata, analisis kritis, serta pertanyaan yang menuntut penalaran mendalam.";
+    } else if (stylePreset === 'snbt') {
+      styleInstruction = "Standar UTBK-SNBT / TKA: Soal menuntut kemampuan literasi tinggi, penyelesaian masalah (problem solving), dan kejelian menganalisis fenomena.";
+    } else if (stylePreset === 'variasi') {
+      styleInstruction = "Kombinasi Variatif: Campuran tingkat kesulitan (Mudah, Sedang, HOTS) dengan gaya naratif kontekstual dan skenario kehidupan sehari-hari.";
+    }
+
+    let prompt = `================================================================================
+MEGAPROMPT UTAMA AI: PENYUSUNAN PAKET SOAL ASESMEN SUMATIF PUSMENDIK / TKA
+================================================================================
+MATA PELAJARAN : ${cfg.mataPelajaran || 'Sosiologi'}
+FASE / KELAS   : SMA Kelas XI - XII (Fase F)
+TOTAL KISI-KISI: ${totalBaris} Baris Spesifikasi
+TOTAL SOAL     : ${totalSoal} Butir Soal Keseluruhan
+GAYA PENULISAN : ${styleInstruction}
+================================================================================
+
+PERAN DAN INSTRUKSI UTAMA (SYSTEM PROMPT):
+Anda adalah Tim Ahli Pembuat Soal Ujian Nasional, Tim Pengembang TKA (Tes Kemampuan Akademik) SMA, dan Pakar Evaluasi Pembelajaran Kemendikbudristek (Pusmendik).
+Tugas Anda adalah merancang dan menyusun paket soal asesmen sumatif sebanyak ${totalSoal} butir soal secara LENGKAP, BEBAS HALLUCINATION, dan PRESISI berdasarkan ${totalBaris} baris Matriks Asesmen / Kisi-Kisi berikut.
+
+IKHTISAR SPESIFIKASI ASESMEN:
+- Total Baris Kisi-Kisi: ${totalBaris} Baris Spesifikasi
+- Total Target Soal Keseluruhan: ${totalSoal} Butir
+- Rincian Bentuk Soal:
+  * Pilihan Ganda Sederhana (PG 5 Opsi): ${countPG} Butir
+  * Pilihan Ganda Kompleks (MCMA / Banyak Jawaban): ${countMCMA} Butir
+  * Kategori / Menjodohkan / Pernyataan: ${countKategori} Butir
+- Sebaran Level Kognitif:
+  * Level 1 - Pemahaman (Knowing): ${countL1} Kisi-Kisi
+  * Level 2 - Penerapan (Applying): ${countL2} Kisi-Kisi
+  * Level 3 - Penalaran (Reasoning / HOTS): ${countL3} Kisi-Kisi
+
+--------------------------------------------------------------------------------
+MATRIKS ASESMEN & RINCIAN SPESIFIKASI SOAL (${totalBaris} BARIS):
+--------------------------------------------------------------------------------
+`;
+
+    items.forEach((kisi, idx) => {
+      const activeKonteks = (kisi.konteksLokal && kisi.konteksLokal.length > 0) ? kisi.konteksLokal : cfg.konteksLokal;
+      const activeStimulus = (kisi.stimulusKonten && kisi.stimulusKonten.length > 0) ? kisi.stimulusKonten : cfg.stimulusKonten;
+
+      prompt += `
+[KISI-KISI NO. ${kisi.no || (idx + 1)}]
+- Elemen / Materi Utama : ${kisi.elemenMateri || '-'}
+- Sub-Elemen / Submateri: ${kisi.subElemenMateri || '-'}
+- Bentuk Soal          : ${getBentukSoalLabel(kisi.bentukSoal)} (${kisi.jumlahSoal || 1} Soal)
+- Level Kognitif       : ${getLevelKognitifLabel(kisi.levelKognitif)}
+- Indikator / Diuji    : ${kisi.kompetensi || '-'}
+- Batasan & Catatan    : ${kisi.batasanCatatan || 'Patuhi kurikulum resmi'}
+- Konteks Lokal ID     : ${activeKonteks.length > 0 ? activeKonteks.join(", ") : 'Masyarakat & Budaya Indonesia'}
+- Stimulus Konten      : ${activeStimulus.length > 0 ? activeStimulus.join(", ") : 'Teks Kasus / Data Relevan'}
+`;
+    });
+
+    prompt += `
+--------------------------------------------------------------------------------
+PETUNJUK PENULISAN DAN FORMAT OUTPUT KETAT (DOKUMEN WORD & TABEL EXCEL):
+--------------------------------------------------------------------------------
+Sajikan seluruh hasil generasi soal secara LENGKAP, BEBAS POTONGAN, dan PRESISI dalam 2 FORMAT OUTPUT TERTATA KETAT:
+
+[BAGIAN 1: NASKAH SOAL LENGKAP SIAP CETAK - FORMAT WORD / DOCX READY]
+Sajikan seluruh ${totalSoal} butir soal berurutan dari Kisi-Kisi No. 1 s.d. No. ${totalBaris} dalam bentuk naskah cetak bernomor rapi yang dapat langsung disalin-rekatkan (copy-paste) ke Microsoft Word:
+1. SPESIFIKASI SOAL:
+   - Nomor Soal, Materi Utama, Submateri, Level Kognitif (L1/L2/L3), dan Bentuk Soal.
+2. STIMULUS LENGKAP:
+   - Narasi kasus/fenomena, data statistik, atau tabel kontekstual (2-4 paragraf) yang kaya informasi analitis.
+3. BUTIR PERTANYAAN & OPSI JAWABAN:
+   - Pilihan Ganda Sederhana: Pertanyaan jelas + 5 Opsi (A, B, C, D, E). Pastikan distribusi kunci jawaban (A, B, C, D, E) tersebar proporsional.
+   - Pilihan Ganda Kompleks (MCMA): Pertanyaan + 4-5 opsi pernyataan + instruksi instruktif.
+   - Kategori / Menjodohkan: Skenario + daftar pernyataan & kategori berpasangan.
+4. KUNCI JAWABAN & PEMBAHASAN MENDALAM:
+   - Kunci Jawaban Tepat + Pembahasan Komprehensif (Rationale ilmiah/sosiologis) serta penjelasan mengapa opsi lain tidak tepat.
+5. PEDOMAN PENSKORAN & RUBRIK (SKALA 0-100):
+   - Sertakan bobot nilai per bentuk soal (misal PG = 1 poin, MCMA = 2 poin, Kategori = 2 poin) dan rumus konversi skor total ke nilai 100.
+
+[BAGIAN 2: TABEL MATRIKS REKAPITULASI SOAL - FORMAT EXCEL / SPREADSHEET READY]
+Di bagian paling akhir (setelah seluruh Naskah Word selesai), Anda WAJIB menyajikan TABEL REKAPITULASI BENTUK MARKDOWN / TSV CODEBLOCK yang siap di-copy-paste langsung ke Microsoft Excel atau Google Sheets.
+Tabel harus memuat seluruh ${totalSoal} soal dengan struktur kolom baku Excel sebagai berikut:
+
+| No Soal | Elemen / Materi Utama | Submateri | Level Kognitif | Bentuk Soal | Ringkasan Stimulus | Pertanyaan / Teks Soal | Opsi A | Opsi B | Opsi C | Opsi D | Opsi E | Kunci Jawaban | Pembahasan Singkat |
+
+--------------------------------------------------------------------------------
+PRINSIP BEBAS HALLUCINATION & ETIKA PENULISAN:
+- Gunakan Bahasa Indonesia baku sesuai PUEBI / EBI.
+- Pastikan tidak ada bias SARA, gender, atau konten bermuatan sensitif/politik praktis.
+- Seluruh data/fakta sosiologis harus relevan dan akurat sesuai realitas empiris Indonesia.
+
+Sila buatkan seluruh paket ${totalSoal} butir soal secara berurutan, rapi, dan komprehensif dari Kisi-Kisi No. 1 hingga No. ${totalBaris} memenuhi FORMAT WORD dan FORMAT EXCEL di atas!
+`;
+
+    return prompt.trim();
+  };
+
+  const downloadMasterMegapromptAsTxt = () => {
+    const text = masterMegapromptText || buildMasterMegaprompt(kisiList, config, masterMegapromptStyle);
+    const element = document.createElement("a");
+    const file = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    element.href = URL.createObjectURL(file);
+    element.download = `Megaprompt_Utama_${(config.mataPelajaran || 'Sosiologi').replace(/\s+/g, '_')}_${kisiList.length}_Baris.txt`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+  };
+
+  const handleSyncToWadah1 = () => {
+    const text = masterMegapromptText || buildMasterMegaprompt(kisiList, config, masterMegapromptStyle);
+    setPromptWadah1Text(text);
+    setSyncedToWadah1(true);
+    setTimeout(() => setSyncedToWadah1(false), 3000);
+  };
+
   // --- STATE FOR SECTION 4: PEMBUATAN MATERI & PANDUAN ---
   const [uploadedPdf, setUploadedPdf] = useState<{ name: string; size: number } | null>(null);
   const [isUploadingPdf, setIsUploadingPdf] = useState(false);
@@ -7024,13 +7166,64 @@ PANDUAN EKSTRA:
               </form>
             </div>
 
+            {/* Megaprompt AI Master Banner Card when kisiList has rows */}
+            {kisiList.length > 0 && (
+              <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-800/80 rounded-2xl p-5 text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl relative overflow-hidden my-4">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+                <div className="space-y-1.5 relative z-10">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-sm">
+                      <Sparkles className="h-3 w-3" /> MEGAPROMPT AI MATRIKS
+                    </span>
+                    <span className="text-xs font-mono text-indigo-200 font-bold bg-indigo-900/60 border border-indigo-700/50 px-2 py-0.5 rounded-md">
+                      {kisiList.length} Baris Spesifikasi ({kisiList.reduce((acc, k) => acc + (k.jumlahSoal || 1), 0)} Soal Total)
+                    </span>
+                  </div>
+                  <h4 className="text-base font-black text-white tracking-tight flex items-center gap-2">
+                    Pembuat Prompt Otomatis AI (Master Megaprompt)
+                  </h4>
+                  <p className="text-xs text-indigo-200/80 leading-relaxed max-w-2xl">
+                    Gabungkan seluruh {kisiList.length} baris matriks kisi-kisi menjadi <b>1 Prompt Utama Komprehensif</b> siap pakai untuk Gemini, ChatGPT, Claude, atau sinkronkan ke Wadah 1 CBT Generator.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 w-full md:w-auto relative z-10">
+                  <button
+                    onClick={() => {
+                      const text = buildMasterMegaprompt(kisiList, config, masterMegapromptStyle);
+                      setMasterMegapromptText(text);
+                      setIsMasterMegapromptModalOpen(true);
+                    }}
+                    className="w-full md:w-auto px-5 py-3 bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 hover:from-amber-500 hover:to-yellow-500 text-slate-950 font-black text-xs rounded-xl shadow-lg transition flex items-center justify-center gap-2 border border-amber-300"
+                  >
+                    <Zap className="h-4 w-4 fill-slate-950" />
+                    <span>Buka Megaprompt AI Utama ({kisiList.length} Baris)</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Matrix Table */}
             <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-              <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">MATRIKS ASESMEN KISI-KISI SOAL</span>
-                <span className="text-xs bg-slate-200 text-slate-800 font-mono px-2 py-0.5 rounded-full font-bold">
-                  Total Kisi-Kisi: {kisiList.length} baris
-                </span>
+              <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">MATRIKS ASESMEN KISI-KISI SOAL</span>
+                  <span className="text-xs bg-indigo-50 border border-indigo-200 text-indigo-800 font-mono px-2.5 py-0.5 rounded-full font-bold">
+                    Total Kisi-Kisi: {kisiList.length} baris ({kisiList.reduce((acc, k) => acc + (k.jumlahSoal || 1), 0)} Soal Target)
+                  </span>
+                </div>
+                {kisiList.length > 0 && (
+                  <button
+                    onClick={() => {
+                      const text = buildMasterMegaprompt(kisiList, config, masterMegapromptStyle);
+                      setMasterMegapromptText(text);
+                      setIsMasterMegapromptModalOpen(true);
+                    }}
+                    className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+                    <span>⚡ Megaprompt AI ({kisiList.length} Baris)</span>
+                  </button>
+                )}
               </div>
 
               <div className="overflow-x-auto">
@@ -11486,6 +11679,222 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
             </motion.div>
           </motion.div>
         )}
+        {/* Master Megaprompt AI Modal (Entire Kisi-Kisi Table Combined) */}
+        {isMasterMegapromptModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/85 backdrop-blur-md z-[9999] flex items-center justify-center p-4 no-print"
+          >
+            <motion.div
+              initial={{ scale: 0.92, y: 15, opacity: 0 }}
+              animate={{ scale: 1, y: 0, opacity: 1 }}
+              exit={{ scale: 0.92, y: 15, opacity: 0 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full border border-slate-100 relative overflow-hidden flex flex-col max-h-[92vh]"
+            >
+              {/* Top accent glow line */}
+              <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-amber-400 via-indigo-600 to-emerald-500" />
+
+              {/* Modal Header */}
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-100 border border-amber-200 flex items-center justify-center shadow-sm">
+                    <Sparkles className="h-5 w-5 text-amber-700" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base font-extrabold text-slate-900 tracking-tight">
+                        Pembuat Prompt Otomatis AI (Master Megaprompt)
+                      </h3>
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-400 text-slate-950 uppercase tracking-wider">
+                        {kisiList.length} Baris Kisi-Kisi
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 font-medium">
+                      Menggabungkan seluruh matriks asesmen menjadi 1 Prompt Utama terstruktur presisi untuk AI
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsMasterMegapromptModalOpen(false)}
+                  className="text-slate-400 hover:text-slate-600 font-extrabold text-xl p-1.5 rounded-xl hover:bg-slate-200/60 transition"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-6 overflow-y-auto space-y-5 flex-1">
+                {/* Stats Summary Bar */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div className="bg-slate-50 border border-slate-200/80 p-3 rounded-2xl">
+                    <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Mata Pelajaran</span>
+                    <span className="text-xs font-black text-slate-800 truncate block mt-0.5">{config.mataPelajaran || 'Sosiologi'}</span>
+                  </div>
+                  <div className="bg-indigo-50/60 border border-indigo-100 p-3 rounded-2xl">
+                    <span className="text-[10px] font-extrabold text-indigo-500 uppercase tracking-wider block">Total Kisi-Kisi</span>
+                    <span className="text-sm font-black text-indigo-900 mt-0.5 block">{kisiList.length} Baris Spesifikasi</span>
+                  </div>
+                  <div className="bg-amber-50/60 border border-amber-100 p-3 rounded-2xl">
+                    <span className="text-[10px] font-extrabold text-amber-600 uppercase tracking-wider block">Target Jumlah Soal</span>
+                    <span className="text-sm font-black text-amber-900 mt-0.5 block">
+                      {kisiList.reduce((acc, k) => acc + (k.jumlahSoal || 1), 0)} Butir Soal Total
+                    </span>
+                  </div>
+                  <div className="bg-emerald-50/60 border border-emerald-100 p-3 rounded-2xl">
+                    <span className="text-[10px] font-extrabold text-emerald-600 uppercase tracking-wider block">Level Kognitif</span>
+                    <span className="text-xs font-black text-emerald-900 mt-0.5 block truncate">
+                      L1: {kisiList.filter(k => k.levelKognitif === 'level_1').length} | L2: {kisiList.filter(k => k.levelKognitif === 'level_2').length} | L3: {kisiList.filter(k => k.levelKognitif === 'level_3').length}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Preset Style Selector */}
+                <div className="space-y-2">
+                  <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider block">
+                    Pilih Gaya & Karakter Megaprompt AI:
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {[
+                      { id: 'pusmendik', label: '🎓 Standard Pusmendik', desc: 'Baku & Seimbang' },
+                      { id: 'hots', label: '🔥 HOTS & Kasus', desc: 'Penalaran Tinggi' },
+                      { id: 'snbt', label: '🎯 UTBK-SNBT / TKA', desc: 'Literasi & Solutif' },
+                      { id: 'variasi', label: '📝 Variasi Multi-Level', desc: 'Mudah, Sedang, HOTS' }
+                    ].map((preset) => (
+                      <button
+                        key={preset.id}
+                        onClick={() => {
+                          const newStyle = preset.id as any;
+                          setMasterMegapromptStyle(newStyle);
+                          setMasterMegapromptText(buildMasterMegaprompt(kisiList, config, newStyle));
+                        }}
+                        className={`p-2.5 rounded-2xl border text-left transition-all ${
+                          masterMegapromptStyle === preset.id
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-md ring-2 ring-indigo-200'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="text-xs font-extrabold block">{preset.label}</span>
+                        <span className={`text-[10px] block mt-0.5 font-medium ${masterMegapromptStyle === preset.id ? 'text-indigo-100' : 'text-slate-400'}`}>
+                          {preset.desc}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Text Area Container */}
+                <div className="space-y-2 text-left">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <FileText className="h-4 w-4 text-indigo-600" />
+                      Draf Master Megaprompt AI ({kisiList.length} Baris Total)
+                    </span>
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      {masterMegapromptText.length} Karakter | {masterMegapromptText.split(/\s+/).length} Kata
+                    </span>
+                  </div>
+
+                  <div className="relative group">
+                    <textarea
+                      readOnly
+                      value={masterMegapromptText || buildMasterMegaprompt(kisiList, config, masterMegapromptStyle)}
+                      className="w-full h-80 bg-slate-950 text-slate-100 p-4 rounded-2xl font-mono text-xs leading-relaxed focus:outline-none border border-slate-800 resize-none shadow-inner"
+                    />
+                    <div className="absolute top-3 right-3 flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const text = masterMegapromptText || buildMasterMegaprompt(kisiList, config, masterMegapromptStyle);
+                          navigator.clipboard.writeText(text);
+                          setCopiedMasterMegaprompt(true);
+                          setTimeout(() => setCopiedMasterMegaprompt(false), 2000);
+                        }}
+                        className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-bold transition shadow ${
+                          copiedMasterMegaprompt 
+                            ? 'bg-emerald-600 text-white' 
+                            : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
+                        }`}
+                      >
+                        {copiedMasterMegaprompt ? (
+                          <>
+                            <Check className="h-3.5 w-3.5" />
+                            <span>Tersalin!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3.5 w-3.5" />
+                            <span>Salin Prompt</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action Toolbar Inside Modal */}
+                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <button
+                      onClick={downloadMasterMegapromptAsTxt}
+                      className="flex-1 sm:flex-none px-3.5 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <Download className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>Unduh File (.txt)</span>
+                    </button>
+                    <button
+                      onClick={handleSyncToWadah1}
+                      className="flex-1 sm:flex-none px-3.5 py-2 bg-indigo-50 border border-indigo-200 text-indigo-900 hover:bg-indigo-100 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5"
+                    >
+                      <Layers className="h-3.5 w-3.5 text-indigo-600" />
+                      <span>{syncedToWadah1 ? 'Tersinkron!' : 'Sinkronkan ke Wadah 1 (CBT)'}</span>
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setIsMasterMegapromptModalOpen(false);
+                      handleGenerateAllQuestions();
+                    }}
+                    className="w-full sm:w-auto px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-md"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    <span>Jalankan Generasi Soal AI Langsung</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
+                <span className="text-[11px] text-slate-400 font-medium">
+                  💡 Prompt ini menggabungkan seluruh {kisiList.length} baris matriks secara sistematis.
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsMasterMegapromptModalOpen(false)}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-200 transition"
+                  >
+                    Tutup
+                  </button>
+                  <button
+                    onClick={() => {
+                      const text = masterMegapromptText || buildMasterMegaprompt(kisiList, config, masterMegapromptStyle);
+                      navigator.clipboard.writeText(text);
+                      setCopiedMasterMegaprompt(true);
+                      setTimeout(() => setCopiedMasterMegaprompt(false), 2000);
+                    }}
+                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold transition flex items-center gap-2 shadow"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    <span>{copiedMasterMegaprompt ? 'Berhasil Disalin!' : 'Salin Megaprompt Utama'}</span>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+
         {showSignOutConfirm && (
           <motion.div
             initial={{ opacity: 0 }}
