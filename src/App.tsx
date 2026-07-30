@@ -2306,6 +2306,29 @@ export default function App() {
   useEffect(() => {
     if (!currentUser) return;
 
+    // Listen to current user profile changes in real time
+    const unsubscribeUserProfile = onSnapshot(doc(db, 'users', currentUser.uid), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.role) setUserRole(data.role);
+        if (data.name) setUserName(data.name);
+        if (data.mataPelajaran) {
+          const activeSubject = data.mataPelajaran;
+          setConfig(prev => {
+            if (prev.mataPelajaran !== activeSubject) {
+              return { ...prev, mataPelajaran: activeSubject };
+            }
+            return prev;
+          });
+          setDoc(doc(db, 'user_settings', `${currentUser.uid}_generator_config`), {
+            mataPelajaran: activeSubject
+          }, { merge: true }).catch(() => {});
+        }
+      }
+    }, (error) => {
+      console.warn("User profile listener error:", error);
+    });
+
     // Listen to Kisi-Kisi (Bagian 2 - Isolated per user)
     const qKisi = query(collection(db, 'kisi_kisi'), where('userId', '==', currentUser.uid));
     const unsubscribeKisi = onSnapshot(qKisi, async (snapshot) => {
@@ -2418,6 +2441,7 @@ export default function App() {
     }
 
     return () => {
+      unsubscribeUserProfile();
       unsubscribeKisi();
       unsubscribeQuestions();
       unsubscribeMaterials();
@@ -2741,12 +2765,15 @@ export default function App() {
       setSelectedPresetSubject('Produk Kreatif dan Kewirausahaan');
     }
 
-    if (currentUser && config.mataPelajaran) {
+    if (currentUser && config.mataPelajaran && userRole === 'admin') {
       updateDoc(doc(db, 'users', currentUser.uid), {
         mataPelajaran: config.mataPelajaran
       }).catch(err => console.error("Error saving subject selection:", err));
+      setDoc(doc(db, 'user_settings', `${currentUser.uid}_generator_config`), {
+        mataPelajaran: config.mataPelajaran
+      }, { merge: true }).catch(err => console.error("Error saving subject selection to settings:", err));
     }
-  }, [config.mataPelajaran, currentUser]);
+  }, [config.mataPelajaran, currentUser, userRole]);
 
   const handleSelectPresetSubject = (subject: typeof selectedPresetSubject) => {
     if (userRole !== 'admin') return; // Non-admin teachers are restricted to their assigned Mata Pelajaran Ampuan
@@ -10678,18 +10705,55 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                       onClick={async () => {
                         setIsSavingUserEdit(true);
                         try {
+                          const updatedSubject = editingUser.mataPelajaran || 'Sosiologi';
+
+                          // 1. Update main user profile in 'users' collection
                           await updateDoc(doc(db, 'users', editingUser.id), {
                             name: editingUser.name,
                             role: editingUser.role,
-                            mataPelajaran: editingUser.mataPelajaran,
+                            mataPelajaran: updatedSubject,
                             updatedAt: new Date()
                           });
+
+                          // 2. Synchronize user_settings generator_config
+                          await setDoc(doc(db, 'user_settings', `${editingUser.id}_generator_config`), {
+                            mataPelajaran: updatedSubject
+                          }, { merge: true });
+
+                          // 3. Synchronize user_settings cbt_config
+                          await setDoc(doc(db, 'user_settings', `${editingUser.id}_cbt_config`), {
+                            mataPelajaran: updatedSubject
+                          }, { merge: true });
+
+                          // 4. Check if user's matrix has default reference items from old subject; if so, re-seed for new subject
+                          try {
+                            const kisiSnap = await getDocs(query(collection(db, 'kisi_kisi'), where('userId', '==', editingUser.id)));
+                            if (!kisiSnap.empty) {
+                              let hasCustomItems = false;
+                              kisiSnap.forEach((docSnap) => {
+                                if (!docSnap.id.includes('-ref-')) {
+                                  hasCustomItems = true;
+                                }
+                              });
+                              if (!hasCustomItems) {
+                                const batchDel = writeBatch(db);
+                                kisiSnap.forEach((docSnap) => batchDel.delete(docSnap.ref));
+                                await batchDel.commit();
+                                await seedDefaultData(editingUser.id, updatedSubject);
+                              }
+                            } else {
+                              await seedDefaultData(editingUser.id, updatedSubject);
+                            }
+                          } catch (seedErr) {
+                            console.warn("Auto-reseed matrix warning:", seedErr);
+                          }
+
                           if (editingUser.id === currentUser?.uid) {
                             setUserName(editingUser.name);
                             setUserRole(editingUser.role);
-                            setConfig(prev => ({ ...prev, mataPelajaran: editingUser.mataPelajaran }));
+                            setConfig(prev => ({ ...prev, mataPelajaran: updatedSubject }));
                           }
-                          setUserSuccess(`Profil dan Mata Pelajaran Ampuan "${editingUser.name}" berhasil diperbarui!`);
+                          setUserSuccess(`Profil dan Mata Pelajaran Ampuan "${editingUser.name}" berhasil diperbarui menjadi ${updatedSubject}!`);
                           setEditingUser(null);
                         } catch (err: any) {
                           console.error(err);

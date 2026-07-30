@@ -33,6 +33,11 @@ export async function createNewUserByAdmin(email: string, pass: string, name: st
       mataPelajaran: mataPelajaran || 'Sosiologi',
       createdAt: new Date()
     });
+
+    // Initialize user settings with assigned subject
+    await setDoc(doc(db, 'user_settings', `${uid}_generator_config`), {
+      mataPelajaran: mataPelajaran || 'Sosiologi'
+    }, { merge: true });
     
     // Sign out from the temporary secondary session
     await signOut(secondaryAuth);
