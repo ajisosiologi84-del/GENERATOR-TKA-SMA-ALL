@@ -2076,6 +2076,16 @@ export default function App() {
 
   const seedDefaultData = async (userId: string, targetSubject: string = 'Sosiologi') => {
     try {
+      const userDocRef = doc(db, 'users', userId);
+      const userDocSnap = await getDoc(userDocRef);
+      const isUserTeacher = userDocSnap.exists() && userDocSnap.data().role !== 'admin';
+
+      // For non-admin teachers, do not auto-seed sample matrix rows so they start in an empty state ("posisi kosong blm ada yang dipilih")
+      if (isUserTeacher) {
+        await updateDoc(userDocRef, { isSeeded: true });
+        return;
+      }
+
       const kisiSnap = await getDocs(query(collection(db, 'kisi_kisi'), where('userId', '==', userId)));
       
       // If kisi_kisi is already seeded for this user, return
@@ -2333,12 +2343,34 @@ export default function App() {
     const qKisi = query(collection(db, 'kisi_kisi'), where('userId', '==', currentUser.uid));
     const unsubscribeKisi = onSnapshot(qKisi, async (snapshot) => {
       if (snapshot.empty) {
-        await seedDefaultData(currentUser.uid, config.mataPelajaran || 'Sosiologi');
+        if (userRole === 'admin') {
+          await seedDefaultData(currentUser.uid, config.mataPelajaran || 'Sosiologi');
+        } else {
+          setKisiList([]);
+        }
       } else {
         const list: KisiKisiItem[] = [];
-        snapshot.forEach((doc) => {
-          list.push({ id: doc.id, ...doc.data() } as KisiKisiItem);
+        const idsToDelete: string[] = [];
+        const activeSubjSlug = (config.mataPelajaran || 'sosiologi').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data() as KisiKisiItem;
+          if (userRole !== 'admin') {
+            const isRef = docSnap.id.match(/^kisi-([a-z0-9]+)-ref-/);
+            if (isRef && !docSnap.id.includes(`kisi-${activeSubjSlug}-ref-`)) {
+              idsToDelete.push(docSnap.id);
+              return;
+            }
+          }
+          list.push({ id: docSnap.id, ...data });
         });
+
+        if (idsToDelete.length > 0) {
+          const batch = writeBatch(db);
+          idsToDelete.forEach(id => batch.delete(doc(db, 'kisi_kisi', id)));
+          await batch.commit().catch(e => console.warn("Error purging stale kisi ref items:", e));
+        }
+
         list.sort((a, b) => (a.no || 0) - (b.no || 0));
         setKisiList(list);
       }
@@ -2350,9 +2382,27 @@ export default function App() {
     const qQuestions = query(collection(db, 'questions'), where('userId', '==', currentUser.uid));
     const unsubscribeQuestions = onSnapshot(qQuestions, async (snapshot) => {
       const list: Question[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as Question);
+      const qIdsToDelete: string[] = [];
+      const activeSubjSlug = (config.mataPelajaran || 'sosiologi').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as Question;
+        if (userRole !== 'admin') {
+          const isQRef = docSnap.id.match(/^question-([a-z0-9]+)-ref-/);
+          if (isQRef && !docSnap.id.includes(`question-${activeSubjSlug}-ref-`)) {
+            qIdsToDelete.push(docSnap.id);
+            return;
+          }
+        }
+        list.push({ id: docSnap.id, ...data });
       });
+
+      if (qIdsToDelete.length > 0) {
+        const batch = writeBatch(db);
+        qIdsToDelete.forEach(id => batch.delete(doc(db, 'questions', id)));
+        await batch.commit().catch(e => console.warn("Error purging stale question ref items:", e));
+      }
+
       list.sort((a, b) => (a.noSoal || 0) - (b.noSoal || 0));
       setQuestions(list);
     }, (error) => {
@@ -6434,110 +6484,117 @@ PANDUAN EKSTRA:
                   </p>
                 </div>
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                  <div className="bg-slate-900 border border-slate-800 p-1 rounded-xl flex flex-wrap gap-1">
-                    <button
-                      onClick={() => handleSelectPresetSubject('Matematika')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Matematika' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      📐 Matematika
-                    </button>
-                    <button
-                      onClick={() => handleSelectPresetSubject('Bahasa Indonesia')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Bahasa Indonesia' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      🇮🇩 Bahasa Indonesia
-                    </button>
-                    <button
-                      onClick={() => handleSelectPresetSubject('Bahasa Inggris')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Bahasa Inggris' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      🇬🇧 Bahasa Inggris
-                    </button>
-                    <button
-                      onClick={() => handleSelectPresetSubject('Matematika Tingkat Lanjut')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Matematika Tingkat Lanjut' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      🚀 Mat Lanjut
-                    </button>
-                    <button
-                      onClick={() => handleSelectPresetSubject('Bahasa Indonesia Tingkat Lanjut')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Bahasa Indonesia Tingkat Lanjut' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      ✍️ Indo Lanjut
-                    </button>
-                    <button
-                      onClick={() => handleSelectPresetSubject('Bahasa Inggris Tingkat Lanjut')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Bahasa Inggris Tingkat Lanjut' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      🗣️ Inggris Lanjut
-                    </button>
-                    <button
-                      onClick={() => handleSelectPresetSubject('Fisika')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Fisika' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      ⚛️ Fisika
-                    </button>
-                    <button
-                      onClick={() => handleSelectPresetSubject('Kimia')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Kimia' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      🧪 Kimia
-                    </button>
-                    <button
-                      onClick={() => handleSelectPresetSubject('Biologi')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Biologi' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      🧬 Biologi
-                    </button>
-                    <button
-                      onClick={() => handleSelectPresetSubject('PPKN')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'PPKN' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      🗳️ PPKN
-                    </button>
-                    <button
-                      onClick={() => handleSelectPresetSubject('Ekonomi')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Ekonomi' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      💰 Ekonomi
-                    </button>
-                    <button
-                      onClick={() => handleSelectPresetSubject('Geografi')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Geografi' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      🌍 Geografi
-                    </button>
-                    <button
-                      onClick={() => handleSelectPresetSubject('Sosiologi')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Sosiologi' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      👥 Sosiologi
-                    </button>
-                    <button
-                      onClick={() => handleSelectPresetSubject('Sejarah Tingkat Lanjut')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Sejarah Tingkat Lanjut' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      📜 Sejarah Tingkat Lanjut
-                    </button>
-                    <button
-                      onClick={() => handleSelectPresetSubject('Antropologi')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Antropologi' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      🗿 Antropologi
-                    </button>
-                    <button
-                      onClick={() => handleSelectPresetSubject('Bahasa Jepang')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Bahasa Jepang' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      🎌 Bahasa Jepang
-                    </button>
-                    <button
-                      onClick={() => handleSelectPresetSubject('Produk Kreatif dan Kewirausahaan')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Produk Kreatif dan Kewirausahaan' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                      💼 Kewirausahaan (PKK)
-                    </button>
-                  </div>
+                  {userRole === 'admin' ? (
+                    <div className="bg-slate-900 border border-slate-800 p-1 rounded-xl flex flex-wrap gap-1">
+                      <button
+                        onClick={() => handleSelectPresetSubject('Matematika')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Matematika' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        📐 Matematika
+                      </button>
+                      <button
+                        onClick={() => handleSelectPresetSubject('Bahasa Indonesia')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Bahasa Indonesia' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        🇮🇩 Bahasa Indonesia
+                      </button>
+                      <button
+                        onClick={() => handleSelectPresetSubject('Bahasa Inggris')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Bahasa Inggris' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        🇬🇧 Bahasa Inggris
+                      </button>
+                      <button
+                        onClick={() => handleSelectPresetSubject('Matematika Tingkat Lanjut')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Matematika Tingkat Lanjut' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        🚀 Mat Lanjut
+                      </button>
+                      <button
+                        onClick={() => handleSelectPresetSubject('Bahasa Indonesia Tingkat Lanjut')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Bahasa Indonesia Tingkat Lanjut' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        ✍️ Indo Lanjut
+                      </button>
+                      <button
+                        onClick={() => handleSelectPresetSubject('Bahasa Inggris Tingkat Lanjut')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Bahasa Inggris Tingkat Lanjut' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        🗣️ Inggris Lanjut
+                      </button>
+                      <button
+                        onClick={() => handleSelectPresetSubject('Fisika')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Fisika' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        ⚛️ Fisika
+                      </button>
+                      <button
+                        onClick={() => handleSelectPresetSubject('Kimia')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Kimia' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        🧪 Kimia
+                      </button>
+                      <button
+                        onClick={() => handleSelectPresetSubject('Biologi')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Biologi' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        🧬 Biologi
+                      </button>
+                      <button
+                        onClick={() => handleSelectPresetSubject('PPKN')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'PPKN' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        🗳️ PPKN
+                      </button>
+                      <button
+                        onClick={() => handleSelectPresetSubject('Ekonomi')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Ekonomi' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        💰 Ekonomi
+                      </button>
+                      <button
+                        onClick={() => handleSelectPresetSubject('Geografi')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Geografi' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        🌍 Geografi
+                      </button>
+                      <button
+                        onClick={() => handleSelectPresetSubject('Sosiologi')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Sosiologi' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        👥 Sosiologi
+                      </button>
+                      <button
+                        onClick={() => handleSelectPresetSubject('Sejarah Tingkat Lanjut')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Sejarah Tingkat Lanjut' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        📜 Sejarah Tingkat Lanjut
+                      </button>
+                      <button
+                        onClick={() => handleSelectPresetSubject('Antropologi')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Antropologi' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        🗿 Antropologi
+                      </button>
+                      <button
+                        onClick={() => handleSelectPresetSubject('Bahasa Jepang')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Bahasa Jepang' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        🎌 Bahasa Jepang
+                      </button>
+                      <button
+                        onClick={() => handleSelectPresetSubject('Produk Kreatif dan Kewirausahaan')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedPresetSubject === 'Produk Kreatif dan Kewirausahaan' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        💼 Kewirausahaan (PKK)
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="bg-slate-900 border border-slate-800 px-3.5 py-2 rounded-xl flex items-center gap-2 text-xs font-bold text-amber-300">
+                      <Lock className="h-4 w-4 text-amber-400 flex-shrink-0" />
+                      <span>Hak Akses Terkunci Khusus Mata Pelajaran Ampuan: <b className="text-white">{config.mataPelajaran || selectedPresetSubject}</b></span>
+                    </div>
+                  )}
                   <button
                     onClick={handleImportAllPresets}
                     className="bg-yellow-400 hover:bg-yellow-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 transition shadow-lg"
@@ -10055,40 +10112,47 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
 
                 {/* Subject Buttons Grid */}
                 <div className="space-y-1.5">
-                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Pilih Pelajaran:</label>
-                  <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto p-1.5 bg-slate-50 border border-slate-100 rounded-xl">
-                    {[
-                      { id: 'Matematika', label: '📐 Matematika' },
-                      { id: 'Bahasa Indonesia', label: '🇮🇩 B. Indonesia' },
-                      { id: 'Bahasa Inggris', label: '🇬🇧 B. Inggris' },
-                      { id: 'Matematika Tingkat Lanjut', label: '🚀 Mat Lanjut' },
-                      { id: 'Bahasa Indonesia Tingkat Lanjut', label: '✍️ Indo Lanjut' },
-                      { id: 'Bahasa Inggris Tingkat Lanjut', label: '🗣️ Inggris Lanjut' },
-                      { id: 'Fisika', label: '⚛️ Fisika' },
-                      { id: 'Kimia', label: '🧪 Kimia' },
-                      { id: 'Biologi', label: '🧬 Biologi' },
-                      { id: 'PPKN', label: '🗳️ PPKN' },
-                      { id: 'Ekonomi', label: '💰 Ekonomi' },
-                      { id: 'Geografi', label: '🌍 Geografi' },
-                      { id: 'Sosiologi', label: '👥 Sosiologi' },
-                      { id: 'Sejarah Tingkat Lanjut', label: '📜 Sejarah Lanjut' },
-                      { id: 'Antropologi', label: '🗿 Antropologi' },
-                      { id: 'Bahasa Jepang', label: '🎌 B. Jepang' },
-                      { id: 'Produk Kreatif dan Kewirausahaan', label: '💼 Kewirausahaan' }
-                    ].map((subj) => (
-                      <button
-                        key={subj.id}
-                        onClick={() => setSelectedJadwalPresetSubject(subj.id as any)}
-                        className={`px-2 py-1.5 rounded-lg text-[10px] font-bold text-left transition truncate ${
-                          selectedJadwalPresetSubject === subj.id
-                            ? 'bg-indigo-600 text-white shadow-sm'
-                            : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
-                        }`}
-                      >
-                        {subj.label}
-                      </button>
-                    ))}
-                  </div>
+                  <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Mata Pelajaran:</label>
+                  {userRole === 'admin' ? (
+                    <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto p-1.5 bg-slate-50 border border-slate-100 rounded-xl">
+                      {[
+                        { id: 'Matematika', label: '📐 Matematika' },
+                        { id: 'Bahasa Indonesia', label: '🇮🇩 B. Indonesia' },
+                        { id: 'Bahasa Inggris', label: '🇬🇧 B. Inggris' },
+                        { id: 'Matematika Tingkat Lanjut', label: '🚀 Mat Lanjut' },
+                        { id: 'Bahasa Indonesia Tingkat Lanjut', label: '✍️ Indo Lanjut' },
+                        { id: 'Bahasa Inggris Tingkat Lanjut', label: '🗣️ Inggris Lanjut' },
+                        { id: 'Fisika', label: '⚛️ Fisika' },
+                        { id: 'Kimia', label: '🧪 Kimia' },
+                        { id: 'Biologi', label: '🧬 Biologi' },
+                        { id: 'PPKN', label: '🗳️ PPKN' },
+                        { id: 'Ekonomi', label: '💰 Ekonomi' },
+                        { id: 'Geografi', label: '🌍 Geografi' },
+                        { id: 'Sosiologi', label: '👥 Sosiologi' },
+                        { id: 'Sejarah Tingkat Lanjut', label: '📜 Sejarah Lanjut' },
+                        { id: 'Antropologi', label: '🗿 Antropologi' },
+                        { id: 'Bahasa Jepang', label: '🎌 B. Jepang' },
+                        { id: 'Produk Kreatif dan Kewirausahaan', label: '💼 Kewirausahaan' }
+                      ].map((subj) => (
+                        <button
+                          key={subj.id}
+                          onClick={() => setSelectedJadwalPresetSubject(subj.id as any)}
+                          className={`px-2 py-1.5 rounded-lg text-[10px] font-bold text-left transition truncate ${
+                            selectedJadwalPresetSubject === subj.id
+                              ? 'bg-indigo-600 text-white shadow-sm'
+                              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-800'
+                          }`}
+                        >
+                          {subj.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-2 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2 text-xs font-bold text-amber-800">
+                      <Lock className="h-4 w-4 text-amber-600 flex-shrink-0" />
+                      <span>Ampuan: <b>{config.mataPelajaran || selectedJadwalPresetSubject}</b></span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Import All Button */}
