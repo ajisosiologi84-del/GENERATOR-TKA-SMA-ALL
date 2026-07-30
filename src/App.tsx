@@ -2749,6 +2749,7 @@ export default function App() {
   }, [config.mataPelajaran, currentUser]);
 
   const handleSelectPresetSubject = (subject: typeof selectedPresetSubject) => {
+    if (userRole !== 'admin') return; // Non-admin teachers are restricted to their assigned Mata Pelajaran Ampuan
     setSelectedPresetSubject(subject);
     const presetSubjectMapped = subject === 'PPKN' 
       ? 'Pendidikan Pancasila dan Kewarganegaraan'
@@ -2762,6 +2763,33 @@ export default function App() {
       mataPelajaran: presetSubjectMapped
     }));
   };
+
+  // Enforce Guru Mata Pelajaran lock for Matriks Asesmen & Preset Subject
+  useEffect(() => {
+    if (userRole !== 'admin' && config.mataPelajaran) {
+      const mapel = config.mataPelajaran;
+      if (mapel === 'Pendidikan Pancasila dan Kewarganegaraan') {
+        setSelectedPresetSubject('PPKN');
+      } else if (mapel === 'Sejarah') {
+        setSelectedPresetSubject('Sejarah Tingkat Lanjut');
+      } else if (mapel === 'Produk atau Projek Kreatif dan Kewirausahaan SMK dan MAK') {
+        setSelectedPresetSubject('Produk Kreatif dan Kewirausahaan');
+      } else if ([
+        'Matematika', 'Bahasa Indonesia', 'Bahasa Inggris', 
+        'Matematika Tingkat Lanjut', 'Bahasa Indonesia Tingkat Lanjut', 'Bahasa Inggris Tingkat Lanjut', 
+        'Fisika', 'Kimia', 'Biologi', 'PPKN', 'Ekonomi', 'Geografi', 'Sosiologi', 
+        'Sejarah Tingkat Lanjut', 'Antropologi', 'Bahasa Jepang', 'Produk Kreatif dan Kewirausahaan'
+      ].includes(mapel as any)) {
+        setSelectedPresetSubject(mapel as any);
+      }
+    }
+  }, [userRole, config.mataPelajaran]);
+
+  // Admin User Management CRUD & Edit States
+  const [editingUser, setEditingUser] = useState<any | null>(null);
+  const [userSearchQuery, setUserSearchQuery] = useState<string>('');
+  const [isSavingUserEdit, setIsSavingUserEdit] = useState<boolean>(false);
+  const [isBatchImportingUsers, setIsBatchImportingUsers] = useState<boolean>(false);
   
   // Inline Deletion Confirmation States
   const [deletingKisiId, setDeletingKisiId] = useState<string | null>(null);
@@ -3398,7 +3426,7 @@ export default function App() {
 
     // 1. Prompt Kisi-kisi (Matriks Asesmen)
     const promptKisiText = `Anda adalah ahli kurikulum pendidikan menengah SMA di Indonesia dan spesialis penyusunan Tes Kemampuan Akademik (TKA) berstandar tinggi (HOTS).
-Tugas Anda adalah merancang sebuah MATRIKS ASESMEN / KISI-KISI SOAL yang komprehensif, terstruktur, dan valid untuk mata pelajaran di bawah ini.
+Tugas Anda adalah merancang sebuah MATRIKS ASESMEN / KISI-KISI SOAL yang komprehensif, terstruktur, dan valid untuk mata pelajaran di bawah ini. Jadikan Hasil soal Outpot Format word dan excel.
 
 INFORMASI MATA PELAJARAN & PARAMETER UTAMA:
 - MATA PELAJARAN: ${config.mataPelajaran}
@@ -3449,7 +3477,7 @@ Tuliskan blok kode JSON valid (di dalam format \`\`\`json) yang berisi array of 
 
     // 2. Prompt Pembuat Soal (Megaprompt)
     const promptSoalText = `Anda adalah seorang ahli penyusun soal TKA (Tes Kemampuan Akademik) SMA tingkat nasional dan pakar evaluasi kurikulum pendidikan di Indonesia.
-Tugas Anda adalah merancang butir soal TKA SMA bermutu tinggi, berorientasi HOTS (Higher Order Thinking Skills), valid, dan objektif berdasarkan spesifikasi di bawah ini.
+Tugas Anda adalah merancang ${config.jumlahSoal || 20} butir soal ${getBentukSoalLabel(config.bentukSoal)} berorientasi HOTS (Higher Order Thinking Skills) untuk mata pelajaran ${config.mataPelajaran || 'Sosiologi'} tingkat SMA, ${config.muatan || 'Kelas XII'}. Jadikan Hasil soal Outpot Format word dan excel.
 
 INFORMASI SPESIFIKASI SOAL:
 - MATA PELAJARAN: ${config.mataPelajaran}
@@ -3467,8 +3495,16 @@ PANDUAN PENYUSUNAN SOAL:
 3. **Kualitas Pilihan Pengecoh**: Pilihan jawaban (A s.d ${config.jumlahOpsi === 5 ? 'E' : 'D'}) harus homogen secara tata bahasa, logis, dan ilmiah. Distraktor tidak boleh terlalu mudah ditebak dan harus menuntut siswa untuk berpikir analitis sebelum memilih.
 4. **Kunci & Pembahasan Komprehensif**: Berikan penjelasan analitis langkah-demi-langkah yang ilmiah, objektif, dan logis untuk membuktikan mengapa kunci jawaban tersebut benar dan mengapa opsi lainnya kurang tepat.
 
-SAJIKAN SOAL DALAM FORMAT TEKS TERSTRUKTUR BERIKUT:
-===========================================
+==================================================
+INSTRUKSI FORMAT OUTPUT UTAMA (SIAP DIPINDAHKAN KE MICROSOFT WORD DAN MICROSOFT EXCEL):
+==================================================
+Wajib sajikan hasil pembuatan soal dalam DUA FORMAT OUTPUT LENGKAP berikut agar ketika di-copy dari Gemini, ChatGPT, Claude, dll. hasilnya langsung cocok dan dapat digunakan di MS Word dan MS Excel:
+
+--------------------------------------------------
+BAGIAN 1: FORMAT DOKUMEN MS WORD (NASKAH SOAL TERTULIS)
+--------------------------------------------------
+Sajikan setiap butir soal secara berurutan dengan format naskah dokumen yang rapi, ber-paragraf jelas, dan mudah dipindahkan langsung ke Microsoft Word:
+
 No Soal : [Nomor Soal]
 Kompetensi : [Kompetensi yang diuji]
 Sub Kompetensi : [Sub kompetensi spesifik]
@@ -3487,7 +3523,19 @@ Kunci Jawaban: [Kunci Jawaban yang tepat, misal: A]
 
 Pembahasan:
 [Penjelasan analitis langkah demi langkah secara ilmiah dan terstruktur]
-===========================================`;
+
+--------------------------------------------------
+BAGIAN 2: FORMAT TABEL MS EXCEL (MARKDOWN TABLE DATA TERSTRUKTUR)
+--------------------------------------------------
+Sajikan JUGA seluruh butir soal di atas dalam bentuk TABEL MARKDOWN SINGLE-LINE CELL agar saat pengguna meng-copy tabel ini dan me-paste langsung ke Microsoft Excel atau Google Sheets, data otomatis terbagi secara presisi ke dalam kolom-kolom sel Excel tanpa merusak baris atau tatanan tabel:
+
+| No Soal | Elemen Materi | Sub Elemen | Level Kognitif | Bentuk Soal | Stimulus & Pertanyaan Soal | Opsi A | Opsi B | Opsi C | Opsi D | ${config.jumlahOpsi === 5 ? 'Opsi E | ' : ''}Kunci Jawaban | Pembahasan |
+|---|---|---|---|---|---|---|---|---|---|${config.jumlahOpsi === 5 ? '---|' : ''}---|---|
+| 1 | ... | ... | ... | ... | ... | ... | ... | ... | ... | ${config.jumlahOpsi === 5 ? '... | ' : ''}... | ... |
+
+PERINTAH KHUSUS INTEGRASI WORD & EXCEL:
+1. Pastikan hasil soal ketika di-copy di AI (Gemini, ChatGPT, Claude, dll.) secara utuh memuat Format Word (Bagian 1) dan Format Excel (Bagian 2).
+2. Pada bagian Tabel Excel (Bagian 2), jangan gunakan karakter baris baru (line-break / enter) di dalam sel tabel Markdown agar 1 nomor soal persis menduduki 1 baris sel di Microsoft Excel.`;
 
     setGeneratedKisiPrompt(promptKisiText);
     setGeneratedSoalPrompt(promptSoalText);
@@ -3888,7 +3936,7 @@ Aturan Penyusunan Matriks:
     
     // Generate a beautiful, highly useful default prompt locally first (instant)
     const localPrompt = `Anda adalah seorang ahli penyusun soal TKA (Tes Kemampuan Akademik) SMA tingkat nasional dan pakar evaluasi kurikulum pendidikan di Indonesia.
-Tugas Anda adalah merancang ${item.jumlahSoal || 5} butir soal ${getBentukSoalLabel(item.bentukSoal)} berorientasi HOTS (Higher Order Thinking Skills) untuk mata pelajaran ${config.mataPelajaran || "Umum"} tingkat SMA, Kelas XII.
+Tugas Anda adalah merancang ${item.jumlahSoal || 5} butir soal ${getBentukSoalLabel(item.bentukSoal)} berorientasi HOTS (Higher Order Thinking Skills) untuk mata pelajaran ${config.mataPelajaran || "Umum"} tingkat SMA, Kelas XII. Jadikan Hasil soal Outpot Format word dan excel.
 
 SPESIFIKASI BUTIR SOAL:
 - Mata Pelajaran: ${config.mataPelajaran || "Umum"}
@@ -5748,13 +5796,29 @@ PANDUAN EKSTRA:
               <div className="space-y-4">
                 {/* 1. Mata Pelajaran */}
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                    1. Mata Pelajaran TKA
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1 flex items-center justify-between">
+                    <span>1. Mata Pelajaran TKA</span>
+                    {userRole !== 'admin' && (
+                      <span className="text-[10px] font-extrabold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
+                        <Lock className="h-3 w-3 text-amber-600" /> Mapel Ampuan Guru
+                      </span>
+                    )}
                   </label>
+                  {userRole !== 'admin' && (
+                    <div className="bg-amber-50 border border-amber-200 text-amber-800 p-2.5 rounded-xl text-xs flex items-center gap-2 mb-2">
+                      <Lock className="h-4 w-4 text-amber-600 shrink-0" />
+                      <span>Hak akses Mata Pelajaran Anda dikunci sesuai dengan Mata Pelajaran Ampuan: <b>{config.mataPelajaran || 'Sosiologi'}</b> (Dikonfigurasi oleh Admin).</span>
+                    </div>
+                  )}
                   <select
+                    disabled={userRole !== 'admin'}
                     value={config.mataPelajaran}
                     onChange={(e) => setConfig({ ...config, mataPelajaran: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-sm"
+                    className={`w-full border rounded-xl px-4 py-2.5 text-sm ${
+                      userRole !== 'admin' 
+                        ? 'bg-slate-100 border-slate-200 text-slate-700 cursor-not-allowed font-bold' 
+                        : 'bg-slate-50 border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium'
+                    }`}
                   >
                     <option value="">-- Pilih Mata Pelajaran --</option>
                     <optgroup label="Mata Pelajaran Wajib">
@@ -6294,6 +6358,17 @@ PANDUAN EKSTRA:
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
+                <a
+                  href="https://drive.google.com/drive/folders/16QEOiWYsOqYr6vMkJbRLw3FhkiB6NWSF?usp=sharing"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-sm"
+                  title="Download Template Penulisan Soal dari Google Drive"
+                >
+                  <Download className="h-4.5 w-4.5 text-amber-600" />
+                  <span>Template Penulisan Soal</span>
+                  <ExternalLink className="h-3 w-3 text-amber-500 ml-0.5" />
+                </a>
                 <button
                   onClick={handleDeleteUnusedKisi}
                   className="bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition"
@@ -10307,15 +10382,79 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
             </section>
 
             {/* Right Col: Current Users List */}
-            <section className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl shadow-sm p-6 flex flex-col">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-4">
+            <section className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl shadow-sm p-6 flex flex-col space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
                 <div className="flex items-center gap-2">
                   <Users className="h-5 w-5 text-indigo-600" />
                   <h2 className="text-lg font-bold text-slate-800">Daftar Pengguna Sistem</h2>
                 </div>
-                <span className="bg-indigo-50 text-indigo-700 text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
-                  {usersList.length} Pengguna
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="bg-indigo-50 text-indigo-700 text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">
+                    {usersList.length} Pengguna
+                  </span>
+                  {/* Batch Upload Button */}
+                  <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition">
+                    <Upload className="h-3.5 w-3.5 text-slate-600" />
+                    <span>⚡ Impor CSV/JSON</span>
+                    <input 
+                      type="file" 
+                      accept=".csv,.json"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        setIsBatchImportingUsers(true);
+                        setUserError(null);
+                        setUserSuccess(null);
+                        try {
+                          const text = await file.text();
+                          let count = 0;
+                          if (file.name.endsWith('.json')) {
+                            const data = JSON.parse(text);
+                            const userArray = Array.isArray(data) ? data : [data];
+                            for (const item of userArray) {
+                              if (item.email && item.password) {
+                                await createNewUserByAdmin(item.email, item.password, item.name || 'Guru', item.role || 'user', item.mataPelajaran || 'Sosiologi');
+                                count++;
+                              }
+                            }
+                          } else {
+                            // CSV Parsing
+                            const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
+                            for (let i = 0; i < lines.length; i++) {
+                              const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+                              if (cols.length >= 3) {
+                                // format: name, email, password, role, mataPelajaran
+                                const [name, email, pass, roleVal, mapelVal] = cols;
+                                if (email && email.includes('@') && pass) {
+                                  await createNewUserByAdmin(email, pass, name || 'Guru', (roleVal === 'admin' ? 'admin' : 'user'), mapelVal || 'Sosiologi');
+                                  count++;
+                                }
+                              }
+                            }
+                          }
+                          setUserSuccess(`Berhasil mengimpor batch ${count} akun pengguna!`);
+                        } catch (err: any) {
+                          console.error(err);
+                          setUserError(`Gagal impor batch pengguna: ${err.message}`);
+                        } finally {
+                          setIsBatchImportingUsers(false);
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Search filter input */}
+              <div>
+                <input
+                  type="text"
+                  placeholder="🔍 Cari berdasarkan nama, email, atau mata pelajaran..."
+                  value={userSearchQuery}
+                  onChange={(e) => setUserSearchQuery(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-xl px-3.5 py-2 text-xs text-slate-800"
+                />
               </div>
 
               <div className="overflow-x-auto">
@@ -10325,16 +10464,27 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                       <th className="py-3 px-2">Nama Pengguna</th>
                       <th className="py-3 px-2">Email</th>
                       <th className="py-3 px-2">Role</th>
-                      <th className="py-3 px-2 text-right">Aksi</th>
+                      <th className="py-3 px-2 text-right">Aksi CRUD</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {usersList.map((usr) => (
+                    {usersList
+                      .filter((usr) => {
+                        if (!userSearchQuery) return true;
+                        const q = userSearchQuery.toLowerCase();
+                        return (usr.name || '').toLowerCase().includes(q) ||
+                               (usr.email || '').toLowerCase().includes(q) ||
+                               (usr.mataPelajaran || '').toLowerCase().includes(q);
+                      })
+                      .map((usr) => (
                       <tr key={usr.id} className="hover:bg-slate-50/50 transition">
                         <td className="py-3.5 px-2 font-bold text-slate-800">
                           <div>{usr.name || 'Guru Sosiologi'}</div>
                           {usr.role !== 'admin' && (
-                            <div className="text-[10px] text-indigo-600 font-medium mt-0.5">Mapel: {usr.mataPelajaran || 'Sosiologi'}</div>
+                            <div className="text-[10px] text-indigo-600 font-medium mt-0.5 flex items-center gap-1">
+                              <BookOpen className="h-3 w-3 text-indigo-500 shrink-0" />
+                              <span>Mapel Ampuan: <b>{usr.mataPelajaran || 'Sosiologi'}</b></span>
+                            </div>
                           )}
                         </td>
                         <td className="py-3.5 px-2 text-slate-600">{usr.email}</td>
@@ -10349,27 +10499,45 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                           </span>
                         </td>
                         <td className="py-3.5 px-2 text-right">
-                          <button
-                            disabled={usr.email === currentUser?.email}
-                            onClick={async () => {
-                              if (confirm(`Apakah Anda yakin ingin menghapus akses pengguna ${usr.name || usr.email}?`)) {
-                                try {
-                                  await deleteDoc(doc(db, 'users', usr.id));
-                                } catch (err) {
-                                  console.error("Gagal menghapus pengguna:", err);
-                                  alert("Gagal menghapus pengguna dari database.");
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* Edit Button */}
+                            <button
+                              onClick={() => setEditingUser({
+                                id: usr.id,
+                                name: usr.name || '',
+                                email: usr.email || '',
+                                role: usr.role || 'user',
+                                mataPelajaran: usr.mataPelajaran || 'Sosiologi'
+                              })}
+                              className="p-1.5 rounded-lg border bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border-indigo-200 hover:border-indigo-300 transition"
+                              title="Ubah Nama, Peran & Mapel Ampuan"
+                            >
+                              <Edit className="h-3.5 w-3.5" />
+                            </button>
+
+                            {/* Delete Button */}
+                            <button
+                              disabled={usr.email === currentUser?.email}
+                              onClick={async () => {
+                                if (confirm(`Apakah Anda yakin ingin menghapus akses pengguna ${usr.name || usr.email}?`)) {
+                                  try {
+                                    await deleteDoc(doc(db, 'users', usr.id));
+                                  } catch (err) {
+                                    console.error("Gagal menghapus pengguna:", err);
+                                    alert("Gagal menghapus pengguna dari database.");
+                                  }
                                 }
-                              }
-                            }}
-                            className={`p-1.5 rounded-lg border transition ${
-                              usr.email === currentUser?.email
-                                ? 'opacity-40 cursor-not-allowed bg-slate-100 border-slate-200 text-slate-400'
-                                : 'bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200 hover:border-rose-300'
-                            }`}
-                            title={usr.email === currentUser?.email ? "Anda tidak dapat menghapus akun Anda sendiri" : "Hapus Pengguna"}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                              }}
+                              className={`p-1.5 rounded-lg border transition ${
+                                usr.email === currentUser?.email
+                                  ? 'opacity-40 cursor-not-allowed bg-slate-100 border-slate-200 text-slate-400'
+                                  : 'bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200 hover:border-rose-300'
+                              }`}
+                              title={usr.email === currentUser?.email ? "Anda tidak dapat menghapus akun Anda sendiri" : "Hapus Pengguna"}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -10384,6 +10552,141 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                 </table>
               </div>
             </section>
+
+            {/* Modal Edit User CRUD */}
+            {editingUser && (
+              <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fadeIn">
+                <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden p-6 space-y-5">
+                  <div className="flex justify-between items-center pb-4 border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <Edit className="h-5 w-5 text-indigo-600" />
+                      <h3 className="text-base font-extrabold text-slate-800">Ubah Profil & Mapel Ampuan</h3>
+                    </div>
+                    <button 
+                      onClick={() => setEditingUser(null)}
+                      className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-4 text-xs">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Email Pengguna (Readonly)</label>
+                      <input type="text" disabled value={editingUser.email} className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-500 font-medium cursor-not-allowed" />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Nama Lengkap Guru</label>
+                      <input 
+                        type="text" 
+                        value={editingUser.name} 
+                        onChange={(e) => setEditingUser({ ...editingUser, name: e.target.value })}
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl px-4 py-2.5 text-slate-800 font-bold text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Peran Hak Akses (Role)</label>
+                      <div className="grid grid-cols-2 gap-3 mt-1">
+                        <button
+                          type="button"
+                          onClick={() => setEditingUser({ ...editingUser, role: 'user' })}
+                          className={`py-2 px-3 text-xs font-bold rounded-xl border flex items-center justify-center gap-1.5 transition ${
+                            editingUser.role === 'user'
+                              ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
+                              : 'bg-slate-50 border-slate-200 text-slate-500'
+                          }`}
+                        >
+                          <User className="h-4 w-4" />
+                          Guru Mapel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingUser({ ...editingUser, role: 'admin' })}
+                          className={`py-2 px-3 text-xs font-bold rounded-xl border flex items-center justify-center gap-1.5 transition ${
+                            editingUser.role === 'admin'
+                              ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
+                              : 'bg-slate-50 border-slate-200 text-slate-500'
+                          }`}
+                        >
+                          <Shield className="h-4 w-4" />
+                          Administrator
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">Mata Pelajaran Ampuan</label>
+                      <select
+                        value={editingUser.mataPelajaran || 'Sosiologi'}
+                        onChange={(e) => setEditingUser({ ...editingUser, mataPelajaran: e.target.value })}
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl px-4 py-2.5 text-xs text-slate-800 font-bold"
+                      >
+                        <option value="Sosiologi">👥 Sosiologi</option>
+                        <option value="Matematika">📐 Matematika</option>
+                        <option value="Bahasa Indonesia">🇮🇩 Bahasa Indonesia</option>
+                        <option value="Bahasa Inggris">🇬🇧 Bahasa Inggris</option>
+                        <option value="Matematika Tingkat Lanjut">🚀 Matematika Tingkat Lanjut</option>
+                        <option value="Bahasa Indonesia Tingkat Lanjut">✍️ Bahasa Indonesia Tingkat Lanjut</option>
+                        <option value="Bahasa Inggris Tingkat Lanjut">🗣️ Bahasa Inggris Tingkat Lanjut</option>
+                        <option value="Fisika">⚛️ Fisika</option>
+                        <option value="Kimia">🧪 Kimia</option>
+                        <option value="Biologi">🧬 Biologi</option>
+                        <option value="Pendidikan Pancasila dan Kewarganegaraan">🏛️ Pendidikan Pancasila dan Kewarganegaraan (PPKN)</option>
+                        <option value="Ekonomi">📈 Ekonomi</option>
+                        <option value="Geografi">🗺️ Geografi</option>
+                        <option value="Sejarah">📜 Sejarah</option>
+                        <option value="Antropologi">🗿 Antropologi</option>
+                        <option value="Bahasa Jepang">🇯🇵 Bahasa Jepang</option>
+                        <option value="Produk atau Projek Kreatif dan Kewirausahaan SMK dan MAK">🛠️ Produk / Projek Kreatif dan Kewirausahaan</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => setEditingUser(null)}
+                      className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSavingUserEdit}
+                      onClick={async () => {
+                        setIsSavingUserEdit(true);
+                        try {
+                          await updateDoc(doc(db, 'users', editingUser.id), {
+                            name: editingUser.name,
+                            role: editingUser.role,
+                            mataPelajaran: editingUser.mataPelajaran,
+                            updatedAt: new Date()
+                          });
+                          if (editingUser.id === currentUser?.uid) {
+                            setUserName(editingUser.name);
+                            setUserRole(editingUser.role);
+                            setConfig(prev => ({ ...prev, mataPelajaran: editingUser.mataPelajaran }));
+                          }
+                          setUserSuccess(`Profil dan Mata Pelajaran Ampuan "${editingUser.name}" berhasil diperbarui!`);
+                          setEditingUser(null);
+                        } catch (err: any) {
+                          console.error(err);
+                          alert(`Gagal menyimpan perubahan: ${err.message}`);
+                        } finally {
+                          setIsSavingUserEdit(false);
+                        }
+                      }}
+                      className="px-5 py-2.5 text-xs font-extrabold bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow transition flex items-center gap-1.5"
+                    >
+                      {isSavingUserEdit ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                      <span>Simpan Perubahan</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

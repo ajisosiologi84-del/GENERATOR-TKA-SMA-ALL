@@ -510,7 +510,7 @@ Draf Megaprompt yang Anda buat harus memuat:
 2. Spesifikasi lengkap materi, tingkat kognitif (C1-C6/HOTS), serta integrasi Konteks Nusantara dan Stimulus Tambahan yang spesifik agar bernuansa ke-Indonesia-an yang otentik dan mendalam.
 3. Aturan pembuatan stimulus (kontekstual, studi kasus, riil, atau data ilmiah khas Nusantara).
 4. Aturan pengecoh pilihan ganda yang homogen dan tidak terlalu mudah tereliminasi.
-5. Format keluaran (soal, opsi A-E, kunci jawaban, dan pembahasan mendalam).
+5. Format keluaran (soal, opsi A-E, kunci jawaban, dan pembahasan mendalam). Wajib menyertakan instruksi: "Jadikan Hasil soal Outpot Format word dan excel.".
 6. Teknik melahirkan pertanyaan tingkat tinggi (HOTS) yang memicu daya analisis siswa.
 
 Tulis draf prompt tersebut langsung dalam format Markdown yang elegan, berwibawa, rapi, dan langsung bisa dicopy oleh pengguna. Jangan tambahkan penjelasan pembuka dari Anda sendiri seperti "Berikut adalah prompt yang Anda minta", melainkan langsung mulailah isi prompt tersebut dengan judul atau teks instruksi utama yang siap disalin.`;
