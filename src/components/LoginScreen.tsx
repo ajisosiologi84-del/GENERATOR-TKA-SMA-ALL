@@ -1,22 +1,17 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  updateProfile 
+  signInWithEmailAndPassword 
 } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { 
-  Shield, 
-  User, 
   Lock, 
   Mail, 
   Sparkles, 
   AlertCircle, 
   ArrowRight,
   BookOpen,
-  GraduationCap,
   ShieldCheck,
   Eye,
   EyeOff
@@ -27,21 +22,13 @@ interface LoginScreenProps {
 }
 
 export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
-  const [activeTab, setActiveTab] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [fullName, setFullName] = useState('');
-  const [role, setRole] = useState<'admin' | 'user'>('user');
-  const [adminSecretCode, setAdminSecretCode] = useState('');
   
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-
-  // Check if ?register=true or ?reg=1 or ?setup=admin is in URL to enable self-registration
-  const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
-  const isRegisterParamPresent = params.get('register') === 'true' || params.get('reg') === '1' || params.get('setup') === 'admin';
 
   const handleFetchUserProfileAndCallback = async (uid: string, fallbackEmail: string) => {
     try {
@@ -108,63 +95,9 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         ));
 
       if (isInvalidCred) {
-        setError("Email atau Password yang Anda masukkan salah. Belum punya akun? Silakan klik 'Daftar Baru' untuk membuat akun.");
+        setError("Email atau Password yang Anda masukkan salah. Silakan hubungi Administrator jika Anda belum memiliki akun.");
       } else {
         setError(`Gagal Masuk: ${err.message || err}`);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSignUp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email || !password || !fullName) {
-      setError("Silakan lengkapi seluruh formulir pendaftaran.");
-      return;
-    }
-
-    // Secure Admin Registration verification
-    if (role === 'admin') {
-      const trimmedCode = adminSecretCode.trim();
-      if (trimmedCode !== 'MASTERPRINT-ADMIN' && trimmedCode !== 'TKA-SMA-ADMIN') {
-        setError("Kode Verifikasi Administrator salah atau tidak sah.");
-        return;
-      }
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password);
-      const uid = userCredential.user.uid;
-      
-      // Update Auth Profile
-      await updateProfile(userCredential.user, {
-        displayName: fullName
-      });
-
-      // Save to users collection
-      await setDoc(doc(db, 'users', uid), {
-        uid,
-        email: email.trim(),
-        name: fullName,
-        role: role,
-        createdAt: new Date()
-      });
-
-      setSuccessMsg("Pendaftaran berhasil! Mengalihkan ke Dashboard...");
-      setTimeout(() => {
-        onLoginSuccess(role, fullName);
-      }, 1000);
-    } catch (err: any) {
-      console.error(err);
-      if (err.code === 'auth/email-already-in-use') {
-        setError("Email sudah digunakan.");
-      } else if (err.code === 'auth/weak-password') {
-        setError("Password terlalu lemah (minimal 6 karakter).");
-      } else {
-        setError(`Pendaftaran gagal: ${err.message}`);
       }
     } finally {
       setLoading(false);
@@ -184,7 +117,7 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         transition={{ duration: 0.5 }}
         className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl p-6 relative z-10"
       >
-        {/* TKA SMA Official-Style Header & Emblem Banner (Anti-Plagiarism Original Design) */}
+        {/* TKA SMA Official-Style Header & Emblem Banner */}
         <div className="mb-5 space-y-3 bg-slate-950/80 border border-slate-800 p-4 rounded-2xl text-center relative overflow-hidden shadow-inner">
           {/* Subtle Ambient Glow Effects */}
           <div className="absolute -top-12 -left-12 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
@@ -235,40 +168,6 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           <p className="text-xs text-slate-400 mt-0.5">Sistem Manajemen Kisi-Kisi & Soal TKA SMA berbasis AI</p>
         </div>
 
-        {/* Tab Selector for Sign In / Sign Up */}
-        <div className="flex border border-slate-800 mb-5 bg-slate-950/60 p-1 rounded-2xl">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('signin');
-              setError(null);
-              setSuccessMsg(null);
-            }}
-            className={`flex-1 py-2 px-3 text-center rounded-xl font-bold text-xs transition-all cursor-pointer ${
-              activeTab === 'signin'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Masuk
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('signup');
-              setError(null);
-              setSuccessMsg(null);
-            }}
-            className={`flex-1 py-2 px-3 text-center rounded-xl font-bold text-xs transition-all cursor-pointer ${
-              activeTab === 'signup'
-                ? 'bg-indigo-600 text-white shadow-md'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Daftar Baru
-          </button>
-        </div>
-
         {/* Alert Messages */}
         {error && (
           <motion.div 
@@ -292,226 +191,64 @@ export default function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
           </motion.div>
         )}
 
-        {/* Form Inputs (Conditional by Tab) */}
-        {activeTab === 'signin' ? (
-          <form onSubmit={handleSignIn} className="space-y-4">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Alamat Email</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
-                  <Mail className="h-4 w-4" />
-                </span>
-                <input
-                  type="email"
-                  placeholder="nama@sekolah.sch.id"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
-                  disabled={loading}
-                />
-              </div>
+        {/* Form Inputs (Sign In only) */}
+        <form onSubmit={handleSignIn} className="space-y-4">
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Alamat Email</label>
+            <div className="relative">
+              <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
+                <Mail className="h-4 w-4" />
+              </span>
+              <input
+                type="email"
+                placeholder="nama@sekolah.sch.id"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
+                disabled={loading}
+              />
             </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Password</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
-                  <Lock className="h-4 w-4" />
-                </span>
-                <input
-                  type={showPassword ? "text" : "password"}
-                  placeholder="******"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-10 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
-                  disabled={loading}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition cursor-pointer"
-                  title={showPassword ? "Sembunyikan Password" : "Tampilkan Password"}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4 text-indigo-400" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-
-            {/* Action Button */}
-            <button
-              type="submit"
-              className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-extrabold py-3 px-4 rounded-xl shadow-lg transition-all duration-200 flex items-center justify-center gap-2 text-xs mt-2 disabled:opacity-50 cursor-pointer"
-              disabled={loading}
-            >
-              {loading ? "Memproses..." : "Masuk ke Aplikasi"}
-              {!loading && <ArrowRight className="h-4 w-4" />}
-            </button>
-
-            <div className="text-center pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTab('signup');
-                  setError(null);
-                  setSuccessMsg(null);
-                }}
-                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium transition cursor-pointer"
-              >
-                Belum memiliki akun? <span className="underline font-bold">Daftar Akun Baru di sini</span>
-              </button>
-            </div>
-          </form>
-        ) : (
-          <form onSubmit={handleSignUp} className="space-y-4">
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Nama Lengkap</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
-                  <User className="h-4 w-4" />
-                </span>
-                <input
-                  type="text"
-                  placeholder="Nama Lengkap & Gelar"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
-                  disabled={loading}
-                  required
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Alamat Email</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
-                  <Mail className="h-4 w-4" />
-                </span>
-                <input
-                  type="email"
-                  placeholder="nama@sekolah.sch.id"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
-                  disabled={loading}
-                  required
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Password</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
-                  <Lock className="h-4 w-4" />
-                </span>
-                <input
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Minimal 6 Karakter"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-10 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
-                  disabled={loading}
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition cursor-pointer"
-                  title={showPassword ? "Sembunyikan Password" : "Tampilkan Password"}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4 text-indigo-400" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Peran Pengguna (Role)</label>
-              <div className="grid grid-cols-2 gap-2 mt-1">
-                <button
-                  type="button"
-                  onClick={() => setRole('user')}
-                  className={`py-2 px-3 text-xs font-semibold rounded-xl border transition ${
-                    role === 'user'
-                      ? 'bg-slate-800 border-indigo-500 text-indigo-400'
-                      : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
-                  }`}
-                >
-                  Guru Sosiologi
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRole('admin')}
-                  className={`py-2 px-3 text-xs font-semibold rounded-xl border transition ${
-                    role === 'admin'
-                      ? 'bg-slate-800 border-indigo-500 text-indigo-400'
-                      : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
-                  }`}
-                >
-                  Administrator
-                </button>
-              </div>
-            </div>
-
-            {role === 'admin' && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                className="space-y-1"
-              >
-                <label className="block text-[10px] font-bold text-indigo-400 uppercase tracking-wider">Kode Khusus Verifikasi Admin</label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-indigo-500">
-                    <Shield className="h-4 w-4" />
-                  </span>
-                  <input
-                    type="password"
-                    placeholder="Masukkan Kode Khusus Admin"
-                    value={adminSecretCode}
-                    onChange={(e) => setAdminSecretCode(e.target.value)}
-                    className="w-full bg-slate-950 border border-indigo-950 text-indigo-300 rounded-xl pl-10 pr-4 py-2.5 text-xs placeholder-slate-700 focus:outline-none focus:border-indigo-500 transition font-mono"
-                    disabled={loading}
-                    required
-                  />
-                </div>
-              </motion.div>
-            )}
-
-            {/* Action Button */}
-            <button
-              type="submit"
-              className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-extrabold py-3 px-4 rounded-xl shadow-lg transition-all duration-200 flex items-center justify-center gap-2 text-xs mt-2 disabled:opacity-50 cursor-pointer"
-              disabled={loading}
-            >
-              {loading ? "Mendaftarkan..." : "Selesaikan Pendaftaran"}
-              {!loading && <ArrowRight className="h-4 w-4" />}
-            </button>
-
-            <div className="text-center pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveTab('signin');
-                  setError(null);
-                  setSuccessMsg(null);
-                }}
-                className="text-xs text-indigo-400 hover:text-indigo-300 font-medium transition cursor-pointer"
-              >
-                Sudah memiliki akun? <span className="underline font-bold">Masuk di sini</span>
-              </button>
-            </div>
-          </form>
-        )}
-
-
-
-        {/* Helper text when register query IS used */}
-        {isRegisterParamPresent && (
-          <div className="mt-5 text-center text-[10px] text-slate-400 bg-indigo-950/20 p-3 border border-indigo-900/40 rounded-2xl leading-relaxed">
-            <span className="font-bold text-indigo-400 block mb-1">🔑 Mode Registrasi Aktif (Melalui URL Khusus)</span>
-            Daftarkan akun Admin menggunakan kode verifikasi khusus, atau daftarkan akun Guru langsung dari sini.
           </div>
-        )}
+
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Password</label>
+            <div className="relative">
+              <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
+                <Lock className="h-4 w-4" />
+              </span>
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder="******"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-10 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 transition"
+                disabled={loading}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition cursor-pointer"
+                title={showPassword ? "Sembunyikan Password" : "Tampilkan Password"}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4 text-indigo-400" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+
+          {/* Action Button */}
+          <button
+            type="submit"
+            className="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-extrabold py-3 px-4 rounded-xl shadow-lg transition-all duration-200 flex items-center justify-center gap-2 text-xs mt-2 disabled:opacity-50 cursor-pointer"
+            disabled={loading}
+          >
+            {loading ? "Memproses..." : "Masuk ke Aplikasi"}
+            {!loading && <ArrowRight className="h-4 w-4" />}
+          </button>
+
+          <div className="text-center pt-2 text-[11px] text-slate-500">
+            Penambahan akun pengguna baru hanya dapat dilakukan oleh <span className="text-indigo-400 font-semibold">Administrator</span>.
+          </div>
+        </form>
 
         {/* Pusmendik & Perkaban Regulation Compliance Banner */}
         <div className="mt-5 p-3.5 bg-slate-950/90 border border-slate-800 rounded-2xl text-[10px] text-slate-300 text-center leading-relaxed shadow-sm">
