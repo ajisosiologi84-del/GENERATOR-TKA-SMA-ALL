@@ -45,6 +45,12 @@ export async function createNewUserByAdmin(email: string, pass: string, name: st
     try {
       await deleteApp(secondaryApp);
     } catch (e) {}
+    
+    if (error.code === 'auth/email-already-in-use' || error.message?.includes('email-already-in-use')) {
+      const customErr: any = new Error(`Email '${email}' sudah terdaftar dalam sistem.`);
+      customErr.code = 'auth/email-already-in-use';
+      throw customErr;
+    }
     throw error;
   }
 }

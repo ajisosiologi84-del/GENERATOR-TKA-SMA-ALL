@@ -10255,12 +10255,12 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                   setNewUserMataPelajaran('Sosiologi');
                 } catch (err: any) {
                   console.error(err);
-                  if (err.code === 'auth/email-already-in-use') {
-                    setUserError("Alamat email sudah terdaftar.");
-                  } else if (err.code === 'auth/weak-password') {
+                  if (err.code === 'auth/email-already-in-use' || err.message?.includes('email-already-in-use')) {
+                    setUserError(`Alamat email (${newUserEmail.trim()}) sudah terdaftar dalam sistem.`);
+                  } else if (err.code === 'auth/weak-password' || err.message?.includes('weak-password')) {
                     setUserError("Password terlalu lemah (minimal 6 karakter).");
                   } else {
-                    setUserError(`Gagal membuat akun: ${err.message}`);
+                    setUserError(`Gagal membuat akun: ${err.message || err}`);
                   }
                 } finally {
                   setIsAddingUser(false);
@@ -10409,13 +10409,22 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                         try {
                           const text = await file.text();
                           let count = 0;
+                          let skipped = 0;
                           if (file.name.endsWith('.json')) {
                             const data = JSON.parse(text);
                             const userArray = Array.isArray(data) ? data : [data];
                             for (const item of userArray) {
                               if (item.email && item.password) {
-                                await createNewUserByAdmin(item.email, item.password, item.name || 'Guru', item.role || 'user', item.mataPelajaran || 'Sosiologi');
-                                count++;
+                                try {
+                                  await createNewUserByAdmin(item.email, item.password, item.name || 'Guru', item.role || 'user', item.mataPelajaran || 'Sosiologi');
+                                  count++;
+                                } catch (itemErr: any) {
+                                  if (itemErr.code === 'auth/email-already-in-use' || itemErr.message?.includes('email-already-in-use')) {
+                                    skipped++;
+                                  } else {
+                                    throw itemErr;
+                                  }
+                                }
                               }
                             }
                           } else {
@@ -10424,19 +10433,30 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                             for (let i = 0; i < lines.length; i++) {
                               const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
                               if (cols.length >= 3) {
-                                // format: name, email, password, role, mataPelajaran
                                 const [name, email, pass, roleVal, mapelVal] = cols;
                                 if (email && email.includes('@') && pass) {
-                                  await createNewUserByAdmin(email, pass, name || 'Guru', (roleVal === 'admin' ? 'admin' : 'user'), mapelVal || 'Sosiologi');
-                                  count++;
+                                  try {
+                                    await createNewUserByAdmin(email, pass, name || 'Guru', (roleVal === 'admin' ? 'admin' : 'user'), mapelVal || 'Sosiologi');
+                                    count++;
+                                  } catch (itemErr: any) {
+                                    if (itemErr.code === 'auth/email-already-in-use' || itemErr.message?.includes('email-already-in-use')) {
+                                      skipped++;
+                                    } else {
+                                      throw itemErr;
+                                    }
+                                  }
                                 }
                               }
                             }
                           }
-                          setUserSuccess(`Berhasil mengimpor batch ${count} akun pengguna!`);
+                          if (skipped > 0) {
+                            setUserSuccess(`Mengimpor ${count} akun baru (${skipped} akun dilewati karena email sudah terdaftar).`);
+                          } else {
+                            setUserSuccess(`Berhasil mengimpor batch ${count} akun pengguna!`);
+                          }
                         } catch (err: any) {
                           console.error(err);
-                          setUserError(`Gagal impor batch pengguna: ${err.message}`);
+                          setUserError(`Gagal impor batch pengguna: ${err.message || err}`);
                         } finally {
                           setIsBatchImportingUsers(false);
                         }
