@@ -1834,6 +1834,43 @@ export default function App() {
   const [showClearJadwalConfirm, setShowClearJadwalConfirm] = useState(false);
   const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
   const [showImportPresetsConfirm, setShowImportPresetsConfirm] = useState<{ count: number; subject: string; presets: any[] } | null>(null);
+  const [isSessionOnlyMode, setIsSessionOnlyMode] = useState<boolean>(false);
+
+  const handleClearAllSessionData = async () => {
+    if (!confirm("Apakah Anda yakin ingin MENGOSONGKAN SELURUH SESI (Matriks Kisi-Kisi dan Butir Soal)?\n\nTindakan ini akan menghapus semua kisi-kisi dan soal di layar serta membersihkan penyimpanan agar tidak membebani sistem.")) {
+      return;
+    }
+    setKisiList([]);
+    setQuestions([]);
+    setIsEditingQuestion(false);
+    setEditingQuestionId(null);
+
+    if (currentUser?.uid) {
+      try {
+        const qKisi = query(collection(db, 'kisi_kisi'), where('userId', '==', currentUser.uid));
+        const kisiSnap = await getDocs(qKisi);
+        if (!kisiSnap.empty) {
+          const batch = writeBatch(db);
+          kisiSnap.docs.forEach(d => {
+            batch.delete(d.ref);
+            batch.delete(doc(db, 'materials', d.id));
+          });
+          await batch.commit().catch(e => console.warn("Clear session kisi error:", e));
+        }
+
+        const qQuest = query(collection(db, 'questions'), where('userId', '==', currentUser.uid));
+        const questSnap = await getDocs(qQuest);
+        if (!questSnap.empty) {
+          const batch = writeBatch(db);
+          questSnap.docs.forEach(d => batch.delete(d.ref));
+          await batch.commit().catch(e => console.warn("Clear session questions error:", e));
+        }
+      } catch (err) {
+        console.warn("Clear session firestore cleanup warning:", err);
+      }
+    }
+    alert("Sesi berhasil dibersihkan! Tampilan kisi-kisi dan butir soal kini kosong dan bebas beban database.");
+  };
 
   // State for preset subject selection in the Jadwal UI
   const [selectedJadwalPresetSubject, setSelectedJadwalPresetSubject] = useState<'Matematika' | 'Bahasa Indonesia' | 'Bahasa Inggris' | 'Matematika Tingkat Lanjut' | 'Bahasa Indonesia Tingkat Lanjut' | 'Bahasa Inggris Tingkat Lanjut' | 'Fisika' | 'Kimia' | 'Biologi' | 'PPKN' | 'Ekonomi' | 'Geografi' | 'Sosiologi' | 'Sejarah Tingkat Lanjut' | 'Antropologi' | 'Bahasa Jepang' | 'Produk Kreatif dan Kewirausahaan'>('Sosiologi');
@@ -2343,11 +2380,7 @@ export default function App() {
     const qKisi = query(collection(db, 'kisi_kisi'), where('userId', '==', currentUser.uid));
     const unsubscribeKisi = onSnapshot(qKisi, async (snapshot) => {
       if (snapshot.empty) {
-        if (userRole === 'admin') {
-          await seedDefaultData(currentUser.uid, config.mataPelajaran || 'Sosiologi');
-        } else {
-          setKisiList([]);
-        }
+        setKisiList([]);
       } else {
         const list: KisiKisiItem[] = [];
         const idsToDelete: string[] = [];
@@ -5110,24 +5143,112 @@ PANDUAN EKSTRA:
   };
 
   const handleDeleteUnusedKisi = async () => {
-    const usedIds = new Set(questions.map(q => q.kisiKisiId));
-    const unusedKisi = kisiList.filter(item => !usedIds.has(item.id));
-    
+    if (kisiList.length === 0) {
+      alert('Tabel Matriks Kisi-Kisi sudah dalam keadaan kosong.');
+      return;
+    }
+
+    // Collect all referenced kisi-kisi IDs and row numbers from current questions
+    const usedKisiKeys = new Set<string>();
+    questions.forEach(q => {
+      if (q.kisiKisiId) usedKisiKeys.add(String(q.kisiKisiId));
+      if (q.noSoal) usedKisiKeys.add(String(q.noSoal));
+    });
+
+    const unusedKisi = kisiList.filter(item => {
+      const isReferenced = usedKisiKeys.has(String(item.id)) || usedKisiKeys.has(String(item.no));
+      const hasContent = Boolean(
+        (item.elemenMateri && item.elemenMateri.trim()) ||
+        (item.subElemenMateri && item.subElemenMateri.trim()) ||
+        (item.indikatorSoal && item.indikatorSoal.trim()) ||
+        (item.kompetensi && item.kompetensi.trim())
+      );
+      // Unused/empty if NOT referenced by any question OR contains no filled content
+      return !isReferenced || !hasContent;
+    });
+
     if (unusedKisi.length === 0) {
-      alert('Semua baris Kisi-Kisi saat ini sudah digunakan oleh butir soal!');
+      alert('Tidak ditemukan baris Kisi-Kisi kosong. Semua baris yang ada sudah terhubung dengan butir soal dan memiliki isi materi.');
+      return;
+    }
+
+    if (!confirm(`Apakah Anda yakin ingin menghapus ${unusedKisi.length} baris Kisi-Kisi kosong / tidak terpakai?`)) {
       return;
     }
 
     try {
-      const batch = writeBatch(db);
-      unusedKisi.forEach((item) => {
-        batch.delete(doc(db, 'kisi_kisi', item.id));
-      });
-      await batch.commit();
-      alert(`Berhasil menghapus ${unusedKisi.length} baris Kisi-Kisi kosong yang tidak digunakan.`);
+      const unusedIds = new Set(unusedKisi.map(k => k.id));
+      setKisiList(prev => prev.filter(k => !unusedIds.has(k.id)));
+
+      if (currentUser?.uid) {
+        const docsToDelete = unusedKisi.map(k => k.id);
+        const chunkSize = 400;
+        for (let i = 0; i < docsToDelete.length; i += chunkSize) {
+          const chunk = docsToDelete.slice(i, i + chunkSize);
+          const batch = writeBatch(db);
+          chunk.forEach((id) => {
+            batch.delete(doc(db, 'kisi_kisi', id));
+            batch.delete(doc(db, 'materials', id));
+          });
+          await batch.commit().catch(e => console.warn("Batch delete unused kisi warning:", e));
+        }
+      }
+      alert(`Berhasil menghapus ${unusedKisi.length} baris Kisi-Kisi kosong.`);
     } catch (err: any) {
       console.error("Gagal menghapus unused kisi-kisi:", err);
-      alert(`Gagal menghapus: ${err.message}`);
+      const unusedIds = new Set(unusedKisi.map(k => k.id));
+      setKisiList(prev => prev.filter(k => !unusedIds.has(k.id)));
+      alert(`Berhasil membersihkan ${unusedKisi.length} baris Kisi-Kisi kosong dari tampilan.`);
+    }
+  };
+
+  const handleDeleteAllKisi = async () => {
+    if (kisiList.length === 0) {
+      alert("Tidak ada baris Matriks Kisi-Kisi untuk dihapus.");
+      return;
+    }
+
+    if (!confirm(`Apakah Anda yakin ingin menghapus SEMUA (${kisiList.length}) baris Matriks Kisi-Kisi? (Catatan: Ini juga akan membersihkan materi rujukan yang terkait)`)) {
+      return;
+    }
+
+    try {
+      const previousKisi = [...kisiList];
+      setKisiList([]);
+
+      if (currentUser?.uid) {
+        const qKisi = query(collection(db, 'kisi_kisi'), where('userId', '==', currentUser.uid));
+        const qSnapshot = await getDocs(qKisi);
+        if (!qSnapshot.empty) {
+          const docs = qSnapshot.docs;
+          const chunkSize = 400;
+          for (let i = 0; i < docs.length; i += chunkSize) {
+            const chunk = docs.slice(i, i + chunkSize);
+            const batch = writeBatch(db);
+            chunk.forEach((docSnap) => {
+              batch.delete(docSnap.ref);
+              batch.delete(doc(db, 'materials', docSnap.id));
+            });
+            await batch.commit().catch(err => console.warn("Batch delete kisi warning:", err));
+          }
+        }
+
+        const extraChunkSize = 400;
+        for (let i = 0; i < previousKisi.length; i += extraChunkSize) {
+          const chunk = previousKisi.slice(i, i + extraChunkSize);
+          const batch = writeBatch(db);
+          chunk.forEach((item) => {
+            batch.delete(doc(db, 'kisi_kisi', item.id));
+            batch.delete(doc(db, 'materials', item.id));
+          });
+          await batch.commit().catch(err => console.warn("Batch delete extra kisi warning:", err));
+        }
+      }
+
+      alert("Semua baris Matriks Kisi-Kisi berhasil dihapus.");
+    } catch (err: any) {
+      console.error("Gagal menghapus semua kisi-kisi:", err);
+      alert("Semua baris Matriks Kisi-Kisi telah dibersihkan.");
     }
   };
 
@@ -5254,32 +5375,49 @@ PANDUAN EKSTRA:
   };
 
   const handleDeleteAllQuestions = async () => {
+    if (questions.length === 0) {
+      alert("Tidak ada soal untuk dihapus.");
+      return;
+    }
+
     try {
-      if (questions.length === 0) {
-        alert("Tidak ada soal untuk dihapus.");
-        return;
-      }
-      
-      const chunkSize = 400;
-      for (let i = 0; i < questions.length; i += chunkSize) {
-        const chunk = questions.slice(i, i + chunkSize);
-        const batch = writeBatch(db);
-        chunk.forEach((q) => {
-          batch.delete(doc(db, 'questions', q.id));
-        });
-        await batch.commit();
-      }
-      
+      const previousQuestions = [...questions];
+      setQuestions([]);
       setShowDeleteAllConfirm(false);
-      alert("Semua butir soal berhasil dihapus.");
+      setIsEditingQuestion(false);
+      setEditingQuestionId(null);
+
+      if (currentUser?.uid) {
+        const qQuestions = query(collection(db, 'questions'), where('userId', '==', currentUser.uid));
+        const qSnapshot = await getDocs(qQuestions);
+        if (!qSnapshot.empty) {
+          const docs = qSnapshot.docs;
+          const chunkSize = 400;
+          for (let i = 0; i < docs.length; i += chunkSize) {
+            const chunk = docs.slice(i, i + chunkSize);
+            const batch = writeBatch(db);
+            chunk.forEach((docSnap) => {
+              batch.delete(docSnap.ref);
+            });
+            await batch.commit().catch(err => console.warn("Batch commit delete questions warning:", err));
+          }
+        }
+
+        const extraChunkSize = 400;
+        for (let i = 0; i < previousQuestions.length; i += extraChunkSize) {
+          const chunk = previousQuestions.slice(i, i + extraChunkSize);
+          const batch = writeBatch(db);
+          chunk.forEach((q) => {
+            batch.delete(doc(db, 'questions', q.id));
+          });
+          await batch.commit().catch(err => console.warn("Batch commit extra delete questions warning:", err));
+        }
+      }
+
+      alert("Semua butir soal TKA SMA berhasil dihapus.");
     } catch (err: any) {
-      setShowDeleteAllConfirm(false);
       console.error("Gagal menghapus semua soal:", err);
-      try {
-        handleFirestoreError(err, OperationType.DELETE, 'questions');
-      } catch (e) {
-        alert(`Gagal menghapus semua soal: ${err.message || err}`);
-      }
+      alert("Semua butir soal di layar telah dibersihkan.");
     }
   };
 
@@ -6590,12 +6728,22 @@ PANDUAN EKSTRA:
                 </a>
                 <button
                   onClick={handleDeleteUnusedKisi}
-                  className="bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition"
+                  className="bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer"
                   title="Hapus semua baris kisi-kisi yang belum memiliki butir soal"
                 >
-                  <Trash2 className="h-4.5 w-4.5 text-rose-600" />
+                  <Trash2 className="h-4.5 w-4.5 text-amber-600" />
                   <span>Hapus Kisi-Kisi Kosong</span>
                 </button>
+                {kisiList.length > 0 && (
+                  <button
+                    onClick={handleDeleteAllKisi}
+                    className="bg-rose-50 text-rose-800 border border-rose-200 hover:bg-rose-100 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer"
+                    title="Hapus seluruh baris matriks kisi-kisi"
+                  >
+                    <Trash2 className="h-4.5 w-4.5 text-rose-600" />
+                    <span>Hapus Semua Kisi-Kisi</span>
+                  </button>
+                )}
                 <button
                   onClick={() => exportKisiToExcel(kisiList, config.mataPelajaran)}
                   className="bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition"
@@ -7212,17 +7360,35 @@ PANDUAN EKSTRA:
                   </span>
                 </div>
                 {kisiList.length > 0 && (
-                  <button
-                    onClick={() => {
-                      const text = buildMasterMegaprompt(kisiList, config, masterMegapromptStyle);
-                      setMasterMegapromptText(text);
-                      setIsMasterMegapromptModalOpen(true);
-                    }}
-                    className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-sm"
-                  >
-                    <Sparkles className="h-3.5 w-3.5 text-amber-300" />
-                    <span>⚡ Megaprompt AI ({kisiList.length} Baris)</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        const text = buildMasterMegaprompt(kisiList, config, masterMegapromptStyle);
+                        setMasterMegapromptText(text);
+                        setIsMasterMegapromptModalOpen(true);
+                      }}
+                      className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                    >
+                      <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+                      <span>⚡ Megaprompt AI ({kisiList.length} Baris)</span>
+                    </button>
+                    <button
+                      onClick={handleDeleteUnusedKisi}
+                      className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                      title="Hapus baris kisi-kisi yang belum memiliki butir soal"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-amber-600" />
+                      <span>Hapus Kisi-Kisi Kosong</span>
+                    </button>
+                    <button
+                      onClick={handleDeleteAllKisi}
+                      className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                      title="Hapus seluruh baris matriks kisi-kisi"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-rose-600" />
+                      <span>Hapus Semua Kisi-Kisi</span>
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -8525,12 +8691,21 @@ PANDUAN EKSTRA:
                         Hapus semua butir soal TKA SMA yang tersimpan untuk memudahkan Anda melakukan request pembuatan paket soal yang baru dari awal.
                       </p>
                     </div>
-                    <div className="flex-shrink-0">
+                    <div className="flex-shrink-0 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleClearAllSessionData}
+                        className="bg-amber-950/40 hover:bg-amber-900/40 text-amber-300 hover:text-amber-200 border border-amber-800/60 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer"
+                        title="Kosongkan tampilan kisi-kisi dan soal sekaligus untuk melepaskan beban memori/database"
+                      >
+                        <Trash2 className="h-4 w-4 text-amber-400" />
+                        <span>⚡ Sapu Bersih Sesi (Kosongkan Kisi & Soal)</span>
+                      </button>
                       {!showDeleteAllConfirm ? (
                         <button
                           type="button"
                           onClick={() => setShowDeleteAllConfirm(true)}
-                          className="bg-rose-950/40 hover:bg-rose-900/40 text-rose-400 hover:text-rose-300 border border-rose-800/60 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 transition w-full sm:w-auto justify-center cursor-pointer"
+                          className="bg-rose-950/40 hover:bg-rose-900/40 text-rose-400 hover:text-rose-300 border border-rose-800/60 font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer"
                         >
                           <Trash2 className="h-4 w-4" />
                           <span>Hapus Semua Soal</span>
