@@ -4381,12 +4381,15 @@ SPESIFIKASI BUTIR SOAL:
 - Sub-materi (Sub-elemen) / Indikator Soal: ${item.subElemenMateri || '-'}
 - Level Kognitif: ${getLevelKognitifLabel(item.levelKognitif)} (${item.levelKognitif})
 - Bentuk Soal: ${getBentukSoalLabel(item.bentukSoal)}
+${item.konteksNusantara ? `- Konteks Nusantara: ${item.konteksNusantara}` : ''}
+${item.stimulusTambahan ? `- Stimulus Tambahan: ${item.stimulusTambahan}` : ''}
+${item.batasanCatatan ? `- Catatan Khusus: ${item.batasanCatatan}` : ''}
 
 PANDUAN PENYUSUNAN SOAL:
 1. **Analisis HOTS (C4-C6)**: Pertanyaan harus mengukur kemampuan menganalisis, mengevaluasi, atau merancang/berpikir kritis siswa, bukan hafalan tekstual.
-2. **Kekuatan Stimulus**: Wajib menyertakan stimulus kontekstual yang kaya data, kutipan studi kasus, grafik, atau skenario kehidupan nyata di Indonesia.
-3. **Pengecoh Homogen & Ilmiah**: Seluruh pilihan jawaban (opsi) harus homogen secara sintaksis, setara panjangnya, logis, dan menantang siswa untuk mengeliminasi distraktor secara analitis.
-4. **Pembahasan Ilmiah**: Sertakan pembahasan langkah demi langkah yang logis, mendalam, serta membuktikan kebenaran kunci jawaban.
+2. **PENGGABUNGAN STIMULUS DAN PERTANYAAN (MANDATORI)**: Wajib menyajikan stimulus (paragraf/data/tabel/studi kasus) dan pertanyaan utama secara langsung menyatu di dalam satu bagian 'Soal:'. JANGAN memisahkan field stimulus dan soal, dan JANGAN mencantumkan nomor soal (misal '1.', 'Soal 1.') di dalam teks soal.
+3. **Pengecoh Homogen & Ilmiah**: Seluruh pilihan jawaban (opsi) harus homogen secara sintaksis, setara panjangnya, logis, dan menantang siswa untuk mengeliminasi distraktor secara analitis. Setiap pilihan jawaban WAJIB diawali dengan huruf label A, B, C, D, E dan titik, contoh: A. ..., B. ..., C. ..., D. ..., E. ...
+4. **Pembahasan Ilmiah**: Sertakan pembahasan langkah demi langkah yang logis, mendalam, tanpa tanda asteris (*), serta membuktikan kebenaran kunci jawaban.
 
 Sajikan output Anda dengan format teks terstruktur yang rapi seperti di bawah ini:
 
@@ -4397,7 +4400,7 @@ Sub Kompetensi : [Sub kompetensi spesifik]
 Bentuk Soal : [Jenis bentuk soal]
 
 Soal (Menggabungkan Stimulus dan Pertanyaan Utama):
-[Paragraf stimulus, data/tabel, atau situasi kontekstual, diikuti langsung dengan pertanyaan utama atau instruksi pengerjaan secara menyatu dalam satu kesatuan teks]
+[Tuliskan paragraf stimulus, data/tabel, atau situasi kontekstual, lalu diikuti langsung dengan pertanyaan utama atau instruksi pengerjaan secara menyatu dalam satu kesatuan teks soal tanpa dipisah]
 
 Pilihan Jawaban:
 A. [Pilihan A]
@@ -4424,7 +4427,14 @@ Pembahasan:
       if (aiConfig.mode === 'client') {
         const systemInstruction = `Anda adalah pakar prompt engineering pendidikan.`;
         const prompt = `Anda adalah seorang ahli instruktur prompt (prompt engineer) yang berpengalaman membuat instruktur sistem tingkat lanjut (system instructions) dan prompt untuk AI LLM generasi terbaru.
-Tugas Anda adalah memformulasikan prompt instruksi spesifik dan sangat mendalam (Super-Prompt) untuk menghasilkan butir-butir soal berkualitas tinggi (HOTS), lengkap dengan stimulus bacaan/tabel, opsi jawaban, kunci jawaban yang tepat, dan pembahasan terperinci.
+Tugas Anda adalah memformulasikan prompt instruksi spesifik dan sangat mendalam (Super-Prompt) untuk menghasilkan butir-butir soal berkualitas tinggi (HOTS) berdasarkan kisi-kisi berikut.
+
+ATURAN MANDATORI FORMAT OUTPUT:
+1. Wajib menginstruksikan AI untuk MENGGABUNGKAN stimulus (paragraf/data/tabel/studi kasus) dan pertanyaan utama secara langsung menyatu di dalam satu bagian 'Soal:', tanpa dipisah menjadi section/field stimulus tersendiri.
+2. JANGAN mencantumkan nomor soal (seperti '1.', 'Soal 1.') di dalam teks soal.
+3. Setiap pilihan jawaban WAJIB diawali huruf A, B, C, D, E dan titik (misal 'A. ...').
+4. Hilangkan semua tanda bintang/asteris (*) dari teks soal, pilihan jawaban, dan pembahasan.
+5. Instruksikan agar hasil soal disajikan dalam format Word dan Excel.
 
 Masukan Parameter Kisi-Kisi:
 - Mata Pelajaran: ${config.mataPelajaran}
