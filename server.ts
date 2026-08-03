@@ -67,8 +67,9 @@ async function generateContentWithFallbackAndRetry(
     contents: any;
     config?: any;
     apiKeysRaw?: string;
+    temperature?: number;
   }
-): Promise<any> {
+): Promise<{ response: any; meta: { keyIndex: number; totalKeys: number; rotated: boolean } }> {
   const keysToTry = parseApiKeys(params.apiKeysRaw);
   if (keysToTry.length === 0) {
     throw new Error(
@@ -76,14 +77,16 @@ async function generateContentWithFallbackAndRetry(
     );
   }
 
-  // Ordered by preferred + high availability across independent quota buckets
-  const modelsToTry = [
+  // Preferred models with auto fallback
+  const preferredModel = params.config?.model || "gemini-2.0-flash";
+  const allModels = [
     "gemini-2.0-flash",
     "gemini-2.5-pro",
     "gemini-1.5-flash",
     "gemini-1.5-pro",
     "gemini-2.0-flash-lite"
   ];
+  const modelsToTry = [preferredModel, ...allModels.filter(m => m !== preferredModel)];
 
   const now = Date.now();
   // Filter active models not in active cool-off
@@ -92,7 +95,6 @@ async function generateContentWithFallbackAndRetry(
     return !lastFail || (now - lastFail > COOL_OFF_DURATION);
   });
   
-  // If all models are in cool-off, reset cool-off so we don't lock out forever
   if (activeModels.length === 0) {
     coolOffModels.clear();
     activeModels = [...modelsToTry];
@@ -123,10 +125,15 @@ async function generateContentWithFallbackAndRetry(
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           let timeoutId: any;
+          const mergedConfig = {
+            ...params.config,
+            temperature: params.temperature ?? params.config?.temperature ?? 0.7
+          };
+
           const apiCall = ai.models.generateContent({
             model,
             contents: params.contents,
-            config: params.config,
+            config: mergedConfig,
           });
 
           const timeoutPromise = new Promise<never>((_, reject) => {
@@ -135,7 +142,14 @@ async function generateContentWithFallbackAndRetry(
 
           try {
             const response = await Promise.race([apiCall, timeoutPromise]);
-            return response;
+            return {
+              response,
+              meta: {
+                keyIndex: keyIdx,
+                totalKeys: keysToTry.length,
+                rotated: keyIdx > 0
+              }
+            };
           } finally {
             if (timeoutId) clearTimeout(timeoutId);
           }
@@ -153,7 +167,7 @@ async function generateContentWithFallbackAndRetry(
           if (isNotFound) {
             console.warn(`Model ${model} not found/deprecated. Skipping...`);
             coolOffModels.set(model, Date.now() + 86400000); // 24 hours cool-off
-            break; // Move to next model immediately
+            break; // Move to next model
           }
 
           const isQuotaOrDemandError = 
@@ -167,16 +181,24 @@ async function generateContentWithFallbackAndRetry(
 
           if (isQuotaOrDemandError) {
             coolOffModels.set(model, Date.now());
-            // Try next model for current key since each model has its own quota pool
             break;
           }
-          break; // Move to next model if other error
+          break;
         }
       }
     }
   }
 
   throw lastError || new Error("Gagal memproses AI setelah merotasi seluruh API Key dan model.");
+}
+
+// Helper to attach rotation header metadata to response
+function attachRotationHeader(res: express.Response, meta?: { keyIndex: number; totalKeys: number; rotated: boolean }) {
+  if (meta) {
+    res.setHeader('x-api-key-index', String(meta.keyIndex));
+    res.setHeader('x-api-keys-total', String(meta.totalKeys));
+    res.setHeader('x-api-key-rotated', meta.rotated ? 'true' : 'false');
+  }
 }
 
 // API Routes
@@ -224,7 +246,7 @@ Aturan Penyusunan Matriks:
 4. Distribusikan jumlah soal per kisi-kisi (misalnya antara 3-10 soal per baris).
 5. Hasilkan juga 'konteksNusantara' (rencana integrasi konteks lokal Nusantara/Indonesia yang spesifik dan relevan dengan materi ini, misal adat daerah, keragaman etnis, geografi kepulauan, sejarah lokal, dsb) serta 'stimulusTambahan' (rencana bentuk stimulus seperti teks bacaan, studi kasus riil, berita, data tabel, atau peristiwa konkret khas Indonesia) untuk meningkatkan kualitas stimulus soal.`;
 
-    const response = await generateContentWithFallbackAndRetry({
+    const result = await generateContentWithFallbackAndRetry({
       contents: prompt,
       apiKeysRaw,
       config: {
@@ -267,7 +289,8 @@ Aturan Penyusunan Matriks:
       }
     });
 
-    const resultText = response.text || "[]";
+    attachRotationHeader(res, result.meta);
+    const resultText = result.response.text || "[]";
     const parsed = JSON.parse(resultText);
     res.json(parsed);
   } catch (error: any) {
@@ -383,9 +406,11 @@ PANDUAN EKSTRA:
 5. JIKA soal membutuhkan visual pendukung (seperti grafik fungsi, diagram kartesius, bangun geometri, siklus biologi, diagram sirkuit, kurva ekonomi, dsb.), Anda disarankan untuk membuat kode SVG inline yang valid (dimulai dengan '<svg' and ditutup '</svg>' lengkap dengan viewBox, stroke, fill, teks label agar indah dan responsive) ATAU mencantumkan URL gambar Unsplash yang relevan pada field 'gambarUrl'. Jika tidak membutuhkan visual, isi 'gambarUrl' dengan string kosong "".
 6. Harap sesuaikan bahasa agar baku, formal, sesuai EBI (Ejaan Bahasa Indonesia), namun mudah dimengerti.
 7. Hasilkan tepat ${countRequired} objek soal di dalam array hasil.
-8. SANGAT PENTING (MANDATORI): Gabungkan paragraf stimulus/pengantar/studi kasus (bila ada) langsung ke bagian awal field 'soal' (diikuti pertanyaan utama di bawahnya), dan kosongkan field 'stimulus' (isi dengan string kosong ""). Jangan memisahkannya agar struktur soal konsisten dengan prompt.`;
+8. SANGAT PENTING (MANDATORI): Gabungkan paragraf stimulus/pengantar/studi kasus (bila ada) langsung ke bagian awal field 'soal' (diikuti pertanyaan utama di bawahnya), dan kosongkan field 'stimulus' (isi dengan string kosong ""). Jangan memisahkannya agar struktur soal konsisten dengan prompt.
+9. SANGAT PENTING: JANGAN mencantumkan nomor soal (seperti '1.', 'Soal 1.', 'No. 1') di dalam teks field 'soal'. Tulis langsung isi stimulus dan pertanyaan utama.
+10. SANGAT PENTING: Setiap pilihan jawaban di dalam array 'opsi' WAJIB diawali dengan huruf label pilihan dan titik, contoh: ['A. ...', 'B. ...', 'C. ...', 'D. ...', 'E. ...'].`;
 
-    const response = await generateContentWithFallbackAndRetry({
+    const result = await generateContentWithFallbackAndRetry({
       contents: prompt,
       apiKeysRaw,
       config: {
@@ -417,8 +442,33 @@ PANDUAN EKSTRA:
       }
     });
 
-    const resultText = response.text || "[]";
-    const parsed = JSON.parse(resultText);
+    attachRotationHeader(res, result.meta);
+    const resultText = result.response.text || "[]";
+    let parsed = JSON.parse(resultText);
+
+    if (Array.isArray(parsed)) {
+      parsed = parsed.map((q: any) => {
+        let cleanSoal = typeof q.soal === 'string' ? q.soal.trim() : '';
+        cleanSoal = cleanSoal.replace(/^(soal\s*)?(no\.?\s*)?\d+[\.\)\:\-]\s*/i, '').trim();
+
+        let cleanOpsi = Array.isArray(q.opsi) ? q.opsi : [];
+        cleanOpsi = cleanOpsi.map((opt: string, idx: number) => {
+          let text = String(opt || '').trim();
+          text = text.replace(/^\*\*([^*]+)\*\*/, '$1').trim();
+          text = text.replace(/^[\*\-\•\s]*\(?([A-Ea-e1-5])\)?[\.\)\:\-]\s*/, '').trim();
+          text = text.replace(/^[A-Ea-e]\s+/, '').trim();
+          const letter = String.fromCharCode(65 + idx);
+          return `${letter}. ${text}`;
+        });
+
+        return {
+          ...q,
+          soal: cleanSoal,
+          opsi: cleanOpsi
+        };
+      });
+    }
+
     res.json(parsed);
   } catch (error: any) {
     console.error("Error generating soal:", error);
@@ -437,18 +487,7 @@ apiRouter.post("/generate-illustration", async (req, res) => {
 
     const apiKeysRaw = (req.headers['x-api-key'] as string) || req.body.apiKey || undefined;
     const systemInstruction = `Anda adalah desainer grafis dan ahli ilustrasi ilmiah/edukatif profesional untuk soal ujian SMA.
-Tugas Anda adalah menghasilkan kode inline SVG (<svg> ... </svg>) yang valid, indah, bersih, modern, dan sangat responsif untuk mendukung pemahaman soal ujian.
-
-Ketentuan pembuatan SVG:
-1. Hasilkan HANYA kode SVG mentah tanpa penjelasan, tanpa teks pengantar, tanpa markdown, dan tanpa pembungkus backticks (jangan gunakan \`\`\`xml atau \`\`\`svg). Mulai langsung dengan '<svg' dan akhiri dengan '</svg>'.
-2. Buat desain yang modern, estetis, dan profesional:
-   - Gunakan palet warna modern yang bersih dan kontras tinggi (misalnya Indigo, Emerald, Violet, Amber, Slate, Rose, Sky).
-   - Gunakan garis stroke tebal dan jelas (misal stroke-width="2"), marker panah yang rapi, dan grid yang presisi.
-   - Tambahkan teks label, sumbu koordinat, keterangan, atau rumus dengan font-family="system-ui, -apple-system, sans-serif" agar serasi dengan antarmuka web modern dan mudah dibaca (font-size minimal 11px-12px, font-weight bold jika penting).
-   - Atur viewBox secara proporsional agar responsive (misal viewBox="0 0 500 280"). Gunakan background warna netral atau transparan, tapi berikan padding yang cukup agar elemen tidak mepet ke tepi.
-   - Pastikan teks label tidak terpotong dan koordinat teks diletakkan dengan presisi di sebelah objek/garis/titik yang dirujuk.
-3. Konten visual harus merepresentasikan permintaan pengguna dengan sangat akurat secara ilmiah/matematis (misalnya: jika diminta grafik parabola kuadrat, gambar kurva mulus berbentuk parabola yang memotong sumbu dengan benar; jika diminta rangkaian listrik, gambarkan simbol resistor/baterai/saklar standar dengan label nilai hambatannya).
-4. Gambar harus bersifat mandiri (self-contained), murni berbasis elemen vektor SVG (<rect>, <circle>, <path>, <text>, <line>, <g>, dll.), tidak bergantung pada file eksternal.`;
+Tugas Anda adalah menghasilkan kode inline SVG (<svg> ... </svg>) yang valid, indah, bersih, modern, dan sangat responsif untuk mendukung pemahaman soal ujian.`;
 
     const userPrompt = `Buatlah kode SVG inline yang merepresentasikan ilustrasi berikut:
 Permintaan Pengguna: "${prompt}"
@@ -456,7 +495,7 @@ ${context ? `Konteks Soal yang berkaitan: "${context}"` : ""}
 
 Ingat, hanya hasilkan kode SVG langsung tanpa penanda kode atau pembungkus markdown apapun. Dimulai dari '<svg' sampai '</svg>'.`;
 
-    const response = await generateContentWithFallbackAndRetry({
+    const result = await generateContentWithFallbackAndRetry({
       contents: userPrompt,
       apiKeysRaw,
       config: {
@@ -465,8 +504,8 @@ Ingat, hanya hasilkan kode SVG langsung tanpa penanda kode atau pembungkus markd
       },
     });
 
-    let svgCode = response.text || "";
-    // Clean up potential markdown code block wrappers if any slips through
+    attachRotationHeader(res, result.meta);
+    let svgCode = result.response.text || "";
     svgCode = svgCode.trim();
     if (svgCode.startsWith("```")) {
       svgCode = svgCode.replace(/^```[a-zA-Z]*\n/, "").replace(/\n```$/, "").trim();
@@ -477,6 +516,46 @@ Ingat, hanya hasilkan kode SVG langsung tanpa penanda kode atau pembungkus markd
     console.error("Error generating illustration:", error);
     const formatted = formatServerAiError(error);
     res.status(formatted.statusCode).json({ error: formatted.message });
+  }
+});
+
+// Endpoint 4: Test Health and Validity of Multiple API Keys
+apiRouter.post("/test-key-health", async (req, res) => {
+  try {
+    const apiKeysRaw = (req.headers['x-api-key'] as string) || req.body.apiKey || undefined;
+    const keys = parseApiKeys(apiKeysRaw);
+
+    if (keys.length === 0) {
+      return res.status(400).json({ error: "Tidak ada API Key yang diberikan." });
+    }
+
+    const results = [];
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const snippet = key.substring(0, 7) + "..." + key.substring(key.length - 4);
+      try {
+        const ai = new GoogleGenAI({ apiKey: key });
+        await ai.models.generateContent({
+          model: "gemini-2.0-flash",
+          contents: "Ping",
+          config: { maxOutputTokens: 5 }
+        });
+        results.push({ keyIndex: i, snippet, status: "valid", message: "API Key Aktif & Normal" });
+      } catch (err: any) {
+        const errMsg = err?.message || String(err);
+        const isQuota = /quota|limit|429|exhausted|503/i.test(errMsg);
+        results.push({ 
+          keyIndex: i, 
+          snippet, 
+          status: isQuota ? "exhausted" : "invalid", 
+          message: isQuota ? "Limit Kuota Terlampaui (429)" : "Key Tidak Valid / Error"
+        });
+      }
+    }
+
+    res.json({ totalKeys: keys.length, results });
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message || "Gagal menguji kesehatan API Key" });
   }
 });
 
@@ -516,7 +595,7 @@ Draf Megaprompt yang Anda buat harus memuat:
 
 Tulis draf prompt tersebut langsung dalam format Markdown yang elegan, berwibawa, rapi, dan langsung bisa dicopy oleh pengguna. Jangan tambahkan penjelasan pembuka dari Anda sendiri seperti "Berikut adalah prompt yang Anda minta", melainkan langsung mulailah isi prompt tersebut dengan judul atau teks instruksi utama yang siap disalin.`;
 
-    const response = await generateContentWithFallbackAndRetry({
+    const { response, meta } = await generateContentWithFallbackAndRetry({
       contents: userPrompt,
       apiKeysRaw,
       config: {
@@ -525,6 +604,7 @@ Tulis draf prompt tersebut langsung dalam format Markdown yang elegan, berwibawa
       },
     });
 
+    attachRotationHeader(res, meta);
     const optimizedPrompt = response.text || "";
     res.json({ prompt: optimizedPrompt });
   } catch (error: any) {
@@ -607,7 +687,7 @@ Batasan & Catatan Kurikulum: ${kisi.batasanCatatan || "Tidak ada batasan khusus"
 Sediakan di dalam prompt tersebut uraian materi yang sangat kaya, komprehensif, dan detail terkait topik ini (termasuk definisi tokoh, teori, dimensi sosiologis/ilmiah, serta studi kasus nyata sosiologis/kontekstual Indonesia yang sedang hangat) agar konten presentasi/infografisnya memiliki bobot akademis tinggi dan tidak superfisial. Sajikan langsung dalam bentuk MEGA-PROMPT utuh siap salin dalam format Markdown lengkap tanpa teks pengantar atau penutup dari Anda.`;
     }
 
-    const response = await generateContentWithFallbackAndRetry({
+    const { response, meta } = await generateContentWithFallbackAndRetry({
       contents: userPrompt,
       apiKeysRaw,
       config: {
@@ -616,6 +696,7 @@ Sediakan di dalam prompt tersebut uraian materi yang sangat kaya, komprehensif, 
       },
     });
 
+    attachRotationHeader(res, meta);
     const materi = response.text || "";
     res.json({ materi });
   } catch (error: any) {

@@ -103,6 +103,33 @@ enum OperationType {
   WRITE = 'write',
 }
 
+// Helper to clean question text from duplicate numbering prefixes and markdown asterisks
+export function cleanSoalText(soalStr: string): string {
+  if (!soalStr) return '';
+  let text = soalStr.trim();
+  text = text.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1').replace(/\*/g, '').trim();
+  text = text.replace(/^\[?\s*(soal|no\.?\s*soal|butir\s*soal)?\s*[\#\d]+\]?\s*[\.\)\:\-]\s*/i, '').trim();
+  text = text.replace(/^(soal\s*)?(no\.?\s*)?\d+[\.\)\:\-]\s*/i, '').trim();
+  return text;
+}
+
+// Helper to clean option text from any option letter/number prefix and markdown asterisks
+export function cleanOptionText(optStr: string): string {
+  if (!optStr) return '';
+  let text = optStr.trim();
+  text = text.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1').replace(/\*/g, '').trim();
+  text = text.replace(/^[\-\•\s]*\(?([A-Ea-e1-5])\)?[\.\)\:\-]\s*/, '').trim();
+  text = text.replace(/^[A-Ea-e]\s+/, '').trim();
+  return text;
+}
+
+// Helper to format an option string with a clean canonical prefix "A. ", "B. ", etc.
+export function formatOptionString(optStr: string, index: number): string {
+  const letter = String.fromCharCode(65 + index);
+  const clean = cleanOptionText(optStr);
+  return `${letter}. ${clean}`;
+}
+
 interface FirestoreErrorInfo {
   error: string;
   operationType: OperationType;
@@ -2628,13 +2655,100 @@ export default function App() {
       mode: savedMode as 'server' | 'client' | 'n8n',
       apiKey: savedKey,
       model: savedModel,
-      n8nWebhookUrl: savedN8nUrl
+      n8nWebhookUrl: savedN8nUrl,
+      temperature: parseFloat(localStorage.getItem('gemini_api_temperature') || '0.7'),
+      requestDelayMs: parseInt(localStorage.getItem('gemini_api_delay') || '0', 10)
     };
   });
   const [showApiKey, setShowApiKey] = useState(false);
   const [showApiKeySaved, setShowApiKeySaved] = useState(false);
   const [testingN8n, setTestingN8n] = useState(false);
   const [n8nTestStatus, setN8nTestStatus] = useState<{ success: boolean; message: string } | null>(null);
+
+  // States for API Key Health Check, Rotation Animations, and Quota Alerts
+  const [apiKeyToast, setApiKeyToast] = useState<{
+    id: string;
+    type: 'rotation' | 'quota_exhausted' | 'health_check';
+    title: string;
+    message: string;
+    keyIndex?: number;
+    totalKeys?: number;
+  } | null>(null);
+
+  const [apiKeyHealthList, setApiKeyHealthList] = useState<Array<{
+    keyIndex: number;
+    snippet: string;
+    status: 'valid' | 'exhausted' | 'invalid' | 'testing';
+    message: string;
+  }>>([]);
+  const [testingKeyHealth, setTestingKeyHealth] = useState(false);
+
+  // Helper triggers for API Key Rotation Toast / Quota Exhaustion Alerts
+  const triggerApiKeyRotationToast = (fromIdx: number, toIdx: number, totalKeys: number) => {
+    setApiKeyToast({
+      id: `rotation-${Date.now()}`,
+      type: 'rotation',
+      title: '🔄 Rotasi Otomatis Kunci API Gemini',
+      message: `Kunci API #${fromIdx + 1} mengalami limit kuota/rate limit. Sistem otomatis berpindah ke Kunci API #${toIdx + 1} dari total ${totalKeys} kunci tanpa menghentikan pembuatan soal.`,
+      keyIndex: toIdx + 1,
+      totalKeys
+    });
+
+    // Auto dismiss rotation toast after 7 seconds
+    setTimeout(() => {
+      setApiKeyToast(prev => (prev?.type === 'rotation' ? null : prev));
+    }, 7000);
+  };
+
+  const triggerApiKeyQuotaExhaustedToast = (customMessage?: string) => {
+    const totalKeys = (aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5).length || 1;
+    setApiKeyToast({
+      id: `quota-${Date.now()}`,
+      type: 'quota_exhausted',
+      title: '⚠️ Kuota Kunci API Habis (Error 429)',
+      message: customMessage || `Seluruh ${totalKeys} Kunci API Gemini Anda telah mencapai batas kuota harian/menit. Silakan tambahkan Kunci API baru atau beralih ke N8N Sumopod Webhook.`
+    });
+  };
+
+  const handleTestApiKeyHealth = async () => {
+    const keys = (aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5);
+    if (keys.length === 0) {
+      alert("Masukkan minimal satu Kunci API Gemini terlebih dahulu di Langkah 1.");
+      return;
+    }
+
+    setTestingKeyHealth(true);
+    try {
+      const res = await fetch('/api/test-key-health', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': getCleanApiKey(aiConfig.apiKey)
+        },
+        body: JSON.stringify({ apiKey: aiConfig.apiKey })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setApiKeyHealthList(data.results || []);
+        const validCount = (data.results || []).filter((r: any) => r.status === 'valid').length;
+        setApiKeyToast({
+          id: `health-${Date.now()}`,
+          type: 'health_check',
+          title: '✅ Hasil Uji Kesehatan Kunci API',
+          message: `${validCount} dari ${keys.length} Kunci API aktif dan siap digunakan untuk rotasi otomatis.`
+        });
+        setTimeout(() => setApiKeyToast(prev => prev?.type === 'health_check' ? null : prev), 5000);
+      } else {
+        const errText = await res.text();
+        alert(`Gagal menguji kesehatan key: ${errText}`);
+      }
+    } catch (err: any) {
+      alert(`Terjadi kesalahan saat menguji kesehatan key: ${err.message}`);
+    } finally {
+      setTestingKeyHealth(false);
+    }
+  };
 
   const handleSetAiMode = (mode: 'server' | 'client' | 'n8n') => {
     setAiConfig(prev => ({ ...prev, mode }));
@@ -2714,10 +2828,19 @@ export default function App() {
 
     let lastError: any = null;
 
+    // Apply configured request delay (throttling) if set
+    if (aiConfig.requestDelayMs && aiConfig.requestDelayMs > 0) {
+      await new Promise(r => setTimeout(r, aiConfig.requestDelayMs));
+    }
+
     // API Key Rotation Loop across all user-provided keys
     for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx++) {
       const apiKey = apiKeys[keyIdx];
       console.log(`[Client API Key Rotation] Trying Key #${keyIdx + 1} of ${apiKeys.length}...`);
+
+      if (keyIdx > 0) {
+        triggerApiKeyRotationToast(keyIdx - 1, keyIdx, apiKeys.length);
+      }
 
       for (const model of modelsToTry) {
         try {
@@ -2730,7 +2853,7 @@ export default function App() {
               }
             ],
             generationConfig: {
-              temperature: 0.7,
+              temperature: aiConfig.temperature || 0.7,
             }
           };
 
@@ -2792,6 +2915,7 @@ export default function App() {
 
     const errorString = typeof lastError === 'string' ? lastError : (lastError?.message || JSON.stringify(lastError) || '');
     if (/quota|limit|429|exhausted|503|demand|unavailable/i.test(errorString)) {
+      triggerApiKeyQuotaExhaustedToast('Seluruh Kunci API Direct Client Anda telah mencapai batas kuota (Error 429).');
       throw new Error(`⚠️ Kuota API Gemini Direct (Client) Telah Terlampaui (Error 429 Exceeded Quota).
 
 💡 SOLUSI CARA MENGATASINYA:
@@ -4357,7 +4481,8 @@ Hasilkan rancangan prompt instruksi lengkap, terstruktur, profesional, dan dalam
 
     setIsGeneratingSoal(true);
     const totalToGenerate = kisi.jumlahSoal || 1;
-    let currentNoSoal = questions.length + 1;
+    const existingMaxNo = questions.reduce((max, q) => Math.max(max, Number(q.noSoal) || 0), 0);
+    let currentNoSoal = existingMaxNo + 1;
     const allExistingSoalTexts = questions.map(q => q.soal);
 
     setSoalProgress({
@@ -4400,6 +4525,11 @@ INFORMASI MATRIKS:
 - Stimulus Tambahan: ${kisi.stimulusTambahan || "Tidak ada"}
 - Jenis Soal: ${config.jenisSoal}
 ${konteksStr} ${stimulusStr} ${checklistStr}
+
+PETUNJUK FORMAT SANGAT PENTING:
+1. Field 'soal': Tulis langsung teks stimulus/soal secara utuh. JANGAN mencantumkan nomor soal (misal '1.', 'Soal 1.', 'No. 1') di dalam teks.
+2. Field 'opsi': Setiap pilihan jawaban WAJIB diawali dengan huruf label A, B, C, D, E dan titik, contoh: ['A. ...', 'B. ...', 'C. ...', 'D. ...', 'E. ...'].
+
 Hasilkan array JSON tepat ${totalToGenerate} objek soal.
 GABUNGKAN stimulus langsung ke awal field 'soal' dan kosongkan 'stimulus' (string kosong "").`;
 
@@ -4456,21 +4586,25 @@ GABUNGKAN stimulus langsung ke awal field 'soal' dan kosongkan 'stimulus' (strin
       }
 
       if (Array.isArray(data) && data.length > 0) {
-        const mapped: Question[] = data.map((q: any, idx: number) => ({
-          id: `q-ai-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${idx}`,
-          noSoal: currentNoSoal + idx,
-          kisiKisiId: kisi.id,
-          kompetensi: q.kompetensi || kisi.kompetensi,
-          subKompetensi: q.subKompetensi || kisi.subElemenMateri,
-          bentukSoal: kisi.bentukSoal,
-          soal: q.soal,
-          stimulus: q.stimulus || '',
-          opsi: q.opsi || [],
-          kunciJawaban: q.kunciJawaban || 'A',
-          pembahasan: q.pembahasan || 'Pembahasan terstruktur.',
-          kataKunci: q.kataKunci || '',
-          gambarUrl: q.gambarUrl || ''
-        }));
+        const mapped: Question[] = data.map((q: any, idx: number) => {
+          const rawOpsi = Array.isArray(q.opsi) ? q.opsi : [];
+          const normalizedOpsi = rawOpsi.map((opt: string, oIdx: number) => formatOptionString(opt, oIdx));
+          return {
+            id: `q-ai-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${idx}`,
+            noSoal: currentNoSoal + idx,
+            kisiKisiId: kisi.id,
+            kompetensi: q.kompetensi || kisi.kompetensi,
+            subKompetensi: q.subKompetensi || kisi.subElemenMateri,
+            bentukSoal: kisi.bentukSoal,
+            soal: cleanSoalText(q.soal || ''),
+            stimulus: q.stimulus || '',
+            opsi: normalizedOpsi,
+            kunciJawaban: (q.kunciJawaban || 'A').trim().toUpperCase(),
+            pembahasan: q.pembahasan || 'Pembahasan terstruktur.',
+            kataKunci: q.kataKunci || '',
+            gambarUrl: q.gambarUrl || ''
+          };
+        });
 
         setQuestions(prev => {
           const existingIds = new Set(prev.map(p => p.id));
@@ -4673,7 +4807,7 @@ Ingat: HANYA berikan kode SVG murni. Jika Anda membungkusnya dengan blok markdow
 
     const textToParse = rawText.trim();
     let parsedQuestions: Question[] = [];
-    const startNo = questions.length + 1;
+    const startNo = (questions.reduce((max, q) => Math.max(max, Number(q.noSoal) || 0), 0)) + 1;
 
     // ----------------------------------------------------
     // STRATEGY 1: JSON PARSER
@@ -4699,9 +4833,7 @@ Ingat: HANYA berikan kode SVG murni. Jika Anda membungkusnya dengan blok markdow
                 }
 
                 const cleanOpts = (Array.isArray(rawOptions) ? rawOptions : []).map((optStr: string, oIdx: number) => {
-                  const letter = String.fromCharCode(65 + oIdx);
-                  const cleaned = optStr.replace(/^[\*\-\•\s]*\*?\*?([A-E1-5])\*?\*?\s*[\.\)]\s*/i, '').replace(/\*\*([^*]+)\*\*/g, '$1').trim();
-                  return `${letter}. ${cleaned}`;
+                  return formatOptionString(optStr, oIdx);
                 });
 
                 let bSoal: BentukSoal = 'pilihan_ganda_sederhana';
@@ -5835,8 +5967,11 @@ PANDUAN EKSTRA:
       return;
     }
 
-    // Clean options (remove empty strings)
-    const activeOptions = (questionForm.opsi || []).filter(o => o.trim() !== '');
+    // Clean options (remove empty strings and format)
+    const activeOptions = (questionForm.opsi || [])
+      .filter(o => o.trim() !== '')
+      .map((opt, i) => formatOptionString(opt, i));
+    const cleanFormSoal = cleanSoalText(questionForm.soal || '');
     setIsSavingQuestion(true);
 
     try {
@@ -5849,7 +5984,7 @@ PANDUAN EKSTRA:
           kompetensi: questionForm.kompetensi || '',
           subKompetensi: questionForm.subKompetensi || '',
           bentukSoal: questionForm.bentukSoal as BentukSoal,
-          soal: questionForm.soal || '',
+          soal: cleanFormSoal,
           stimulus: questionForm.stimulus || '',
           opsi: activeOptions,
           kunciJawaban: questionForm.kunciJawaban || '',
@@ -5867,12 +6002,12 @@ PANDUAN EKSTRA:
         const newQ: Question = {
           id: `q-manual-${Date.now()}`,
           userId: currentUser?.uid,
-          noSoal: questions.length + 1,
+          noSoal: (questions.reduce((max, q) => Math.max(max, Number(q.noSoal) || 0), 0)) + 1,
           kisiKisiId: questionForm.kisiKisiId || '',
           kompetensi: questionForm.kompetensi || 'Kompetensi Umum',
           subKompetensi: questionForm.subKompetensi || 'Sub-Materi',
           bentukSoal: questionForm.bentukSoal as BentukSoal,
-          soal: questionForm.soal || '',
+          soal: cleanFormSoal,
           stimulus: questionForm.stimulus || '',
           opsi: activeOptions,
           kunciJawaban: questionForm.kunciJawaban || '',
@@ -6553,7 +6688,107 @@ PANDUAN EKSTRA:
   }
 
   return (
-    <div id="app-root" className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col antialiased">
+    <div id="app-root" className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col antialiased relative">
+      {/* Animated API Key Rotation / Quota Toast Banner Overlay */}
+      <AnimatePresence>
+        {apiKeyToast && (
+          <motion.div
+            key={apiKeyToast.id}
+            initial={{ opacity: 0, y: -60, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -30, scale: 0.95 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+            className={`fixed top-4 left-1/2 -translate-x-1/2 z-[9999] w-[92%] max-w-lg p-4 rounded-2xl shadow-2xl border backdrop-blur-md text-left flex items-start gap-3.5 ${
+              apiKeyToast.type === 'quota_exhausted'
+                ? 'bg-rose-950/95 border-rose-500/80 text-rose-50 shadow-rose-950/50'
+                : apiKeyToast.type === 'rotation'
+                ? 'bg-slate-900/95 border-indigo-500/80 text-indigo-50 shadow-indigo-950/50'
+                : 'bg-emerald-950/95 border-emerald-500/80 text-emerald-50 shadow-emerald-950/50'
+            }`}
+          >
+            <div className="flex-shrink-0 mt-0.5">
+              {apiKeyToast.type === 'quota_exhausted' ? (
+                <div className="p-2 bg-rose-500/20 rounded-xl border border-rose-400/40 animate-pulse">
+                  <ShieldAlert className="h-6 w-6 text-rose-400" />
+                </div>
+              ) : apiKeyToast.type === 'rotation' ? (
+                <div className="p-2 bg-indigo-500/20 rounded-xl border border-indigo-400/40 relative">
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ repeat: Infinity, duration: 3, ease: 'linear' }}
+                  >
+                    <RefreshCw className="h-6 w-6 text-indigo-400" />
+                  </motion.div>
+                </div>
+              ) : (
+                <div className="p-2 bg-emerald-500/20 rounded-xl border border-emerald-400/40">
+                  <CheckCircle2 className="h-6 w-6 text-emerald-400" />
+                </div>
+              )}
+            </div>
+
+            <div className="flex-1 space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-1.5">
+                  <span>{apiKeyToast.title}</span>
+                  {apiKeyToast.keyIndex && (
+                    <span className="bg-indigo-500/30 text-indigo-300 border border-indigo-400/30 text-[10px] px-2 py-0.5 rounded-full font-mono">
+                      Key #{apiKeyToast.keyIndex} / {apiKeyToast.totalKeys}
+                    </span>
+                  )}
+                </h4>
+                <button
+                  onClick={() => setApiKeyToast(null)}
+                  className="text-slate-400 hover:text-white p-0.5 rounded-md hover:bg-white/10 transition cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <p className="text-xs leading-relaxed opacity-90 font-medium">
+                {apiKeyToast.message}
+              </p>
+
+              {/* Quick action buttons if quota exhausted */}
+              {apiKeyToast.type === 'quota_exhausted' && (
+                <div className="flex items-center gap-2 pt-2 flex-wrap text-xs font-bold">
+                  <button
+                    onClick={() => {
+                      setApiKeyToast(null);
+                      setActiveTab('soal');
+                      const el = document.getElementById('ai-connection-panel');
+                      if (el) el.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="bg-rose-600 hover:bg-rose-500 text-white px-3 py-1.5 rounded-lg flex items-center gap-1 transition shadow-sm cursor-pointer"
+                  >
+                    <Key className="h-3.5 w-3.5" />
+                    <span>+ Tambah API Key Baru</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleSetAiMode('n8n');
+                      setApiKeyToast(null);
+                    }}
+                    className="bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40 px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                  >
+                    <Zap className="h-3.5 w-3.5 text-amber-400" />
+                    <span>Gunakan N8N Webhook</span>
+                  </button>
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-indigo-300 hover:underline text-[11px] flex items-center gap-1 ml-auto"
+                  >
+                    <span>Buat Key Gratis ↗</span>
+                  </a>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
       <header id="header-section" className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white shadow-md py-6 px-4 sm:px-8 no-print">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -7115,32 +7350,68 @@ PANDUAN EKSTRA:
                           className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg p-2.5 text-xs font-mono leading-relaxed shadow-inner"
                         />
                         
-                        <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
-                          <p className="text-[10.5px] text-slate-600 font-medium leading-normal">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <p className="text-[10.5px] text-slate-600 font-medium leading-normal flex-1 min-w-[200px]">
                             💡 <b>Fitur Rotasi API Key:</b> Masukkan beberapa API Key dari akun berbeda (pisahkan dengan koma atau enter). Jika 1 key mencapai limit kuota (429), sistem otomatis pindah ke key berikutnya tanpa menghentikan pembuatan soal.
                           </p>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              localStorage.setItem('gemini_api_key', aiConfig.apiKey);
-                              if (currentUser) {
-                                try {
-                                  await updateDoc(doc(db, 'users', currentUser.uid), {
-                                    geminiApiKey: aiConfig.apiKey
-                                  });
-                                } catch (err) {
-                                  console.error("Gagal menyimpan API Key ke cloud:", err);
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <button
+                              type="button"
+                              onClick={handleTestApiKeyHealth}
+                              disabled={testingKeyHealth}
+                              className="bg-white hover:bg-slate-50 text-indigo-700 border border-indigo-300 text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-sm cursor-pointer disabled:opacity-50"
+                              title="Uji keaktifan dan limit kuota seluruh API Key yang diinput"
+                            >
+                              {testingKeyHealth ? <RefreshCw className="h-3.5 w-3.5 animate-spin text-indigo-600" /> : <Zap className="h-3.5 w-3.5 text-amber-500" />}
+                              <span>{testingKeyHealth ? 'Menguji Key...' : 'Tes Kesehatan Key'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                localStorage.setItem('gemini_api_key', aiConfig.apiKey);
+                                if (currentUser) {
+                                  try {
+                                    await updateDoc(doc(db, 'users', currentUser.uid), {
+                                      geminiApiKey: aiConfig.apiKey
+                                    });
+                                  } catch (err) {
+                                    console.error("Gagal menyimpan API Key ke cloud:", err);
+                                  }
                                 }
-                              }
-                              setShowApiKeySaved(true);
-                              setTimeout(() => setShowApiKeySaved(false), 3000);
-                            }}
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold px-3.5 py-1.5 rounded-lg flex items-center gap-1 transition shadow-sm hover:shadow active:scale-95 flex-shrink-0"
-                          >
-                            <Save className="h-3.5 w-3.5" />
-                            <span>SIMPAN</span>
-                          </button>
+                                setShowApiKeySaved(true);
+                                setTimeout(() => setShowApiKeySaved(false), 3000);
+                              }}
+                              className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold px-3.5 py-1.5 rounded-lg flex items-center gap-1 transition shadow-sm hover:shadow active:scale-95 flex-shrink-0 cursor-pointer"
+                            >
+                              <Save className="h-3.5 w-3.5" />
+                              <span>SIMPAN</span>
+                            </button>
+                          </div>
                         </div>
+
+                        {/* API Key Health Badges List */}
+                        {apiKeyHealthList.length > 0 && (
+                          <div className="p-2.5 bg-white border border-indigo-100 rounded-lg space-y-1.5 mt-2 animate-fadeIn">
+                            <span className="text-[10.5px] font-bold text-slate-700 block">Status Kesehatan Kunci API:</span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {apiKeyHealthList.map((item, idx) => (
+                                <span
+                                  key={idx}
+                                  className={`text-[10px] px-2.5 py-1 rounded-md font-mono font-bold flex items-center gap-1 border ${
+                                    item.status === 'valid'
+                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                      : item.status === 'exhausted'
+                                      ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                      : 'bg-rose-50 text-rose-800 border-rose-300'
+                                  }`}
+                                >
+                                  <span>Key #{item.keyIndex + 1} ({item.snippet}):</span>
+                                  <span>{item.status === 'valid' ? '🟢 Aktif' : item.status === 'exhausted' ? '🟡 Limit (429)' : '🔴 Error'}</span>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       <AnimatePresence>
@@ -7177,8 +7448,54 @@ PANDUAN EKSTRA:
                         <option value="gemini-1.5-pro">Gemini 1.5 Pro (Model Alternatif Pro)</option>
                         <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Model Ringan & Hemat)</option>
                       </select>
+                    </div>
+
+                    {/* Temperature Parameter Slider */}
+                    <div className="space-y-1 mt-2.5 pt-2 border-t border-indigo-100">
+                      <div className="flex justify-between items-center text-[11px] font-bold text-slate-700">
+                        <span className="uppercase tracking-wide">Parameter Kreativitas (Temperature)</span>
+                        <span className="text-indigo-600 font-mono bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">{aiConfig.temperature || 0.7}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="1.0"
+                        step="0.05"
+                        value={aiConfig.temperature || 0.7}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setAiConfig(prev => ({ ...prev, temperature: val }));
+                          localStorage.setItem('gemini_api_temperature', String(val));
+                        }}
+                        className="w-full accent-indigo-600 h-1.5 bg-indigo-100 rounded-lg cursor-pointer"
+                      />
+                      <p className="text-[10px] text-slate-500">
+                        0.1 - 0.4: Konsisten/Presisi | 0.7: Standar Seimbang (Rekomendasi) | 0.9 - 1.0: Lebih Kreatif
+                      </p>
+                    </div>
+
+                    {/* Throttling Request Delay Parameter */}
+                    <div className="space-y-1 mt-2 pt-2 border-t border-indigo-100">
+                      <div className="flex justify-between items-center text-[11px] font-bold text-slate-700">
+                        <span className="uppercase tracking-wide">Jeda Waktu Antar-Request (Throttling)</span>
+                        <span className="text-indigo-600 font-mono bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">{aiConfig.requestDelayMs || 0} ms</span>
+                      </div>
+                      <select
+                        value={aiConfig.requestDelayMs || 0}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setAiConfig(prev => ({ ...prev, requestDelayMs: val }));
+                          localStorage.setItem('gemini_api_delay', String(val));
+                        }}
+                        className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2.5 py-1 text-xs font-medium text-slate-700"
+                      >
+                        <option value={0}>0 ms (Tanpa Jeda - Maksimum Kecepatan)</option>
+                        <option value={500}>500 ms (Jeda Ringan - Mencegah Rate Limit)</option>
+                        <option value={1000}>1000 ms (1 Detik - Stabil untuk Akun Free)</option>
+                        <option value={2000}>2000 ms (2 Detik - Sangat Aman dari Error 429)</option>
+                      </select>
                       <p className="text-[10px] text-slate-500 leading-relaxed">
-                        💡 <b>Sistem Fallback & Rotasi API Key:</b> Jika model utama atau API Key pertama mengalami limit (429/503), sistem akan otomatis merotasi ke API Key berikutnya dan mencoba model alternatif secara otomatis.
+                        💡 <b>Sistem Fallback & Rotasi API Key:</b> Jika model utama atau API Key pertama mengalami limit (429/503), sistem akan otomatis merotasi ke API Key berikutnya dan mencoba model alternatif secara otomatis dengan notifikasi animasi visual.
                       </p>
                     </div>
 
@@ -12192,14 +12509,15 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                           {/* Question Statement */}
                           <div className="text-slate-900 leading-relaxed font-semibold whitespace-pre-line text-xs sm:text-sm">
                             {printConfig.showCompetencyTag && <span className="font-bold mr-1">{q.noSoal}.</span>}
-                            {q.soal}
+                            {cleanSoalText(q.soal)}
                           </div>
 
                           {/* Options */}
                           {q.opsi && q.opsi.length > 0 && (
                             <div className={`grid gap-2 pl-2 ${printConfig.layoutColumns === '2' ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2'}`}>
                               {q.opsi.map((opt, i) => {
-                                const optLetter = opt.trim().substring(0, 1).toUpperCase();
+                                const optLetter = String.fromCharCode(65 + i);
+                                const optText = cleanOptionText(opt);
                                 const isCorrectOption = q.kunciJawaban.trim().toUpperCase().includes(optLetter) && printConfig.showAnswerKey;
                                 return (
                                   <div 
@@ -12217,7 +12535,7 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                                     }`}>
                                       {optLetter}
                                     </span>
-                                    <span className="font-sans leading-relaxed text-[11px] sm:text-xs">{opt.substring(2)}</span>
+                                    <span className="font-sans leading-relaxed text-[11px] sm:text-xs">{optText}</span>
                                   </div>
                                 );
                               })}
@@ -12249,7 +12567,7 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                               
                               <div className="text-[11px] text-slate-700 leading-relaxed">
                                 <span className="font-bold text-slate-800">Pembahasan Ilmiah:</span>
-                                <p className="whitespace-pre-wrap mt-0.5">{q.pembahasan}</p>
+                                <p className="whitespace-pre-wrap mt-0.5">{cleanSoalText(q.pembahasan)}</p>
                               </div>
                             </motion.div>
                           )}
