@@ -2765,6 +2765,7 @@ export default function App() {
   const [kisiForm, setKisiForm] = useState<Partial<KisiKisiItem>>({
     bentukSoal: 'pilihan_ganda_sederhana',
     levelKognitif: 'level_2',
+    jenisSoal: 'tunggal',
     elemenMateri: '',
     subElemenMateri: '',
     kompetensi: '',
@@ -3015,6 +3016,9 @@ export default function App() {
     const countMCMA = items.filter(k => k.bentukSoal === 'mcma').reduce((acc, k) => acc + (k.jumlahSoal || 1), 0);
     const countKategori = items.filter(k => k.bentukSoal === 'kategori').reduce((acc, k) => acc + (k.jumlahSoal || 1), 0);
 
+    const countTunggal = items.filter(k => (k.jenisSoal || 'tunggal') === 'tunggal').length;
+    const countGrup = items.filter(k => k.jenisSoal === 'grup').length;
+
     const countL1 = items.filter(k => k.levelKognitif === 'level_1').length;
     const countL2 = items.filter(k => k.levelKognitif === 'level_2').length;
     const countL3 = items.filter(k => k.levelKognitif === 'level_3').length;
@@ -3047,6 +3051,9 @@ Tugas Anda adalah merancang dan menyusun paket soal asesmen sumatif sebanyak ${t
 IKHTISAR SPESIFIKASI ASESMEN:
 - Total Baris Kisi-Kisi: ${totalBaris} Baris Spesifikasi
 - Total Target Soal Keseluruhan: ${totalSoal} Butir
+- Klasifikasi Jenis Struktur Soal:
+  * Soal Tunggal (Berdiri Sendiri / Standalone) : ${countTunggal} Baris Kisi-Kisi
+  * Soal Grup (Sekumpulan Soal 1 Stimulus Wacana Bersama) : ${countGrup} Baris Kisi-Kisi
 - Rincian Bentuk Soal:
   * Pilihan Ganda Sederhana (PG 5 Opsi): ${countPG} Butir
   * Pilihan Ganda Kompleks (MCMA / Banyak Jawaban): ${countMCMA} Butir
@@ -3064,9 +3071,11 @@ MATRIKS ASESMEN & RINCIAN SPESIFIKASI SOAL (${totalBaris} BARIS):
     items.forEach((kisi, idx) => {
       const activeKonteks = (kisi.konteksLokal && kisi.konteksLokal.length > 0) ? kisi.konteksLokal : cfg.konteksLokal;
       const activeStimulus = (kisi.stimulusKonten && kisi.stimulusKonten.length > 0) ? kisi.stimulusKonten : cfg.stimulusKonten;
+      const isGrup = kisi.jenisSoal === 'grup';
 
       prompt += `
 [KISI-KISI NO. ${kisi.no || (idx + 1)}]
+- Jenis Struktur Soal  : ${isGrup ? '📚 SOAL GRUP (Sekumpulan butir soal mengacu pada 1 STIMULUS BERSAMA/WACANA TERPADU)' : '📌 SOAL TUNGGAL (Soal mandiri berdiri sendiri dengan 1 stimulus khusus)'}
 - Elemen / Materi Utama : ${kisi.elemenMateri || '-'}
 - Sub-Elemen / Submateri: ${kisi.subElemenMateri || '-'}
 - Bentuk Soal          : ${getBentukSoalLabel(kisi.bentukSoal)} (${kisi.jumlahSoal || 1} Soal)
@@ -4624,6 +4633,119 @@ Ingat: HANYA berikan kode SVG murni. Jika Anda membungkusnya dengan blok markdow
     }
   };
 
+  // Generator Soal Instan tanpa API Key (Templat Standar TKA)
+  const handleGenerateInstantQuestionsWithoutAPI = async (targetKisi?: KisiKisiItem) => {
+    const listToProcess = targetKisi ? [targetKisi] : kisiList;
+    if (listToProcess.length === 0) {
+      alert('Matriks Asesmen Kisi-Kisi masih kosong. Sila isi atau tambahkan kisi-kisi terlebih dahulu!');
+      return;
+    }
+
+    setIsGeneratingSoal(true);
+    let startNo = questions.length + 1;
+    const newQuestions: Question[] = [];
+
+    listToProcess.forEach((kisi) => {
+      const countToGen = kisi.jumlahSoal || 1;
+      const isGrup = kisi.jenisSoal === 'grup';
+      
+      const mapel = config.mataPelajaran || 'Mata Pelajaran Umum';
+      const elemen = kisi.elemenMateri || 'Materi Utama';
+      const sub = kisi.subElemenMateri || 'Sub-Materi Spesifik';
+      const kom = kisi.kompetensi || 'Kompetensi Asesmen TKA';
+      const konteks = kisi.konteksNusantara || (config.konteksLokal && config.konteksLokal.length > 0 ? config.konteksLokal.join(', ') : 'Masyarakat Indonesia');
+
+      let sharedStimulus = '';
+      if (isGrup) {
+        sharedStimulus = `[WACANA/STIMULUS TERPADU SOAL GRUP TKA]\n\nDalam konteks ${konteks}, fenomena mengenai "${sub}" pada bidang ${elemen} (${mapel}) menunjukkan dinamika yang kompleks. Berdasarkan data empiris dan kajian literatur di Indonesia, keterkaitan antara ${sub} dan ${kom} menjadi fokus utama analisis. Masyarakat dan para pakar mengamati bahwa penerapan prinsip ${sub} memiliki implikasi langsung terhadap perkembangan sosial, ekonomi, serta sains di era modern.\n\nSimak dan cermati informasi di atas untuk menjawab butir soal berikut:\n\n`;
+      }
+
+      for (let j = 0; j < countToGen; j++) {
+        const no = startNo++;
+        const isL3 = kisi.levelKognitif === 'level_3';
+        const isL2 = kisi.levelKognitif === 'level_2';
+        const levelLabel = isL3 ? 'Penalaran (HOTS - Level 3)' : isL2 ? 'Penerapan (Level 2)' : 'Pemahaman (Level 1)';
+
+        const localStimulus = isGrup ? sharedStimulus : `Cermati konteks ${konteks} berikut ini!\nDalam pembelajaran ${mapel} pada topik ${elemen} - ${sub}, peserta didik dihadapkan pada studi kasus mengenai ${kom}. `;
+
+        let questionText = '';
+        let opsiList: string[] = [];
+        let kunci = 'A';
+        let pembahasanText = '';
+
+        if (kisi.bentukSoal === 'pilihan_ganda_sederhana') {
+          questionText = `${localStimulus}Berdasarkan prinsip ${sub}, manakah pernyataan berikut yang paling tepat dan logis dalam menjelaskan ${kom}?`;
+          opsiList = [
+            `A. ${sub} secara signifikan meningkatkan efektivitas ${kom} sesuai konteks ${konteks}.`,
+            `B. ${sub} tidak memiliki hubungan struktural dengan pelaksanaan ${kom}.`,
+            `C. ${kom} hanya dipengaruhi oleh faktor eksternal di luar lingkup ${elemen}.`,
+            `D. Penerapan ${sub} menurunkan kualitas indikator capaian pada ${mapel}.`,
+            `E. Kebijakan ${sub} bertentangan dengan kaidah dasar ${elemen}.`
+          ];
+          if (config.jumlahOpsi === 4) opsiList = opsiList.slice(0, 4);
+          kunci = 'A';
+          pembahasanText = `Pembahasan Logis (${levelLabel}):\nPilihan A adalah jawaban yang benar. Pada materi ${elemen} (${sub}), prinsip utama berpusat pada keterkaitan langsung dengan ${kom}. Dalam konteks ${konteks}, integrasi konsep ini terbukti memberikan dampak positif yang nyata dan teruji secara ilmiah. Pilihan B, C, D, dan E kurang tepat karena mengabaikan analisis kausalitas pokok materi.`;
+        } else if (kisi.bentukSoal === 'mcma') {
+          questionText = `${localStimulus}Pilihlah semua pernyataan yang BENAR (jawaban dapat lebih dari satu) terkait dengan konsep ${sub} dalam pengembangan ${kom}!`;
+          opsiList = [
+            `A. ${sub} merupakan fondasi utama dalam memahami ${kom}.`,
+            `B. Penerapan ${sub} relevan dengan kondisi empiris ${konteks}.`,
+            `C. ${sub} tidak relevan dengan kurikulum ${mapel} SMA.`,
+            `D. Konsep ${sub} membantu analisis kritis fenomena ${elemen}.`,
+            `E. ${kom} terpisah secara parsial dari kajian ${sub}.`
+          ];
+          if (config.jumlahOpsi === 4) opsiList = opsiList.slice(0, 4);
+          kunci = 'A, B, D';
+          pembahasanText = `Pembahasan MCMA (${levelLabel}):\nPernyataan A, B, dan D adalah BENAR. Konsep ${sub} pada bidang ${elemen} memang mencakup aspek teoritis, relevansi empiris di Indonesia (${konteks}), serta kemampuan analisis kritis. Sebaliknya, pernyataan C dan E salah karena kontradiktif dengan esensi materi.`;
+        } else {
+          // Kategori
+          questionText = `${localStimulus}Tentukan kategori untuk setiap pernyataan di bawah ini berdasarkan kesesuaiannya dengan materi ${sub} (${mapel}):`;
+          opsiList = [
+            `1. Pernyataan 1: Konsep ${sub} berperan penting dalam mewujudkan ${kom}.`,
+            `2. Pernyataan 2: ${sub} tidak memiliki aplikasi praktis dalam kehidupan sehari-hari di Indonesia.`,
+            `3. Pernyataan 3: Analisis ${elemen} memerlukan pemahaman komprehensif tentang ${sub}.`,
+            `4. Pernyataan 4: Fenomena ${sub} bertolak belakang dengan indikator ${kom}.`
+          ];
+          kunci = '1. Benar, 2. Salah, 3. Benar, 4. Salah';
+          pembahasanText = `Pembahasan Kategori (${levelLabel}):\n- Pernyataan 1: BENAR, karena ${sub} merupakan bagian inti dari ${kom}.\n- Pernyataan 2: SALAH, karena ${sub} sangat relevan dengan realitas ${konteks}.\n- Pernyataan 3: BENAR, pemahaman ${elemen} membutuhkan penguasaan ${sub}.\n- Pernyataan 4: SALAH, ${sub} sejalan dan mendukung indikator ${kom}.`;
+        }
+
+        const qObj: Question = {
+          id: `q-instant-${Date.now()}-${no}`,
+          userId: currentUser?.uid,
+          noSoal: no,
+          kisiKisiId: kisi.id,
+          kompetensi: kom,
+          subKompetensi: sub,
+          bentukSoal: kisi.bentukSoal,
+          soal: questionText,
+          opsi: opsiList,
+          kunciJawaban: kunci,
+          pembahasan: pembahasanText,
+          kataKunci: `${mapel}, ${elemen}, ${sub}`,
+          gambarUrl: ''
+        };
+
+        newQuestions.push(qObj);
+      }
+    });
+
+    for (const q of newQuestions) {
+      if (currentUser?.uid) {
+        try {
+          await setDoc(doc(db, 'questions', q.id), q);
+        } catch (err) {
+          console.warn("Failed to sync instant question to firestore:", err);
+        }
+      }
+    }
+
+    setQuestions(prev => [...prev, ...newQuestions]);
+    setIsGeneratingSoal(false);
+    setActiveTab('soal');
+    alert(`Berhasil membuat ${newQuestions.length} butir soal TKA secara instan (tanpa API Key)!`);
+  };
+
   // Generate Soal for ALL kisi-kisi rows
   const handleGenerateAllQuestions = async () => {
     if (!config.mataPelajaran) {
@@ -5022,6 +5144,18 @@ PANDUAN EKSTRA:
   };
 
   // Kisi-Kisi Manual Actions
+  const handleToggleJenisSoal = async (id: string, currentJenis?: JenisSoal) => {
+    const newJenis: JenisSoal = currentJenis === 'grup' ? 'tunggal' : 'grup';
+    setKisiList(prev => prev.map(item => item.id === id ? { ...item, jenisSoal: newJenis } : item));
+    if (currentUser?.uid) {
+      try {
+        await updateDoc(doc(db, 'kisi_kisi', id), { jenisSoal: newJenis });
+      } catch (err) {
+        console.warn("Failed to update jenisSoal in firestore:", err);
+      }
+    }
+  };
+
   const handleSaveKisiForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!kisiForm.elemenMateri || !kisiForm.subElemenMateri || !kisiForm.kompetensi) {
@@ -5037,6 +5171,7 @@ PANDUAN EKSTRA:
           no: kisiList.find(item => item.id === editingKisiId)?.no || 1,
           bentukSoal: kisiForm.bentukSoal as BentukSoal,
           levelKognitif: kisiForm.levelKognitif as LevelKognitif,
+          jenisSoal: (kisiForm.jenisSoal as JenisSoal) || 'tunggal',
           elemenMateri: kisiForm.elemenMateri || '',
           subElemenMateri: kisiForm.subElemenMateri || '',
           kompetensi: kisiForm.kompetensi || '',
@@ -5058,6 +5193,7 @@ PANDUAN EKSTRA:
           no: kisiList.length + 1,
           bentukSoal: kisiForm.bentukSoal as BentukSoal,
           levelKognitif: kisiForm.levelKognitif as LevelKognitif,
+          jenisSoal: (kisiForm.jenisSoal as JenisSoal) || 'tunggal',
           elemenMateri: kisiForm.elemenMateri || '',
           subElemenMateri: kisiForm.subElemenMateri || '',
           kompetensi: kisiForm.kompetensi || '',
@@ -5080,6 +5216,7 @@ PANDUAN EKSTRA:
     setKisiForm({
       bentukSoal: 'pilihan_ganda_sederhana',
       levelKognitif: 'level_2',
+      jenisSoal: 'tunggal',
       elemenMateri: '',
       subElemenMateri: '',
       kompetensi: '',
@@ -5097,6 +5234,7 @@ PANDUAN EKSTRA:
     setKisiForm({
       bentukSoal: item.bentukSoal,
       levelKognitif: item.levelKognitif,
+      jenisSoal: item.jenisSoal || 'tunggal',
       elemenMateri: item.elemenMateri,
       subElemenMateri: item.subElemenMateri,
       kompetensi: item.kompetensi,
@@ -6415,6 +6553,25 @@ PANDUAN EKSTRA:
                     Jika fitur pembuat soal AI gagal di server produksi (Vercel) akibat batas waktu eksekusi (timeout 10 detik), silakan beralih ke <b>Mode Browser (Direct API)</b> dengan memasukkan Kunci API Gemini Anda sendiri untuk bypass timeout tersebut secara total.
                   </p>
 
+                  {/* Callout box for Generating Questions without API key */}
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-2.5 text-xs text-emerald-950">
+                    <Zap className="h-4 w-4 text-emerald-600 flex-shrink-0 mt-0.5 fill-emerald-500" />
+                    <div className="space-y-1">
+                      <span className="font-extrabold block text-emerald-950">💡 Ingin Membuat Soal Tanpa API Key?</span>
+                      <p className="text-[11px] text-emerald-800 leading-relaxed">
+                        Jika Anda tidak memiliki API Key Gemini atau tidak ingin menggunakan koneksi AI online, Anda dapat langsung menghasilkan butir soal TKA SMA berstandar HOTS secara instan menggunakan tombol <b>"⚡ Generate Soal Instan (Tanpa API Key)"</b> di Tab Matriks Kisi-Kisi dan Tab Butir Soal TKA.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => handleGenerateInstantQuestionsWithoutAPI()}
+                        className="mt-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-[11px] flex items-center gap-1.5 transition shadow-sm cursor-pointer"
+                      >
+                        <Zap className="h-3.5 w-3.5 fill-amber-300 text-amber-300" />
+                        <span>Coba Generator Soal Instan Sekarang (Tanpa API Key)</span>
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -6556,13 +6713,16 @@ PANDUAN EKSTRA:
                     <span className="block text-xs font-bold text-slate-500 mb-2">KONTEKS LOKAL INDONESIA</span>
                     <div className="space-y-1.5 max-h-40 overflow-y-auto pr-2 border border-slate-100 p-2 rounded-xl bg-slate-50/50">
                       {[
-                        { key: 'Budaya Nusantara', label: '🎭 Budaya Nusantara' },
-                        { key: 'Geografis Indonesia', label: '🗺️ Geografis Indonesia' },
-                        { key: 'Kehidupan Sosial', label: '👥 Kehidupan Sosial' },
-                        { key: 'Ekonomi Rakyat', label: '💰 Ekonomi Rakyat' },
-                        { key: 'Teknologi Tradisional', label: '⚙️ Teknologi Tradisional' },
-                        { key: 'Kearifan Lokal', label: '🏛️ Kearifan Lokal' },
-                        { key: 'Keragaman Etnis', label: '🌈 Keragaman Etnis' }
+                        { key: 'Budaya Nusantara', label: '🎭 Budaya Nusantara (Adat & Seni)' },
+                        { key: 'Geografis Indonesia', label: '🗺️ Geografis & Kewilayahan ID' },
+                        { key: 'Kehidupan Sosial', label: '👥 Kehidupan Sosial & Kemasyarakatan' },
+                        { key: 'Ekonomi Rakyat', label: '💰 Ekonomi Rakyat, Pasar & UMKM' },
+                        { key: 'Teknologi Tradisional', label: '⚙️ Etno-Sains & Teknologi Tradisional' },
+                        { key: 'Kearifan Lokal', label: '🏛️ Kearifan Lokal & Ekologi' },
+                        { key: 'Keragaman Etnis', label: '🌈 Keragaman Etnis & Inklusivitas' },
+                        { key: 'Profil Pelajar Pancasila', label: '🇮🇩 Profil Pelajar Pancasila & Karakter' },
+                        { key: 'Isu Kontemporer', label: '📢 Isu Kontemporer & Realitas Empiris' },
+                        { key: 'Kebahasaan Diksi', label: '🗣️ Aksesibilitas Diksi & Bahasa ID' }
                       ].map((item) => (
                         <label key={item.key} className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:bg-slate-100 p-1 rounded">
                           <input
@@ -6582,13 +6742,16 @@ PANDUAN EKSTRA:
                     <span className="block text-xs font-bold text-slate-500 mb-2">STIMULUS & PENGEMBANGAN KONTEN</span>
                     <div className="space-y-1.5 max-h-40 overflow-y-auto pr-2 border border-slate-100 p-2 rounded-xl bg-slate-50/50">
                       {[
-                        { key: 'Teks Bacaan', label: '📖 Teks Bacaan' },
-                        { key: 'Gambar/Ilustrasi', label: '🖼️ Gambar/Ilustrasi' },
-                        { key: 'Data/Tabel', label: '📊 Data/Tabel' },
-                        { key: 'Grafik/Diagram', label: '📈 Grafik/Diagram' },
-                        { key: 'Kasus Nyata', label: '🔍 Kasus Nyata' },
-                        { key: 'Cerita Pendek', label: '📚 Cerita Pendek' },
-                        { key: 'Berita/Artikel', label: '📰 Berita/Artikel' }
+                        { key: 'Teks Bacaan', label: '📖 Teks Bacaan Naratif/Sains' },
+                        { key: 'Gambar/Ilustrasi', label: '🖼️ Gambar / Infografis' },
+                        { key: 'Data/Tabel', label: '📊 Data Statistik / Tabel Empiris' },
+                        { key: 'Grafik/Diagram', label: '📈 Grafik / Diagram Tren' },
+                        { key: 'Kasus Nyata', label: '🔍 Kasus Nyata / Skenario Masalah' },
+                        { key: 'Cerita Pendek', label: '📚 Cerita Pendek / Anekdot' },
+                        { key: 'Berita/Artikel', label: '📰 Artikel Berita / Opini Media' },
+                        { key: 'Peta/Denah', label: '🗺️ Peta Geospasial / Denah' },
+                        { key: 'Dokumen Resmi', label: '📜 Dokumen / Regulasi Kebijakan' },
+                        { key: 'Pernyataan Tokoh', label: '🎙️ Wawancara / Pernyataan Tokoh' }
                       ].map((item) => (
                         <label key={item.key} className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:bg-slate-100 p-1 rounded">
                           <input
@@ -7114,6 +7277,22 @@ PANDUAN EKSTRA:
                   />
                 </div>
                 <div>
+                  <label className="block text-[11px] font-bold text-slate-500 mb-1">Jenis Structure Soal</label>
+                  <select
+                    value={kisiForm.jenisSoal || 'tunggal'}
+                    onChange={(e) => setKisiForm({ ...kisiForm, jenisSoal: e.target.value as JenisSoal })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold text-slate-800 focus:border-indigo-500"
+                  >
+                    <option value="tunggal">📌 Soal Tunggal (Stand-alone)</option>
+                    <option value="grup">📚 Soal Grup (1 Stimulus Bersama)</option>
+                  </select>
+                  <div className="mt-1 text-[10px] text-slate-500 leading-snug font-medium">
+                    {kisiForm.jenisSoal === 'grup' 
+                      ? "📚 1 Stimulus Wacana/Data terpadu dipakai bersama" 
+                      : "📌 Setiap soal memiliki stimulus mandiri"}
+                  </div>
+                </div>
+                <div>
                   <label className="block text-[11px] font-bold text-slate-500 mb-1">Bentuk Soal</label>
                   <select
                     value={kisiForm.bentukSoal}
@@ -7205,13 +7384,16 @@ PANDUAN EKSTRA:
                     <label className="block text-[11px] font-bold text-slate-500 mb-1.5">🎭 KONTEKS LOKAL INDONESIA</label>
                     <div className="space-y-1 max-h-36 overflow-y-auto pr-1 border border-slate-200/60 p-2 rounded-lg bg-slate-50/50">
                       {[
-                        { key: 'Budaya Nusantara', label: '🎭 Budaya Nusantara' },
-                        { key: 'Geografis Indonesia', label: '🗺️ Geografis Indonesia' },
-                        { key: 'Kehidupan Sosial', label: '👥 Kehidupan Sosial' },
-                        { key: 'Ekonomi Rakyat', label: '💰 Ekonomi Rakyat' },
-                        { key: 'Teknologi Tradisional', label: '⚙️ Teknologi Tradisional' },
-                        { key: 'Kearifan Lokal', label: '🏛️ Kearifan Lokal' },
-                        { key: 'Keragaman Etnis', label: '🌈 Keragaman Etnis' }
+                        { key: 'Budaya Nusantara', label: '🎭 Budaya Nusantara (Adat & Seni)' },
+                        { key: 'Geografis Indonesia', label: '🗺️ Geografis & Kewilayahan ID' },
+                        { key: 'Kehidupan Sosial', label: '👥 Kehidupan Sosial & Kemasyarakatan' },
+                        { key: 'Ekonomi Rakyat', label: '💰 Ekonomi Rakyat, Pasar & UMKM' },
+                        { key: 'Teknologi Tradisional', label: '⚙️ Etno-Sains & Teknologi Tradisional' },
+                        { key: 'Kearifan Lokal', label: '🏛️ Kearifan Lokal & Ekologi' },
+                        { key: 'Keragaman Etnis', label: '🌈 Keragaman Etnis & Inklusivitas' },
+                        { key: 'Profil Pelajar Pancasila', label: '🇮🇩 Profil Pelajar Pancasila & Karakter' },
+                        { key: 'Isu Kontemporer', label: '📢 Isu Kontemporer & Realitas Empiris' },
+                        { key: 'Kebahasaan Diksi', label: '🗣️ Aksesibilitas Diksi & Bahasa ID' }
                       ].map((item) => (
                         <label key={item.key} className="flex items-center gap-1.5 text-[10.5px] font-medium text-slate-700 cursor-pointer hover:bg-slate-100 p-0.5 rounded">
                           <input
@@ -7231,13 +7413,16 @@ PANDUAN EKSTRA:
                     <label className="block text-[11px] font-bold text-slate-500 mb-1.5">📖 STIMULUS & PENGEMBANGAN KONTEN</label>
                     <div className="space-y-1 max-h-36 overflow-y-auto pr-1 border border-slate-200/60 p-2 rounded-lg bg-slate-50/50">
                       {[
-                        { key: 'Teks Bacaan', label: '📖 Teks Bacaan' },
-                        { key: 'Gambar/Ilustrasi', label: '🖼️ Gambar/Ilustrasi' },
-                        { key: 'Data/Tabel', label: '📊 Data/Tabel' },
-                        { key: 'Grafik/Diagram', label: '📈 Grafik/Diagram' },
-                        { key: 'Kasus Nyata', label: '🔍 Kasus Nyata' },
-                        { key: 'Cerita Pendek', label: '📚 Cerita Pendek' },
-                        { key: 'Berita/Artikel', label: '📰 Berita/Artikel' }
+                        { key: 'Teks Bacaan', label: '📖 Teks Bacaan Naratif/Sains' },
+                        { key: 'Gambar/Ilustrasi', label: '🖼️ Gambar / Infografis' },
+                        { key: 'Data/Tabel', label: '📊 Data Statistik / Tabel Empiris' },
+                        { key: 'Grafik/Diagram', label: '📈 Grafik / Diagram Tren' },
+                        { key: 'Kasus Nyata', label: '🔍 Kasus Nyata / Skenario Masalah' },
+                        { key: 'Cerita Pendek', label: '📚 Cerita Pendek / Anekdot' },
+                        { key: 'Berita/Artikel', label: '📰 Artikel Berita / Opini Media' },
+                        { key: 'Peta/Denah', label: '🗺️ Peta Geospasial / Denah' },
+                        { key: 'Dokumen Resmi', label: '📜 Dokumen / Regulasi Kebijakan' },
+                        { key: 'Pernyataan Tokoh', label: '🎙️ Wawancara / Pernyataan Tokoh' }
                       ].map((item) => (
                         <label key={item.key} className="flex items-center gap-1.5 text-[10.5px] font-medium text-slate-700 cursor-pointer hover:bg-slate-100 p-0.5 rounded">
                           <input
@@ -7257,10 +7442,10 @@ PANDUAN EKSTRA:
                     <label className="block text-[11px] font-bold text-slate-500 mb-1.5">📋 STANDAR KUALITAS SOAL TKA</label>
                     <div className="space-y-1 max-h-36 overflow-y-auto pr-1 border border-slate-200/60 p-2 rounded-lg bg-slate-50/50">
                       {[
-                        'Validasi Bahasa', 'Konstruksi Soal', 'Kesesuaian Materi', 
-                        'Level Kognitif', 'Konteks Relevan', 'Tidak Bias', 
-                        'Kejelasan Instruksi', 'Kunci Jawaban Tepat', 'Distractor Berkualitas', 
-                        'Sesuai Kurikulum', 'Waktu Pengerjaan', 'Inklusivitas'
+                        'Validasi Bahasa (PUEBI)', 'Konstruksi Soal Presisi', 'Kesesuaian Materi & Kurikulum', 
+                        'Level Kognitif Terdistribusi', 'Konteks Relevan Nusantara', 'Tidak Bias & Bebas SARA', 
+                        'Kejelasan Instruksi & Kunci', 'Kunci Jawaban Tepat Single/Multi', 'Distractor Berkualitas & Homogen', 
+                        'Anti-Hallucination Data', 'Estimasi Waktu Pengerjaan Proposional', 'Inklusivitas & Kesetaraan Gender'
                       ].map((item) => (
                         <label key={item} className="flex items-center gap-1.5 text-[10.5px] font-medium text-slate-700 cursor-pointer hover:bg-slate-100 p-0.5 rounded">
                           <input
@@ -7362,6 +7547,15 @@ PANDUAN EKSTRA:
                 {kisiList.length > 0 && (
                   <div className="flex items-center gap-2">
                     <button
+                      onClick={() => handleGenerateInstantQuestionsWithoutAPI()}
+                      disabled={isGeneratingSoal}
+                      className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                      title="Hasilkan butir soal langsung secara instan dari seluruh kisi-kisi tanpa memerlukan API key"
+                    >
+                      <Zap className="h-3.5 w-3.5 text-amber-300 fill-amber-300" />
+                      <span>⚡ Generate Semua Soal Instan (Tanpa Key)</span>
+                    </button>
+                    <button
                       onClick={() => {
                         const text = buildMasterMegaprompt(kisiList, config, masterMegapromptStyle);
                         setMasterMegapromptText(text);
@@ -7397,6 +7591,7 @@ PANDUAN EKSTRA:
                   <thead>
                     <tr className="bg-slate-100/80 border-b border-slate-200 text-slate-700 font-bold">
                       <th className="py-3.5 px-4 text-center w-12">No</th>
+                      <th className="py-3.5 px-4 min-w-[120px] text-center">Jenis Soal</th>
                       <th className="py-3.5 px-4">Bentuk Soal</th>
                       <th className="py-3.5 px-4">Tingkat Kognitif</th>
                       <th className="py-3.5 px-4">Elemen / Materi</th>
@@ -7411,7 +7606,7 @@ PANDUAN EKSTRA:
                   <tbody>
                     {kisiList.length === 0 ? (
                       <tr>
-                        <td colSpan={10} className="text-center py-12 text-slate-400 font-medium">
+                        <td colSpan={11} className="text-center py-12 text-slate-400 font-medium">
                           Belum ada data kisi-kisi. Sila tambahkan di atas atau gunakan tombol AI untuk membuat otomatis!
                         </td>
                       </tr>
@@ -7426,6 +7621,30 @@ PANDUAN EKSTRA:
                           }`}
                         >
                           <td className="py-4 px-4 text-center font-bold text-slate-700">{item.no}</td>
+                          <td className="py-4 px-4 text-center min-w-[120px]">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleJenisSoal(item.id, item.jenisSoal)}
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10.5px] font-bold border transition-all cursor-pointer shadow-sm ${
+                                item.jenisSoal === 'grup'
+                                  ? 'bg-purple-100 text-purple-900 border-purple-300 hover:bg-purple-200'
+                                  : 'bg-sky-100 text-sky-900 border-sky-300 hover:bg-sky-200'
+                              }`}
+                              title="Klik untuk mengubah jenis (Soal Tunggal ↔ Soal Grup)"
+                            >
+                              {item.jenisSoal === 'grup' ? (
+                                <>
+                                  <Layers className="h-3 w-3 text-purple-600" />
+                                  <span>📚 Soal Grup</span>
+                                </>
+                              ) : (
+                                <>
+                                  <FileText className="h-3 w-3 text-sky-600" />
+                                  <span>📌 Soal Tunggal</span>
+                                </>
+                              )}
+                            </button>
+                          </td>
                           <td className="py-4 px-4">
                             <span className={`inline-block px-2.5 py-1 rounded-full font-semibold text-[10px] ${
                               item.bentukSoal === 'pilihan_ganda_sederhana' ? 'bg-blue-100 text-blue-800' :
@@ -7603,6 +7822,15 @@ PANDUAN EKSTRA:
                                 </div>
                                 <div className="flex flex-col gap-1.5 mt-1.5">
                                   <button
+                                    onClick={() => handleGenerateInstantQuestionsWithoutAPI(item)}
+                                    disabled={isGeneratingSoal}
+                                    className="w-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-900 border border-amber-300 text-[10px] font-black py-1.5 px-1.5 rounded-lg flex items-center justify-center gap-1 transition cursor-pointer"
+                                    title="Buat butir soal langsung dari kisi-kisi ini tanpa butuh API Key"
+                                  >
+                                    <Zap className="h-3 w-3 text-amber-600 fill-amber-500" />
+                                    <span>⚡ Instan (Tanpa Key)</span>
+                                  </button>
+                                  <button
                                     onClick={() => handleGenerateQuestionsForKisi(item)}
                                     disabled={isGeneratingSoal}
                                     className="w-full bg-emerald-50 text-emerald-800 hover:bg-emerald-100 text-[10px] font-bold py-1.5 px-1.5 rounded-lg border border-emerald-100 flex items-center justify-center gap-1 transition"
@@ -7647,6 +7875,15 @@ PANDUAN EKSTRA:
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => handleGenerateInstantQuestionsWithoutAPI()}
+                  disabled={isGeneratingSoal}
+                  className="bg-amber-500 hover:bg-amber-600 text-slate-950 px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition shadow-md cursor-pointer border border-amber-400"
+                  title="Buat butir soal langsung dari matriks kisi-kisi tanpa memerlukan API Key Gemini"
+                >
+                  <Zap className="h-4.5 w-4.5 fill-slate-950" />
+                  <span>⚡ Generate Soal Instan (Tanpa Key)</span>
+                </button>
                 <button
                   onClick={() => exportQuestionsToExcel(questions, printConfig.subjectName || config.mataPelajaran, printConfig.examName, printConfig.showAnswerKey)}
                   className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-sm cursor-pointer"

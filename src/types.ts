@@ -12,6 +12,7 @@ export interface KisiKisiItem {
   no: number;
   bentukSoal: BentukSoal;
   levelKognitif: LevelKognitif;
+  jenisSoal?: JenisSoal;
   elemenMateri: string;
   subElemenMateri: string;
   kompetensi: string;

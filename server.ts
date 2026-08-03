@@ -78,10 +78,11 @@ async function generateContentWithFallbackAndRetry(
 
   // Ordered by preferred + high availability across independent quota buckets
   const modelsToTry = [
-    "gemini-3.6-flash",
-    "gemini-3.1-pro-preview",
-    "gemini-3.1-flash-lite",
-    "gemini-flash-latest"
+    "gemini-2.0-flash",
+    "gemini-2.5-pro",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "gemini-2.0-flash-lite"
   ];
 
   const now = Date.now();
@@ -147,7 +148,7 @@ async function generateContentWithFallbackAndRetry(
             error?.status === 404 || 
             error?.statusCode === 404 || 
             error?.code === 404 || 
-            /not_found|404|no longer available/i.test(errorString);
+            /not_found|404|no longer available|requested entity was not found/i.test(errorString);
 
           if (isNotFound) {
             console.warn(`Model ${model} not found/deprecated. Skipping...`);
