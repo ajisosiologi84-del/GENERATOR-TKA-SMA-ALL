@@ -2609,10 +2609,11 @@ export default function App() {
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
   const [activePromptTab, setActivePromptTab] = useState<'ilustrasi' | 'tabel' | 'grafik' | 'stimulus'>('ilustrasi');
 
-  // AI Config state (Support client-side direct bypass of Vercel 10s timeouts)
+  // AI Config state (Support client-side direct bypass of Vercel 10s timeouts & N8N Sumopod Webhook)
   const [aiConfig, setAiConfig] = useState(() => {
     const savedKey = localStorage.getItem('gemini_api_key') || '';
     const savedMode = localStorage.getItem('gemini_api_mode') || 'server';
+    const savedN8nUrl = localStorage.getItem('n8n_webhook_url') || 'https://sumopod.com/webhook/generate-soal';
     let savedModel = localStorage.getItem('gemini_api_model') || 'gemini-2.0-flash';
     // Upgrade deprecated or invalid models automatically
     if (
@@ -2624,17 +2625,55 @@ export default function App() {
       localStorage.setItem('gemini_api_model', 'gemini-2.0-flash');
     }
     return {
-      mode: savedMode as 'server' | 'client',
+      mode: savedMode as 'server' | 'client' | 'n8n',
       apiKey: savedKey,
-      model: savedModel
+      model: savedModel,
+      n8nWebhookUrl: savedN8nUrl
     };
   });
   const [showApiKey, setShowApiKey] = useState(false);
   const [showApiKeySaved, setShowApiKeySaved] = useState(false);
+  const [testingN8n, setTestingN8n] = useState(false);
+  const [n8nTestStatus, setN8nTestStatus] = useState<{ success: boolean; message: string } | null>(null);
 
-  const handleSetAiMode = (mode: 'server' | 'client') => {
+  const handleSetAiMode = (mode: 'server' | 'client' | 'n8n') => {
     setAiConfig(prev => ({ ...prev, mode }));
     localStorage.setItem('gemini_api_mode', mode);
+  };
+
+  const handleSaveN8nUrl = (url: string) => {
+    setAiConfig(prev => ({ ...prev, n8nWebhookUrl: url }));
+    localStorage.setItem('n8n_webhook_url', url);
+  };
+
+  const handleTestN8nWebhook = async () => {
+    if (!aiConfig.n8nWebhookUrl) {
+      setN8nTestStatus({ success: false, message: 'URL Webhook N8N Sumopod masih kosong! Sila isi URL terlebih dahulu.' });
+      return;
+    }
+    setTestingN8n(true);
+    setN8nTestStatus(null);
+    try {
+      const res = await fetch(aiConfig.n8nWebhookUrl.trim(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'ping_test',
+          mataPelajaran: config.mataPelajaran || 'Sosiologi',
+          timestamp: new Date().toISOString()
+        })
+      });
+      if (res.ok) {
+        setN8nTestStatus({ success: true, message: `Koneksi Webhook N8N Sumopod Berhasil! (HTTP Status ${res.status})` });
+      } else {
+        const txt = await res.text().catch(() => '');
+        setN8nTestStatus({ success: false, message: `Webhook N8N merespon HTTP ${res.status}: ${txt || res.statusText}` });
+      }
+    } catch (err: any) {
+      setN8nTestStatus({ success: false, message: `Gagal terhubung ke N8N: ${err.message || 'CORS / Network Error'}` });
+    } finally {
+      setTestingN8n(false);
+    }
   };
 
   const getCleanApiKey = (keyString: string) => {
@@ -4309,231 +4348,154 @@ Hasilkan rancangan prompt instruksi lengkap, terstruktur, profesional, dan dalam
     }
   };
 
-  // Trigger server-side AI generation of questions for a specific Kisi-Kisi row
+  // Trigger AI generation of questions for a specific Kisi-Kisi row (Server, Client, or N8N)
   const handleGenerateQuestionsForKisi = async (kisi: KisiKisiItem) => {
+    if (!config.mataPelajaran) {
+      alert('Sila pilih Mata Pelajaran terlebih dahulu di Tab 1!');
+      return;
+    }
+
     setIsGeneratingSoal(true);
     const totalToGenerate = kisi.jumlahSoal || 1;
+    let currentNoSoal = questions.length + 1;
+    const allExistingSoalTexts = questions.map(q => q.soal);
+
     setSoalProgress({
       active: true,
       type: 'single',
-      currentNo: 1,
+      currentNo: kisi.no || 1,
       totalNo: 1,
-      topic: kisi.subElemenMateri || 'Materi Umum',
+      topic: kisi.subElemenMateri || 'Materi Single',
       countSuccess: 0,
       totalQuestions: totalToGenerate,
-      statusText: 'Menghubungkan ke server AI Gemini...'
+      statusText: `Menghubungkan ke AI (${aiConfig.mode === 'n8n' ? 'N8N Sumopod Webhook' : aiConfig.mode === 'client' ? 'Direct Gemini' : 'Server AI'}) untuk kisi-kisi No. ${kisi.no}...`
     });
 
     try {
-      const chunkSize = 1; // Set to 1 for maximum speed and to prevent gateway timeouts
-      let generatedSoalList: Question[] = [];
-      let currentNoSoal = questions.length + 1;
+      let data: any[] = [];
+      if (aiConfig.mode === 'n8n') {
+        data = await callN8nWebhook(kisi, totalToGenerate, currentNoSoal, allExistingSoalTexts);
+      } else if (aiConfig.mode === 'client') {
+        const systemInstruction = `Anda adalah ahli pembuat soal ujian nasional dan TKA (Tes Kemampuan Akademik) SMA di Indonesia. Anda sangat terampil menyusun soal tingkat tinggi (HOTS), bervariasi, mendalam, dan bebas dari bias. Patuhi instruksi bentuk soal dan parameter kognitif secara presisi.`;
+        const activeKonteksLokal = (kisi.konteksLokal && kisi.konteksLokal.length > 0) ? kisi.konteksLokal : config.konteksLokal;
+        const activeStimulusKonten = (kisi.stimulusKonten && kisi.stimulusKonten.length > 0) ? kisi.stimulusKonten : config.stimulusKonten;
+        const activeKualitasChecklist = (kisi.kualitasChecklist && kisi.kualitasChecklist.length > 0) ? kisi.kualitasChecklist : config.kualitasChecklist;
 
-      for (let i = 0; i < totalToGenerate; i += chunkSize) {
-        const countForThisChunk = Math.min(chunkSize, totalToGenerate - i);
-        
-        setSoalProgress(prev => ({
-          ...prev,
-          statusText: `Merancang butir soal #${i + 1} s.d #${i + countForThisChunk} via AI...`
-        }));
-        
-        // Combine current database questions with newly generated ones in this loop
-        const currentExistingSoalStems = [
-          ...questions.map(q => q.soal),
-          ...generatedSoalList.map(q => q.soal)
-        ];
+        const konteksStr = activeKonteksLokal.length > 0 ? `Integrasikan KONTEKS LOKAL INDONESIA berikut: ${activeKonteksLokal.join(", ")}.` : "";
+        const stimulusStr = activeStimulusKonten.length > 0 ? `Gunakan tipe STIMULUS: ${activeStimulusKonten.join(", ")}.` : "";
+        const checklistStr = activeKualitasChecklist.length > 0 ? `Pastikan KUALITAS SOAL: ${activeKualitasChecklist.join(", ")}.` : "";
 
-        let data;
-        if (aiConfig.mode === 'client') {
-          const systemInstruction = `Anda adalah ahli pembuat soal ujian nasional dan TKA (Tes Kemampuan Akademik) SMA di Indonesia. Anda sangat terampil menyusun soal tingkat tinggi (HOTS), bervariasi, mendalam, dan bebas dari bias. Patuhi instruksi bentuk soal dan parameter kognitif secara presisi.`;
+        const bentukSoalDesc = kisi.bentukSoal === "pilihan_ganda_sederhana" ? `Pilihan ganda sederhana: Satu jawaban benar (A-${config.jumlahOpsi === 5 ? "E" : "D"}).` : kisi.bentukSoal === "mcma" ? "PG Kompleks MCMA." : "PG Kompleks Kategori.";
 
-          const activeKonteksLokal = (kisi.konteksLokal && kisi.konteksLokal.length > 0) ? kisi.konteksLokal : config.konteksLokal;
-          const activeStimulusKonten = (kisi.stimulusKonten && kisi.stimulusKonten.length > 0) ? kisi.stimulusKonten : config.stimulusKonten;
-          const activeKualitasChecklist = (kisi.kualitasChecklist && kisi.kualitasChecklist.length > 0) ? kisi.kualitasChecklist : config.kualitasChecklist;
-
-          const konteksStr = activeKonteksLokal.length > 0 
-            ? `Integrasikan KONTEKS LOKAL INDONESIA berikut ke dalam stimulus atau soal: ${activeKonteksLokal.join(", ")}.`
-            : "";
-
-          const stimulusStr = activeStimulusKonten.length > 0
-            ? `Gunakan tipe STIMULUS DAN PENGEMBANGAN KONTEN berikut: ${activeStimulusKonten.join(", ")} (misal teks bacaan, data/tabel, berita, kasus nyata).`
-            : "Gunakan stimulus yang relevan jika sesuai dengan kompetensi.";
-
-          const checklistStr = activeKualitasChecklist.length > 0
-            ? `Pastikan memenuhi KUALITAS SOAL berikut: ${activeKualitasChecklist.join(", ")}.`
-            : "";
-
-          const bentukSoalDesc = 
-            kisi.bentukSoal === "pilihan_ganda_sederhana"
-              ? `Pilihan ganda sederhana: Hanya ada satu jawaban yang benar. Sediakan pilihan A sampai ${config.jumlahOpsi === 5 ? "E" : "D"}.`
-              : kisi.bentukSoal === "mcma"
-              ? `Pilihan ganda kompleks model multiple choice multiple answers (MCMA): Ada lebih dari satu jawaban yang benar. Peserta diminta memilih semua jawaban benar. Kunci jawaban harus menyebutkan semua pilihan yang benar (misal: 'A, C'). Sediakan pilihan A sampai ${config.jumlahOpsi === 5 ? "E" : "D"}.`
-              : "Pilihan ganda kompleks kategori: Menyajikan beberapa pernyataan (minimal 3-4 pernyataan) yang semuanya harus direspon, misalnya dengan pilihan 'Benar'/'Salah' atau 'Sesuai'/'Tidak Sesuai'. Kunci jawaban harus merinci status setiap pernyataan (misal: '1. Benar, 2. Salah, 3. Benar').";
-
-          // Construct constraint for existing questions to avoid duplicates in client-side generator
-          let clientExistingQuestionsConstraint = '';
-          const activeSlices = currentExistingSoalStems.filter(Boolean).slice(0, 30);
-          if (activeSlices.length > 0) {
-            clientExistingQuestionsConstraint = `\n\nHINDARI PENGULANGAN SOAL (SANGAT PENTING):\nJangan membuat soal yang sama, memiliki konsep atau contoh kasus/studi yang mirip, or menggunakan narasi stimulus yang mirip dengan soal-soal berikut:\n${activeSlices.map((text, idx) => `- Soal ${idx + 1}: ${text.substring(0, 150)}...`).join('\n')}\nPastikan butir soal yang Anda hasilkan saat ini benar-benar segar, baru, unik secara naratif, bervariasi, dan tidak mengulangi pertanyaan di atas.`;
-          }
-
-          let clientIndonesianLanguageCriteria = '';
-          if (config.mataPelajaran && (config.mataPelajaran.toLowerCase().includes('bahasa indonesia') || config.mataPelajaran.toLowerCase().includes('indonesia'))) {
-            clientIndonesianLanguageCriteria = `\n\nKAIDAH & KAIDAH MUATAN KHUSUS BAHASA INDONESIA (SANGAT PENTING):\n- Teks yang diujikan harus berupa Teks Informasi (Tunggal/Jamak yang berisi fakta, konsep, prosedur, metakognisi dari berbagai bidang pada skala lokal, nasional, global) ATAU Teks Fiksi (realisme/absurd dengan latar cerita konkret/abstrak, tokoh berkarakter bulat, konflik tunggal/jamak dengan penyelesaian terbuka, alur campuran, dan sudut pandang campuran).\n- Karakteristik Kosakata: Menggunakan kata khusus dan kata umum, kata berimbuhan kompleks, kata abstrak, makna denotatif, istilah teknis, atau konotatif konteks luas.\n- Karakteristik Kalimat: Setiap kalimat di dalam teks stimulus/soal harus berkisar antara 8-12 kata per kalimat, menggunakan kalimat kompleks berbagai pola serta kalimat inversi.\n- Karakteristik Wacana: Menggunakan konjungsi antarparagraf dengan makna 'pertentangan' dan 'sebab akibat', tanda baca pendukung makna yang tepat, dengan panjang teks berkisar antara 250-300 kata (kecuali jika bergenre puisi).`;
-          }
-
-          const prompt = `Buatkan tepat sebanyak ${countForThisChunk} butir soal ujian TKA SMA yang berbeda untuk Mata Pelajaran ${config.mataPelajaran}.${clientIndonesianLanguageCriteria}
-          
-PENTING: Jumlah objek soal yang dihasilkan dalam array JSON HARUS tepat sebanyak ${countForThisChunk} butir soal, tidak kurang dan tidak lebih.
-Setiap butir soal harus unik, bervariasi, dan didasarkan pada kisi-kisi berikut.
-
-INFORMASI MATRIKS ASESMEN KISI-KISI:
+        const prompt = `Buatkan tepat ${totalToGenerate} butir soal ujian TKA SMA untuk Mata Pelajaran ${config.mataPelajaran}.
+INFORMASI MATRIKS:
 - No Soal Mulai: ${currentNoSoal}
 - Bentuk Soal: ${kisi.bentukSoal} (${bentukSoalDesc})
-- Tingkat Kognitif: ${kisi.levelKognitif} (${kisi.levelKognitif === 'level_1' ? 'Pemahaman (Knowing) - Mengenali, mengingat, dan memahami konsep dasar' : kisi.levelKognitif === 'level_2' ? 'Penerapan (Applying) - Menerapkan konsep pada fenomena nyata' : 'Penalaran (Reasoning) - Berpikir kritis dan menalar secara logis'})
+- Tingkat Kognitif: ${kisi.levelKognitif}
 - Elemen/Materi: ${kisi.elemenMateri}
-- Sub-Elemen/Submateri: ${kisi.subElemenMateri}
-- Kompetensi yang Diuji: ${kisi.kompetensi}
-- Batasan/Catatan Khusus: ${kisi.batasanCatatan || "Tidak ada"}
-- Konteks Nusantara: ${kisi.konteksNusantara || "Tidak ada khusus"}
-- Stimulus Tambahan: ${kisi.stimulusTambahan || "Tidak ada khusus"}
-- Jenis Soal: ${config.jenisSoal} (Soal Tunggal atau Soal Grup/Terhubung)
-${clientExistingQuestionsConstraint}
+- Sub-Elemen: ${kisi.subElemenMateri}
+- Kompetensi: ${kisi.kompetensi}
+- Batasan/Catatan: ${kisi.batasanCatatan || "Tidak ada"}
+- Konteks Nusantara: ${kisi.konteksNusantara || "Tidak ada"}
+- Stimulus Tambahan: ${kisi.stimulusTambahan || "Tidak ada"}
+- Jenis Soal: ${config.jenisSoal}
+${konteksStr} ${stimulusStr} ${checklistStr}
+Hasilkan array JSON tepat ${totalToGenerate} objek soal.
+GABUNGKAN stimulus langsung ke awal field 'soal' dan kosongkan 'stimulus' (string kosong "").`;
 
-PANDUAN EKSTRA:
-1. ${konteksStr} ${kisi.konteksNusantara ? `Integrasikan juga secara mendalam target Konteks Nusantara berikut ke dalam stimulus atau pokok soal agar bernuansa ke-Indonesia-an yang otentik: "${kisi.konteksNusantara}".` : ""}
-2. ${stimulusStr} ${kisi.stimulusTambahan ? `Gunakan secara aktif target Stimulus Tambahan berikut untuk merancang stimulus/skenario pendukung yang kaya dan berbobot: "${kisi.stimulusTambahan}".` : ""}
-3. ${checklistStr}
-4. Kunci jawaban harus sangat akurat dan pembahasan harus lengkap, ilmiah, edukatif, dan terstruktur dengan rapi agar mudah dipahami siswa SMA. Tambahkan juga field 'kataKunci' yang berisi kata kunci atau konsep penting/topik utama yang digunakan/diuji dalam soal ini.
-5. JIKA soal membutuhkan visual pendukung (seperti grafik fungsi, diagram kartesius, bangun geometri, dsb.), Anda disarankan untuk membuat kode SVG inline yang valid (dimulai dengan '<svg' dan ditutup '</svg>' lengkap dengan viewBox, stroke, fill, teks label agar indah dan responsive) ATAU mencantumkan URL gambar Unsplash yang relevan pada field 'gambarUrl'. Jika tidak membutuhkan visual, isi 'gambarUrl' dengan string kosong "".
-6. Harap sesuaikan bahasa agar baku, formal, sesuai EBI (Ejaan Bahasa Indonesia), namun mudah dimengerti.
-7. Hasilkan tepat ${countForThisChunk} objek soal di dalam array hasil.
-8. SANGAT PENTING (MANDATORI): Gabungkan paragraf stimulus/pengantar/studi kasus (bila ada) langsung ke bagian awal field 'soal' (diikuti pertanyaan utama di bawahnya), dan kosongkan field 'stimulus' (isi dengan string kosong ""). Jangan memisahkannya agar struktur soal konsisten dengan prompt.`;
-
-          const soalSchema = {
-            type: "ARRAY",
-            items: {
-              type: "OBJECT",
-              properties: {
-                kompetensi: { type: "STRING" },
-                subKompetensi: { type: "STRING" },
-                bentukSoal: { type: "STRING" },
-                stimulus: { type: "STRING", description: "Sengaja dikosongkan karena stimulus digabungkan langsung ke dalam field 'soal' (isi dengan string kosong '')" },
-                soal: { type: "STRING", description: "Teks soal lengkap yang menggabungkan stimulus (paragraf stimulus/pengantar/teks bacaan/studi kasus jika ada) dan pertanyaan/pokok soal utama secara menyatu" },
-                opsi: { 
-                  type: "ARRAY", 
-                  items: { type: "STRING" }, 
-                  description: "Array pilihan jawaban (misal ['A. ...', 'B. ...']) atau daftar pernyataan untuk tipe kategori" 
-                },
-                kunciJawaban: { type: "STRING" },
-                pembahasan: { type: "STRING" },
-                kataKunci: { type: "STRING" },
-                gambarUrl: { type: "STRING" }
-              },
-              required: ["kompetensi", "subKompetensi", "bentukSoal", "soal", "opsi", "kunciJawaban", "pembahasan", "kataKunci", "gambarUrl"]
-            }
-          };
-
-          const responseText = await callGeminiDirect(systemInstruction, prompt, soalSchema);
-          data = JSON.parse(responseText);
-        } else {
-          const response = await fetch('/api/generate-soal', {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              'x-api-key': getCleanApiKey(aiConfig.apiKey)
+        const soalSchema = {
+          type: "ARRAY",
+          items: {
+            type: "OBJECT",
+            properties: {
+              kompetensi: { type: "STRING" },
+              subKompetensi: { type: "STRING" },
+              bentukSoal: { type: "STRING" },
+              stimulus: { type: "STRING" },
+              soal: { type: "STRING" },
+              opsi: { type: "ARRAY", items: { type: "STRING" } },
+              kunciJawaban: { type: "STRING" },
+              pembahasan: { type: "STRING" },
+              kataKunci: { type: "STRING" },
+              gambarUrl: { type: "STRING" }
             },
-            body: JSON.stringify({
-              kisi,
-              count: countForThisChunk,
-              mataPelajaran: config.mataPelajaran,
-              definisi: config.definisi,
-              muatan: config.muatan,
-              jumlahOpsi: config.jumlahOpsi,
-              jenisSoal: config.jenisSoal,
-              konteksLokal: config.konteksLokal,
-              stimulusKonten: config.stimulusKonten,
-              kualitasChecklist: config.kualitasChecklist,
-              noSoalStart: currentNoSoal,
-              existingQuestions: currentExistingSoalStems
-            })
-          });
-
-          if (!response.ok) {
-            let errorMsg = `Gagal menghubungi server AI untuk kumpulan soal ke-${Math.floor(i / chunkSize) + 1}`;
-            try {
-              const textError = await response.text();
-              if (textError.includes('<!doctype') || textError.includes('<html')) {
-                errorMsg = 'Server sedang sibuk atau mengalami timeout (Gateway Timeout). Coba lagi beberapa saat atau kurangi jumlah soal.';
-              } else {
-                try {
-                  const errorData = JSON.parse(textError);
-                  errorMsg = errorData.error || errorMsg;
-                } catch {
-                  errorMsg = textError || errorMsg;
-                }
-              }
-            } catch {}
-            throw new Error(errorMsg);
+            required: ["kompetensi", "subKompetensi", "bentukSoal", "soal", "opsi", "kunciJawaban", "pembahasan", "kataKunci", "gambarUrl"]
           }
+        };
 
-          try {
-            const responseText = await response.text();
-            data = JSON.parse(responseText);
-          } catch (jsonErr: any) {
-            throw new Error('Respon dari server tidak valid (bukan JSON format). Silakan coba lagi.');
-          }
+        const responseText = await callGeminiDirect(systemInstruction, prompt, soalSchema);
+        data = JSON.parse(responseText);
+      } else {
+        const response = await fetch('/api/generate-soal', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-api-key': getCleanApiKey(aiConfig.apiKey)
+          },
+          body: JSON.stringify({
+            kisi,
+            count: totalToGenerate,
+            mataPelajaran: config.mataPelajaran,
+            definisi: config.definisi,
+            muatan: config.muatan,
+            jumlahOpsi: config.jumlahOpsi,
+            jenisSoal: config.jenisSoal,
+            konteksLokal: config.konteksLokal,
+            stimulusKonten: config.stimulusKonten,
+            kualitasChecklist: config.kualitasChecklist,
+            noSoalStart: currentNoSoal,
+            existingQuestions: allExistingSoalTexts
+          })
+        });
+
+        if (!response.ok) {
+          const txt = await response.text();
+          throw new Error(`Server Error (${response.status}): ${txt}`);
         }
-
-        if (Array.isArray(data)) {
-          const mapped: Question[] = data.map((q: any, idx: number) => ({
-            id: `q-ai-${Date.now()}-${i}-${idx}`,
-            userId: currentUser?.uid,
-            noSoal: currentNoSoal + idx,
-            kisiKisiId: kisi.id,
-            kompetensi: q.kompetensi || kisi.kompetensi,
-            subKompetensi: q.subKompetensi || kisi.subElemenMateri,
-            bentukSoal: kisi.bentukSoal,
-            soal: q.soal,
-            stimulus: q.stimulus || '',
-            opsi: q.opsi || [],
-            kunciJawaban: q.kunciJawaban || 'A',
-            pembahasan: q.pembahasan || 'Pembahasan terstruktur.',
-            kataKunci: q.kataKunci || '',
-            gambarUrl: q.gambarUrl || ''
-          }));
-          
-          generatedSoalList = [...generatedSoalList, ...mapped];
-          currentNoSoal += mapped.length;
-
-          setSoalProgress(prev => ({
-            ...prev,
-            countSuccess: generatedSoalList.length,
-            statusText: `Berhasil merancang ${generatedSoalList.length} dari ${totalToGenerate} soal.`
-          }));
-        } else {
-          throw new Error('Respon server tidak berbentuk array.');
-        }
+        data = await response.json();
       }
 
-      if (generatedSoalList.length > 0) {
-        const qBatch = writeBatch(db);
-        generatedSoalList.forEach((qItem) => {
-          qBatch.set(doc(db, 'questions', qItem.id), qItem);
-        });
-        await qBatch.commit();
-
-        setActiveTab('soal');
-        setSoalProgress(prev => ({
-          ...prev,
-          statusText: 'Hampir selesai, memformat hasil...'
+      if (Array.isArray(data) && data.length > 0) {
+        const mapped: Question[] = data.map((q: any, idx: number) => ({
+          id: `q-ai-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${idx}`,
+          noSoal: currentNoSoal + idx,
+          kisiKisiId: kisi.id,
+          kompetensi: q.kompetensi || kisi.kompetensi,
+          subKompetensi: q.subKompetensi || kisi.subElemenMateri,
+          bentukSoal: kisi.bentukSoal,
+          soal: q.soal,
+          stimulus: q.stimulus || '',
+          opsi: q.opsi || [],
+          kunciJawaban: q.kunciJawaban || 'A',
+          pembahasan: q.pembahasan || 'Pembahasan terstruktur.',
+          kataKunci: q.kataKunci || '',
+          gambarUrl: q.gambarUrl || ''
         }));
-        await new Promise(resolve => setTimeout(resolve, 600));
-        alert(`Berhasil membuat ${generatedSoalList.length} butir Soal dari Kisi-Kisi No. ${kisi.no} secara otomatis via AI!`);
+
+        setQuestions(prev => {
+          const existingIds = new Set(prev.map(p => p.id));
+          const filtered = mapped.filter(m => !existingIds.has(m.id));
+          return [...prev, ...filtered];
+        });
+
+        if (currentUser?.uid) {
+          for (const newQ of mapped) {
+            try {
+              await setDoc(doc(db, 'questions', newQ.id), newQ);
+            } catch (err) {
+              console.warn("Failed syncing to firestore:", err);
+            }
+          }
+        }
+
+        alert(`🎉 Berhasil membuat ${mapped.length} butir soal untuk kisi-kisi No. ${kisi.no}!`);
+        setActiveTab('soal');
+      } else {
+        throw new Error("Respon yang dihasilkan kosong atau format tidak sesuai.");
       }
     } catch (err: any) {
-      console.error(err);
-      alert(`Gagal membuat soal via AI: ${err.message}. Anda bisa menyusun soal secara manual dengan menekan tombol Tambah Soal.`);
+      console.error('Error generating for kisi:', err);
+      alert(`⚠️ Gagal menyusun soal: ${err.message || 'Error'}`);
     } finally {
       setIsGeneratingSoal(false);
       setSoalProgress(prev => ({ ...prev, active: false }));
@@ -4653,14 +4615,69 @@ Ingat: HANYA berikan kode SVG murni. Jika Anda membungkusnya dengan blok markdow
   const [importAiError, setImportAiError] = useState<string | null>(null);
   const [isImportingAi, setIsImportingAi] = useState(false);
 
+  // State to track detected parser strategy in UI
+  const [importAiDetectedFormat, setImportAiDetectedFormat] = useState<string>('');
+
+  // Helper function to enrich parsed questions with Matrix Kisi-Kisi if available
+  const enrichWithMatrix = (qList: Question[]): Question[] => {
+    if (!kisiList || kisiList.length === 0) return qList;
+
+    return qList.map((q, idx) => {
+      const qNum = q.noSoal || (idx + 1);
+
+      // Calculate cumulative question range for each Kisi-Kisi row
+      let matchedKisi: KisiKisiItem | undefined;
+      let currStart = 1;
+      for (const k of kisiList) {
+        const qty = k.jumlahSoal || 1;
+        const currEnd = currStart + qty - 1;
+        if (qNum >= currStart && qNum <= currEnd) {
+          matchedKisi = k;
+          break;
+        }
+        currStart += qty;
+      }
+
+      if (!matchedKisi) {
+        matchedKisi = kisiList.find(k => k.no === qNum) || kisiList[idx] || kisiList[kisiList.length - 1];
+      }
+
+      if (matchedKisi) {
+        const mainKompetensi = (!q.kompetensi || q.kompetensi === 'Kompetensi Asesmen TKA SMA' || q.kompetensi === matchedKisi.subElemenMateri)
+          ? matchedKisi.elemenMateri
+          : q.kompetensi;
+
+        const subKompetensi = (!q.subKompetensi || q.subKompetensi === 'Materi TKA SMA')
+          ? matchedKisi.subElemenMateri
+          : q.subKompetensi;
+
+        return {
+          ...q,
+          noSoal: qNum,
+          kisiKisiId: matchedKisi.id,
+          kompetensi: mainKompetensi,
+          subKompetensi: subKompetensi,
+          bentukSoal: q.bentukSoal || matchedKisi.bentukSoal || 'pilihan_ganda_sederhana'
+        };
+      }
+      return q;
+    });
+  };
+
   // Helper parser for raw text or JSON into Question objects
   const parseAiQuestionsText = (rawText: string): Question[] => {
-    if (!rawText || !rawText.trim()) return [];
+    if (!rawText || !rawText.trim()) {
+      setImportAiDetectedFormat('');
+      return [];
+    }
 
     const textToParse = rawText.trim();
-    const parsedQuestions: Question[] = [];
+    let parsedQuestions: Question[] = [];
+    const startNo = questions.length + 1;
 
-    // 1. Try JSON parsing
+    // ----------------------------------------------------
+    // STRATEGY 1: JSON PARSER
+    // ----------------------------------------------------
     let jsonMatch = textToParse.match(/\[\s*\{[\s\S]*\}\s*\]/);
     if (!jsonMatch && textToParse.startsWith('[') && textToParse.endsWith(']')) {
       jsonMatch = [textToParse];
@@ -4669,31 +4686,46 @@ Ingat: HANYA berikan kode SVG murni. Jika Anda membungkusnya dengan blok markdow
     if (jsonMatch) {
       try {
         const parsedJson = JSON.parse(jsonMatch[0]);
-        if (Array.isArray(parsedJson)) {
-          let noCount = questions.length + 1;
+        if (Array.isArray(parsedJson) && parsedJson.length > 0) {
           parsedJson.forEach((item, idx) => {
             if (typeof item === 'object' && item !== null) {
-              const questionBody = item.soal || item.pertanyaan || item.question || item.item || '';
+              const questionBody = item.soal || item.pertanyaan || item.question || item.item || item.textSoal || '';
               if (questionBody) {
                 let rawOptions = item.opsi || item.pilihan || item.options || [];
                 if (typeof rawOptions === 'string') {
                   rawOptions = rawOptions.split(/\n+/).map((o: string) => o.trim()).filter(Boolean);
+                } else if (!Array.isArray(rawOptions) && typeof item.opsiA === 'string') {
+                  rawOptions = [item.opsiA, item.opsiB, item.opsiC, item.opsiD, item.opsiE].filter(Boolean);
                 }
+
+                const cleanOpts = (Array.isArray(rawOptions) ? rawOptions : []).map((optStr: string, oIdx: number) => {
+                  const letter = String.fromCharCode(65 + oIdx);
+                  const cleaned = optStr.replace(/^[\*\-\•\s]*\*?\*?([A-E1-5])\*?\*?\s*[\.\)]\s*/i, '').replace(/\*\*([^*]+)\*\*/g, '$1').trim();
+                  return `${letter}. ${cleaned}`;
+                });
+
+                let bSoal: BentukSoal = 'pilihan_ganda_sederhana';
+                const rawBentuk = String(item.bentukSoal || item.bentuk || '').toLowerCase();
+                if (rawBentuk.includes('mcma') || rawBentuk.includes('kompleks') || rawBentuk.includes('banyak')) {
+                  bSoal = 'mcma';
+                } else if (rawBentuk.includes('kategori') || rawBentuk.includes('jodoh') || rawBentuk.includes('pernyataan')) {
+                  bSoal = 'kategori';
+                }
+
                 const uniqueId = `q-ai-import-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${idx + 1}`;
-                
                 parsedQuestions.push({
                   id: uniqueId,
                   userId: currentUser?.uid,
-                  noSoal: item.noSoal || item.no || (noCount++),
+                  noSoal: item.noSoal || item.no || (startNo + idx),
                   kisiKisiId: item.kisiKisiId || '',
-                  kompetensi: item.kompetensi || config.kompetensi || 'Kompetensi Asesmen TKA SMA',
-                  subKompetensi: item.subKompetensi || item.submateri || item.elemenMateri || config.subElemenMateri || 'Materi TKA SMA',
-                  bentukSoal: (item.bentukSoal as BentukSoal) || 'pilihan_ganda_sederhana',
-                  soal: questionBody,
-                  stimulus: item.stimulus || item.wacana || '',
-                  opsi: Array.isArray(rawOptions) ? rawOptions : [],
-                  kunciJawaban: item.kunciJawaban || item.kunci || item.jawaban || 'A',
-                  pembahasan: item.pembahasan || item.penjelasan || item.rationale || 'Pembahasan telah disesuaikan dengan kunci jawaban.',
+                  kompetensi: item.kompetensi || item.materi || item.elemen || config.kompetensi || 'Kompetensi Asesmen TKA SMA',
+                  subKompetensi: item.subKompetensi || item.submateri || item.subElemen || config.subElemenMateri || 'Materi TKA SMA',
+                  bentukSoal: bSoal,
+                  soal: questionBody.replace(/\*\*([^*]+)\*\*/g, '$1').trim(),
+                  stimulus: (item.stimulus || item.wacana || item.ringkasanStimulus || '').replace(/\*\*([^*]+)\*\*/g, '$1').trim(),
+                  opsi: cleanOpts.length > 0 ? cleanOpts : ['A. Opsi A', 'B. Opsi B', 'C. Opsi C', 'D. Opsi D', 'E. Opsi E'],
+                  kunciJawaban: String(item.kunciJawaban || item.kunci || item.jawaban || 'A').replace(/\*\*([^*]+)\*\*/g, '$1').trim(),
+                  pembahasan: (item.pembahasan || item.penjelasan || item.rationale || 'Pembahasan disesuaikan dengan naskah.').replace(/\*\*([^*]+)\*\*/g, '$1').trim(),
                   kataKunci: item.kataKunci || `${config.mataPelajaran || 'TKA SMA'}, ${config.elemenMateri || ''}`
                 });
               }
@@ -4701,110 +4733,314 @@ Ingat: HANYA berikan kode SVG murni. Jika Anda membungkusnya dengan blok markdow
           });
 
           if (parsedQuestions.length > 0) {
-            return parsedQuestions;
+            setImportAiDetectedFormat('JSON Array');
+            return enrichWithMatrix(parsedQuestions);
           }
         }
       } catch (e) {
-        console.warn("JSON parsing failed, falling back to structured text parser...", e);
+        console.warn("JSON parsing skipped:", e);
       }
     }
 
-    // 2. Structured Text Parser
-    const cleanedText = textToParse.replace(/\r\n/g, '\n');
+    // ----------------------------------------------------
+    // STRATEGY 2: MARKDOWN TABLE / TSV PARSER (BAGIAN 2 MEGAPROMPT)
+    // ----------------------------------------------------
+    const lines = textToParse.replace(/\r\n/g, '\n').split('\n');
+    const tableHeaderIdx = lines.findIndex(l => {
+      const lower = l.toLowerCase();
+      return (lower.includes('no') || lower.includes('nomor')) &&
+             (lower.includes('soal') || lower.includes('pertanyaan')) &&
+             (lower.includes('opsi') || lower.includes('materi') || lower.includes('kunci'));
+    });
 
-    // Split text into question blocks based on common question header patterns
-    const blocks = cleanedText
-      .split(/(?:\n\s*|\n*)(?=(?:\[?\bKISI-KISI\s*NO\.?\s*\d+|\[?\bSOAL\s*(?:NO\.?|NOMOR)?\s*\d+|\bNO\.?\s*\d+[\.\:\)]|\bPERTANYAAN\s*\d+|\d+\.\s+[A-Z]))/i)
-      .map(b => b.trim())
-      .filter(b => b.length > 15);
+    if (tableHeaderIdx !== -1) {
+      const headerLine = lines[tableHeaderIdx];
+      const isMarkdown = headerLine.includes('|');
+      const delimiter = isMarkdown ? '|' : '\t';
 
-    let currentNo = questions.length + 1;
+      const rawHeaders = headerLine.split(delimiter).map(h => h.replace(/\*/g, '').trim()).filter(Boolean);
 
-    const processSingleBlock = (blockStr: string, idx: number) => {
-      const lines = blockStr.split('\n').map(l => l.trim()).filter(Boolean);
+      if (rawHeaders.length >= 5) {
+        const getColIdx = (keywords: string[]) => {
+          return rawHeaders.findIndex(h => {
+            const hl = h.toLowerCase();
+            return keywords.some(kw => hl.includes(kw));
+          });
+        };
 
-      let soalText = '';
-      let stimulusText = '';
-      let kunciText = 'A';
-      let pembahasanText = '';
-      let kompetensiText = config.kompetensi || 'Kompetensi Asesmen TKA SMA';
-      let subKompetensiText = config.subElemenMateri || 'Materi TKA SMA';
-      let bentukSoalType: BentukSoal = 'pilihan_ganda_sederhana';
+        const materiIdx = getColIdx(['elemen', 'materi utama', 'materi', 'kompetensi']);
+        const submateriIdx = getColIdx(['submateri', 'sub-elemen', 'sub', 'sub kompetensi']);
+        const bentukIdx = getColIdx(['bentuk']);
+        const stimIdx = getColIdx(['stimulus', 'wacana', 'ringkasan']);
+        const soalIdx = getColIdx(['pertanyaan', 'teks soal', 'soal']);
+        const optAIdx = getColIdx(['opsi a', 'pilihan a']);
+        const optBIdx = getColIdx(['opsi b', 'pilihan b']);
+        const optCIdx = getColIdx(['opsi c', 'pilihan c']);
+        const optDIdx = getColIdx(['opsi d', 'pilihan d']);
+        const optEIdx = getColIdx(['opsi e', 'pilihan e']);
+        const optCombIdx = getColIdx(['opsi', 'pilihan']);
+        const kunciIdx = getColIdx(['kunci']);
+        const pembIdx = getColIdx(['pembahasan', 'penjelasan', 'rationale']);
 
-      // Options extraction
-      const optionLines: string[] = [];
-      lines.forEach(l => {
-        if (/^[A-E]\s*[\.\)]\s*/i.test(l) || /^[1-5]\s*[\.\)]\s*/i.test(l)) {
-          optionLines.push(l);
+        let countRow = 0;
+        for (let i = tableHeaderIdx + 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line || line.startsWith('|---') || line.startsWith('| :-') || line.startsWith('---')) continue;
+
+          const cells = isMarkdown 
+            ? line.split('|').map(c => c.trim())
+            : line.split('\t').map(c => c.trim());
+
+          const cleanCells = isMarkdown ? cells.filter((_, idx) => !(idx === 0 && cells[0] === '') && !(idx === cells.length - 1 && cells[cells.length - 1] === '')) : cells;
+
+          if (cleanCells.length < 3) continue;
+
+          const qSoalText = soalIdx !== -1 && cleanCells[soalIdx] ? cleanCells[soalIdx] : '';
+          if (!qSoalText || qSoalText.length < 3) continue;
+
+          countRow++;
+          const qMateri = materiIdx !== -1 && cleanCells[materiIdx] ? cleanCells[materiIdx] : (config.elemenMateri || 'Materi Utama');
+          const qSubMateri = submateriIdx !== -1 && cleanCells[submateriIdx] ? cleanCells[submateriIdx] : (config.subElemenMateri || 'Submateri');
+          const qStim = stimIdx !== -1 && cleanCells[stimIdx] ? cleanCells[stimIdx] : '';
+
+          let bSoal: BentukSoal = 'pilihan_ganda_sederhana';
+          if (bentukIdx !== -1 && cleanCells[bentukIdx]) {
+            const bt = cleanCells[bentukIdx].toLowerCase();
+            if (bt.includes('mcma') || bt.includes('kompleks') || bt.includes('banyak')) bSoal = 'mcma';
+            else if (bt.includes('kategori') || bt.includes('jodoh')) bSoal = 'kategori';
+          }
+
+          let opts: string[] = [];
+          if (optAIdx !== -1 && cleanCells[optAIdx]) {
+            const a = cleanCells[optAIdx].replace(/^[A-E]\.\s*/i, '');
+            const b = optBIdx !== -1 && cleanCells[optBIdx] ? cleanCells[optBIdx].replace(/^[A-E]\.\s*/i, '') : '';
+            const c = optCIdx !== -1 && cleanCells[optCIdx] ? cleanCells[optCIdx].replace(/^[A-E]\.\s*/i, '') : '';
+            const d = optDIdx !== -1 && cleanCells[optDIdx] ? cleanCells[optDIdx].replace(/^[A-E]\.\s*/i, '') : '';
+            const e = optEIdx !== -1 && cleanCells[optEIdx] ? cleanCells[optEIdx].replace(/^[A-E]\.\s*/i, '') : '';
+
+            opts = [`A. ${a}`, `B. ${b}`, `C. ${c}`, `D. ${d}`];
+            if (e) opts.push(`E. ${e}`);
+          } else if (optCombIdx !== -1 && cleanCells[optCombIdx]) {
+            const rawComb = cleanCells[optCombIdx];
+            opts = rawComb.split(/[\n;]+/).map(s => s.trim()).filter(Boolean);
+          }
+
+          if (opts.length === 0) {
+            opts = ['A. Opsi A', 'B. Opsi B', 'C. Opsi C', 'D. Opsi D', 'E. Opsi E'];
+          }
+
+          const qKunci = kunciIdx !== -1 && cleanCells[kunciIdx] ? cleanCells[kunciIdx] : 'A';
+          const qPemb = pembIdx !== -1 && cleanCells[pembIdx] ? cleanCells[pembIdx] : 'Pembahasan sesuai naskah AI.';
+
+          const uniqueId = `q-ai-import-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${countRow}`;
+          parsedQuestions.push({
+            id: uniqueId,
+            userId: currentUser?.uid,
+            noSoal: startNo + countRow - 1,
+            kisiKisiId: '',
+            kompetensi: qMateri,
+            subKompetensi: qSubMateri,
+            bentukSoal: bSoal,
+            soal: qSoalText.replace(/\*\*([^*]+)\*\*/g, '$1').trim(),
+            stimulus: qStim.replace(/\*\*([^*]+)\*\*/g, '$1').trim(),
+            opsi: opts,
+            kunciJawaban: qKunci.replace(/\*\*([^*]+)\*\*/g, '$1').trim(),
+            pembahasan: qPemb.replace(/\*\*([^*]+)\*\*/g, '$1').trim(),
+            kataKunci: `${config.mataPelajaran || 'TKA SMA'}, ${qMateri}`
+          });
         }
-      });
 
-      // Extract KUNCI JAWABAN
-      const kunciMatch = blockStr.match(/(?:KUNCI\s*JAWABAN|KUNCI|JAWABAN\s*BENAR|ANSWER)\s*[\:\=]\s*([A-E1-5\s\,\-\+\w]+)/i);
-      if (kunciMatch) {
-        kunciText = kunciMatch[1].trim();
+        if (parsedQuestions.length > 0) {
+          setImportAiDetectedFormat('Tabel Matriks Excel/Markdown (Bagian 2)');
+          return enrichWithMatrix(parsedQuestions);
+        }
+      }
+    }
+
+    // ----------------------------------------------------
+    // STRATEGY 3: STRUCTURED TEXT / NASKAH WORD (.DOCX) PARSER
+    // Matches Butir Soal TKA SMA format (Bagian 1 / Word Export)
+    // ----------------------------------------------------
+    let cleanedText = textToParse.replace(/\r\n/g, '\n');
+    
+    // Cut off [BAGIAN 2: ...] if present at the end of text so table rows don't append to last question
+    const bagian2Idx = cleanedText.indexOf('[BAGIAN 2');
+    if (bagian2Idx > 100) {
+      cleanedText = cleanedText.substring(0, bagian2Idx);
+    }
+
+    // Split into blocks by question header patterns
+    const questionHeaderRegex = /(?:\n+|^)(?=(?:#{1,6}\s*|\*{0,2}\s*)?(?:\[?\b(?:NO\.?\s*SOAL|SOAL\s*(?:NO\.?|NOMOR)?|BUTIR\s*SOAL|KISI-KISI\s*NO\.?|PERTANYAAN)\s*\d+\]?|\bNO\.?\s*\d+[\.\:\)]|\d+[\.\)]\s*(?:\*{0,2}\s*)?(?:\[?\bSOAL|\[?\bSPESIFIKASI|\bSTIMULUS|\bPERTANYAAN|\bKOMPETENSI)))/i;
+
+    const rawBlocks = cleanedText.split(questionHeaderRegex).map(b => b.trim()).filter(b => b.length > 15);
+
+    rawBlocks.forEach((blockStr, idx) => {
+      if (idx === 0 && !/(?:SOAL|STIMULUS|PERTANYAAN|OPSI|KUNCI|PEMBAHASAN|KOMPETENSI)/i.test(blockStr)) {
+        return;
       }
 
-      // Extract PEMBAHASAN
-      const pemmMatch = blockStr.match(/(?:PEMBAHASAN|RATIONALE|PENJELASAN|ALASAN)\s*[\:\=]\s*([\s\S]*?)(?=(?:\[?SOAL|\[?KISI-KISI|\bNO\.?\s*\d+|$))/i);
-      if (pemmMatch) {
-        pembahasanText = pemmMatch[1].trim();
+      const blockLines = blockStr.split('\n').map(l => l.trim()).filter(Boolean);
+
+      let noSoalVal = startNo + idx;
+      let kompetensiVal = config.kompetensi || 'Kompetensi Asesmen TKA SMA';
+      let subKompetensiVal = config.subElemenMateri || 'Materi TKA SMA';
+      let bentukSoalVal: BentukSoal = 'pilihan_ganda_sederhana';
+      let stimulusVal = '';
+      let kunciVal = 'A';
+      let pembahasanVal = 'Pembahasan telah disesuaikan dengan naskah Gemini AI.';
+
+      // Extract metadata with optional colons
+      const noMatch = blockStr.match(/(?:NO\.?\s*SOAL|SOAL\s*(?:NO\.?|NOMOR)?|BUTIR\s*SOAL)\s*[\:\=]?\s*(\d+)/i) || blockStr.match(/^(\d+)[\.\)]/);
+      if (noMatch) {
+        noSoalVal = parseInt(noMatch[1], 10);
       }
 
-      // Extract STIMULUS
-      const stimMatch = blockStr.match(/(?:STIMULUS|WACANA|KASUS|TEKS)\s*[\:\=]\s*([\s\S]*?)(?=(?:SOAL|PERTANYAAN|BUTIR|OPSI|A\s*[\.\)]|$))/i);
-      if (stimMatch) {
-        stimulusText = stimMatch[1].trim();
+      const komMatch = blockStr.match(/(?:Kompetensi|Materi\s*Utama|Elemen|Materi)\s*[\:\=]?\s*([^\n]+)/i);
+      if (komMatch) {
+        const raw = komMatch[1].replace(/\*/g, '').trim();
+        if (raw && !raw.toLowerCase().startsWith('sub')) {
+          kompetensiVal = raw;
+        }
       }
 
-      // Extract SOAL / PERTANYAAN
-      const soalMatch = blockStr.match(/(?:SOAL|PERTANYAAN|BUTIR PERTANYAAN)\s*[\:\=]\s*([\s\S]*?)(?=(?:OPSI|A\s*[\.\)]|1\s*[\.\)]|KUNCI|PEMBAHASAN|$))/i);
-      if (soalMatch) {
-        soalText = soalMatch[1].trim();
-      } else {
-        const filteredLines = lines.filter(l => 
-          !/^[A-E]\s*[\.\)]/i.test(l) &&
-          !/^(?:KUNCI|PEMBAHASAN|STIMULUS|WACANA|KISI-KISI|NOMOR|MATERI|SUBMATERI|LEVEL|BENTUK)/i.test(l)
-        );
-        soalText = filteredLines.slice(0, 4).join(' ');
-      }
-
-      soalText = soalText.replace(/^\[?SOAL\s*(?:NO\.?|NOMOR)?\s*\d+\]?\s*[\:\.\-]?\s*/i, '').trim();
-      soalText = soalText.replace(/^NO\.?\s*\d+[\.\:\)]\s*/i, '').trim();
-      soalText = soalText.replace(/^\d+\.\s*/, '').trim();
-
-      const subMatch = blockStr.match(/(?:Submateri|Sub-Elemen|Sub\s*Materi)\s*[\:\=]\s*([^\n]+)/i);
+      const subMatch = blockStr.match(/(?:Sub\s*Kompetensi|Submateri|Sub-Elemen|Sub\s*Materi)\s*[\:\=]?\s*([^\n]+)/i);
       if (subMatch) {
-        subKompetensiText = subMatch[1].trim();
+        subKompetensiVal = subMatch[1].replace(/\*/g, '').trim();
       }
 
-      if (soalText.length > 5 || optionLines.length > 0) {
+      const bentukMatch = blockStr.match(/(?:Bentuk\s*Soal|Bentuk)\s*[\:\=]?\s*([^\n]+)/i);
+      if (bentukMatch) {
+        const bt = bentukMatch[1].toLowerCase();
+        if (bt.includes('mcma') || bt.includes('kompleks') || bt.includes('banyak')) {
+          bentukSoalVal = 'mcma';
+        } else if (bt.includes('kategori') || bt.includes('jodoh') || bt.includes('pernyataan')) {
+          bentukSoalVal = 'kategori';
+        } else {
+          bentukSoalVal = 'pilihan_ganda_sederhana';
+        }
+      } else {
+        if (/MCMA|Pilihan Ganda Kompleks|Banyak Jawaban/i.test(blockStr)) bentukSoalVal = 'mcma';
+        else if (/Kategori|Menjodohkan|Pernyataan/i.test(blockStr)) bentukSoalVal = 'kategori';
+      }
+
+      const kunciMatch = blockStr.match(/(?:KUNCI\s*JAWABAN|KUNCI|JAWABAN\s*BENAR|ANSWER)\s*[\:\=]?\s*([^\n]+)/i);
+      if (kunciMatch) {
+        kunciVal = kunciMatch[1].replace(/\*/g, '').trim();
+      }
+
+      const pemmMatch = blockStr.match(/(?:PEMBAHASAN|RATIONALE|PENJELASAN|ALASAN)\s*(?:MENDALAM)?\s*[\:\=]?\s*([\s\S]*?)(?=(?:\[?SOAL|\[?KISI-KISI|\[?BAGIAN|#{1,6}|\*{0,2}SOAL|NO\.?\s*SOAL|NO\.?\s*\d+|$))/i);
+      if (pemmMatch) {
+        pembahasanVal = pemmMatch[1].replace(/\*\*([^*]+)\*\*/g, '$1').trim();
+      }
+
+      const stimMatch = blockStr.match(/(?:STIMULUS|WACANA|KASUS|TEKS|NARASI)\s*(?:LENGKAP)?\s*[\:\=]?\s*([\s\S]*?)(?=(?:PERTANYAAN|SOAL|BUTIR|OPSI|A\s*[\.\)]|\*\*A\.\*\*|1\s*[\.\)]|KUNCI|PEMBAHASAN|$))/i);
+      if (stimMatch) {
+        stimulusVal = stimMatch[1].replace(/\*\*([^*]+)\*\*/g, '$1').trim();
+      }
+
+      // Line by line state parser for Soal & Options
+      let section: 'metadata' | 'soal' | 'stimulus' | 'options' | 'footer' = 'metadata';
+      const soalLinesArr: string[] = [];
+      const optionLinesArr: string[] = [];
+
+      for (let i = 0; i < blockLines.length; i++) {
+        const line = blockLines[i];
+
+        // Check if line is metadata key or footer key (Kunci/Pembahasan/Pedoman/Rubrik/Kompetensi/Sub Kompetensi/Bentuk)
+        if (/^(?:NO\.?\s*SOAL|SOAL\s*(?:NO|NOMOR)?|BUTIR\s*SOAL|KOMPETENSI|SUB\s*KOMPETENSI|BENTUK\s*SOAL|KUNCI|JAWABAN|PEMBAHASAN|PENJELASAN|RATIONALE|PEDOMAN|RUBRIK|BOBOT|LEVEL)/i.test(line)) {
+          if (/^(?:KUNCI|JAWABAN|PEMBAHASAN|PENJELASAN|RATIONALE|PEDOMAN|RUBRIK|BOBOT)/i.test(line)) {
+            section = 'footer';
+          }
+          continue;
+        }
+
+        // If currently in footer section, do NOT append to options or soal
+        if (section === 'footer') {
+          continue;
+        }
+
+        // Check if line is Pertanyaan header
+        if (/^(?:PERTANYAAN|SOAL|BUTIR\s*PERTANYAAN|TEKS\s*SOAL)\s*[\:\=]?/i.test(line)) {
+          section = 'soal';
+          const afterTag = line.replace(/^(?:PERTANYAAN|SOAL|BUTIR\s*PERTANYAAN|TEKS\s*SOAL)\s*[\:\=]?\s*/i, '').trim();
+          if (afterTag) {
+            soalLinesArr.push(afterTag);
+          }
+          continue;
+        }
+
+        // Check if line is Stimulus header
+        if (/^(?:STIMULUS|WACANA|KASUS|NARASI)\s*[\:\=]?/i.test(line)) {
+          section = 'stimulus';
+          const afterTag = line.replace(/^(?:STIMULUS|WACANA|KASUS|NARASI)\s*[\:\=]?\s*/i, '').trim();
+          if (afterTag && !stimulusVal) {
+            stimulusVal = afterTag;
+          }
+          continue;
+        }
+
+        // Check if line is an Option start (A., B., C., D., E. or 1., 2., 3., 4., 5.)
+        const optMatch = line.match(/^(?:[\*\-\•\s]*)?(?:\*{0,2})([A-E1-5])(?:\*{0,2})\s*[\.\)]\s*(.+)/i);
+        if (optMatch) {
+          section = 'options';
+          const letter = optMatch[1].toUpperCase();
+          const cleanOptText = optMatch[2].replace(/\*\*([^*]+)\*\*/g, '$1').trim();
+          let normLetter = letter;
+          if (['1','2','3','4','5'].includes(letter)) {
+            normLetter = String.fromCharCode(64 + parseInt(letter, 10));
+          }
+          optionLinesArr.push(`${normLetter}. ${cleanOptText}`);
+          continue;
+        }
+
+        // If in options section and line is a multi-line continuation of current option
+        if (section === 'options' && optionLinesArr.length > 0) {
+          optionLinesArr[optionLinesArr.length - 1] += ` ${line.replace(/\*\*([^*]+)\*\*/g, '$1').trim()}`;
+          continue;
+        }
+
+        // If in soal/stimulus/metadata section and line contains question text
+        if (section === 'soal' || section === 'metadata' || section === 'stimulus') {
+          if (section === 'metadata' && line.length > 5) {
+            section = 'soal';
+          }
+          if (section === 'soal') {
+            soalLinesArr.push(line.replace(/\*\*([^*]+)\*\*/g, '$1').trim());
+          }
+        }
+      }
+
+      let soalStr = soalLinesArr.join(' ').trim();
+      soalStr = soalStr.replace(/^\[?SOAL\s*(?:NO\.?|NOMOR)?\s*\d+\]?\s*[\:\.\-]?\s*/i, '').trim();
+      soalStr = soalStr.replace(/^NO\.?\s*SOAL\s*\d+[\.\:\)]?\s*/i, '').trim();
+
+      if (soalStr.length > 5 || optionLinesArr.length > 0) {
         const uniqueId = `q-ai-import-${Date.now()}-${Math.random().toString(36).substring(2, 7)}-${idx + 1}`;
         
         parsedQuestions.push({
           id: uniqueId,
           userId: currentUser?.uid,
-          noSoal: currentNo++,
+          noSoal: noSoalVal,
           kisiKisiId: '',
-          kompetensi: kompetensiText,
-          subKompetensi: subKompetensiText,
-          bentukSoal: bentukSoalType,
-          soal: soalText || `Butir Soal #${idx + 1} dari Gemini AI`,
-          stimulus: stimulusText,
-          opsi: optionLines.length > 0 ? optionLines : ['A. Opsi A', 'B. Opsi B', 'C. Opsi C', 'D. Opsi D', 'E. Opsi E'],
-          kunciJawaban: kunciText,
-          pembahasan: pembahasanText || 'Pembahasan telah disesuaikan dengan naskah Gemini AI.',
-          kataKunci: `${config.mataPelajaran || 'TKA SMA'}, ${config.elemenMateri || ''}`
+          kompetensi: kompetensiVal,
+          subKompetensi: subKompetensiVal,
+          bentukSoal: bentukSoalVal,
+          soal: soalStr || `Butir Soal #${noSoalVal} dari Gemini AI`,
+          stimulus: stimulusVal,
+          opsi: optionLinesArr.length > 0 ? optionLinesArr : ['A. Opsi A', 'B. Opsi B', 'C. Opsi C', 'D. Opsi D', 'E. Opsi E'],
+          kunciJawaban: kunciVal,
+          pembahasan: pembahasanVal,
+          kataKunci: `${config.mataPelajaran || 'TKA SMA'}, ${kompetensiVal}`
         });
       }
-    };
+    });
 
-    if (blocks.length > 0) {
-      blocks.forEach((b, idx) => processSingleBlock(b, idx));
-    } else {
-      processSingleBlock(cleanedText, 0);
+    if (parsedQuestions.length > 0) {
+      setImportAiDetectedFormat('Naskah Soal Word (Bagian 1)');
+      return enrichWithMatrix(parsedQuestions);
     }
 
+    setImportAiDetectedFormat('Format Bebas');
     return parsedQuestions;
   };
 
@@ -4880,6 +5116,67 @@ Ingat: HANYA berikan kode SVG murni. Jika Anda membungkusnya dengan blok markdow
     }
   };
 
+  // Helper for calling N8N Webhook on Sumopod
+  const callN8nWebhook = async (
+    kisi: KisiKisiItem,
+    count: number,
+    currentNoSoal: number,
+    allExistingSoalTexts: string[]
+  ): Promise<any[]> => {
+    if (!aiConfig.n8nWebhookUrl) {
+      throw new Error("URL Webhook N8N Sumopod belum diisi! Silakan masukkan URL Webhook N8N di Tab 1 (Pengaturan Koneksi AI).");
+    }
+
+    const payload = {
+      mataPelajaran: config.mataPelajaran,
+      kisi,
+      count,
+      noSoalStart: currentNoSoal,
+      definisi: config.definisi,
+      muatan: config.muatan,
+      jumlahOpsi: config.jumlahOpsi,
+      jenisSoal: config.jenisSoal,
+      konteksLokal: (kisi.konteksLokal && kisi.konteksLokal.length > 0) ? kisi.konteksLokal : config.konteksLokal,
+      stimulusKonten: (kisi.stimulusKonten && kisi.stimulusKonten.length > 0) ? kisi.stimulusKonten : config.stimulusKonten,
+      kualitasChecklist: (kisi.kualitasChecklist && kisi.kualitasChecklist.length > 0) ? kisi.kualitasChecklist : config.kualitasChecklist,
+      existingQuestions: allExistingSoalTexts.filter(Boolean).slice(0, 30)
+    };
+
+    const res = await fetch(aiConfig.n8nWebhookUrl.trim(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      let errText = '';
+      try {
+        errText = await res.text();
+      } catch {}
+      throw new Error(`N8N Webhook Error (${res.status}): ${errText || res.statusText}`);
+    }
+
+    const resData = await res.json();
+    let questionsResult: any[] = [];
+    if (Array.isArray(resData)) {
+      questionsResult = resData;
+    } else if (resData && Array.isArray(resData.questions)) {
+      questionsResult = resData.questions;
+    } else if (resData && Array.isArray(resData.data)) {
+      questionsResult = resData.data;
+    } else if (resData && Array.isArray(resData.soal)) {
+      questionsResult = resData.soal;
+    } else if (resData && typeof resData === 'object' && resData.soal) {
+      questionsResult = [resData];
+    } else {
+      throw new Error("Format respon dari Webhook N8N Sumopod tidak valid (harus berupa array JSON atau objek dengan properti 'questions' / 'data' / 'soal').");
+    }
+
+    return questionsResult;
+  };
+
   // Generate Soal for ALL kisi-kisi rows
   const handleGenerateAllQuestions = async () => {
     if (!config.mataPelajaran) {
@@ -4906,7 +5203,7 @@ Ingat: HANYA berikan kode SVG murni. Jika Anda membungkusnya dengan blok markdow
       topic: 'Memulai sinkronisasi seluruh kisi-kisi...',
       countSuccess: 0,
       totalQuestions: totalQuestionsTarget,
-      statusText: 'Menghubungkan ke server AI Gemini...'
+      statusText: `Menghubungkan ke ${aiConfig.mode === 'n8n' ? 'N8N Sumopod Webhook' : aiConfig.mode === 'client' ? 'Direct Gemini API' : 'Server AI Gemini'}...`
     });
     
     for (let index = 0; index < kisiList.length; index++) {
@@ -4928,11 +5225,13 @@ Ingat: HANYA berikan kode SVG murni. Jika Anda membungkusnya dengan blok markdow
 
           setSoalProgress(prev => ({
             ...prev,
-            statusText: `Merancang butir soal #${i + 1} s.d #${i + countForThisChunk} untuk kisi-kisi No. ${kisi.no} via AI...`
+            statusText: `Merancang butir soal #${i + 1} s.d #${i + countForThisChunk} untuk kisi-kisi No. ${kisi.no} via ${aiConfig.mode === 'n8n' ? 'N8N Webhook' : 'AI'}...`
           }));
 
           let data;
-          if (aiConfig.mode === 'client') {
+          if (aiConfig.mode === 'n8n') {
+            data = await callN8nWebhook(kisi, countForThisChunk, currentNoSoal, allExistingSoalTexts);
+          } else if (aiConfig.mode === 'client') {
             const systemInstruction = `Anda adalah ahli pembuat soal ujian nasional dan TKA (Tes Kemampuan Akademik) SMA di Indonesia. Anda sangat terampil menyusun soal tingkat tinggi (HOTS), bervariasi, mendalam, dan bebas dari bias. Patuhi instruksi bentuk soal dan parameter kognitif secara presisi.`;
 
             const activeKonteksLokal = (kisi.konteksLokal && kisi.konteksLokal.length > 0) ? kisi.konteksLokal : config.konteksLokal;
@@ -6679,53 +6978,105 @@ PANDUAN EKSTRA:
                 <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                   <div className="flex items-center gap-2">
                     <Sparkles className="h-5 w-5 text-indigo-600 animate-pulse" />
-                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Pengaturan Koneksi AI (Gemini)</h3>
+                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Pengaturan Koneksi AI (Gemini & N8N Sumopod)</h3>
                   </div>
-                  <span className={`px-2.5 py-0.5 text-[10px] font-bold uppercase rounded-full ${aiConfig.mode === 'client' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-50 text-slate-600 border border-slate-200'}`}>
-                    Mode Aktif: {aiConfig.mode === 'client' ? 'Bypass Browser' : 'Default Server'}
+                  <span className={`px-2.5 py-0.5 text-[10px] font-bold uppercase rounded-full ${aiConfig.mode === 'n8n' ? 'bg-orange-100 text-orange-800 border border-orange-300' : aiConfig.mode === 'client' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-50 text-slate-600 border border-slate-200'}`}>
+                    Mode Aktif: {aiConfig.mode === 'n8n' ? '🔗 N8N Sumopod Webhook' : aiConfig.mode === 'client' ? '⚡ Direct Browser API' : '🌐 Server Default'}
                   </span>
                 </div>
 
                 <div className="space-y-4 text-xs">
                   <p className="text-slate-600 leading-relaxed">
-                    Jika fitur pembuat soal AI gagal di server produksi (Vercel) akibat batas waktu eksekusi (timeout 10 detik), silakan beralih ke <b>Mode Browser (Direct API)</b> dengan memasukkan Kunci API Gemini Anda sendiri untuk bypass timeout tersebut secara total.
+                    Pilih jalur pemrosesan pembuat soal AI. Anda dapat menggunakan server bawaan, bypass browser langsung, atau menghubungkan workflow otomatisasi <b>N8N Sumopod (https://sumopod.com)</b>.
                   </p>
 
-                  {/* Callout box for Importing AI Questions */}
-                  <div className="p-3.5 bg-indigo-50 border border-indigo-200 rounded-2xl flex items-start gap-3 text-xs text-indigo-950 shadow-sm">
-                    <FileUp className="h-5 w-5 text-indigo-600 flex-shrink-0 mt-0.5" />
-                    <div className="space-y-1.5">
-                      <span className="font-extrabold block text-indigo-950 text-xs">📥 Masukkan Soal AI Hasil Gemini Megaprompt</span>
-                      <p className="text-[11px] text-indigo-800 leading-relaxed">
-                        Jika Anda membuat soal menggunakan <b>Megaprompt AI</b> di Gemini AI, Anda dapat langsung memasukkan teks atau mengunggah file Word (.docx) / Teks (.txt) hasilnya ke dalam aplikasi secara otomatis.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => setIsImportAiModalOpen(true)}
-                        className="mt-1 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-3.5 py-2 rounded-xl text-[11px] flex items-center gap-2 transition shadow cursor-pointer"
-                      >
-                        <FileUp className="h-4 w-4 text-amber-300" />
-                        <span>Buka Menu Masukkan Soal AI</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <button
                       type="button"
                       onClick={() => handleSetAiMode('server')}
-                      className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition flex items-center justify-center gap-1.5 ${aiConfig.mode === 'server' ? 'bg-slate-900 border-slate-900 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                      className={`py-2 px-3 rounded-xl border text-center font-bold transition flex items-center justify-center gap-1.5 ${aiConfig.mode === 'server' ? 'bg-slate-900 border-slate-900 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
                     >
-                      <span>🌐 Mode Server</span>
+                      <span>🌐 Server Default</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => handleSetAiMode('client')}
-                      className={`flex-1 py-2 px-3 rounded-xl border text-center font-bold transition flex items-center justify-center gap-1.5 ${aiConfig.mode === 'client' ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                      className={`py-2 px-3 rounded-xl border text-center font-bold transition flex items-center justify-center gap-1.5 ${aiConfig.mode === 'client' ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
                     >
-                      <span>⚡ Mode Browser (Direct)</span>
+                      <span>⚡ Direct Browser</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetAiMode('n8n')}
+                      className={`py-2 px-3 rounded-xl border text-center font-bold transition flex items-center justify-center gap-1.5 ${aiConfig.mode === 'n8n' ? 'bg-orange-600 border-orange-600 text-white shadow-sm ring-2 ring-orange-400/30' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                    >
+                      <Zap className="h-3.5 w-3.5 text-amber-300" />
+                      <span>🔗 N8N Sumopod</span>
                     </button>
                   </div>
+
+                  {/* N8N Sumopod Webhook Configuration Panel */}
+                  {aiConfig.mode === 'n8n' && (
+                    <div className="space-y-3 p-4 bg-orange-50/70 border border-orange-200 rounded-xl text-left animate-fadeIn">
+                      <div className="flex justify-between items-center flex-wrap gap-1 border-b border-orange-200/60 pb-2">
+                        <label className="block text-[11px] font-extrabold text-orange-950 uppercase tracking-wide flex items-center gap-1.5">
+                          <Globe className="h-4 w-4 text-orange-600" />
+                          <span>Pengaturan Webhook N8N (Sumopod Hosting)</span>
+                        </label>
+                        <a
+                          href="https://sumopod.com"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10.5px] text-orange-700 hover:underline font-bold"
+                        >
+                          Buka N8N Sumopod ↗
+                        </a>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="block text-[11px] font-bold text-slate-700">
+                          URL Webhook Trigger N8N Sumopod:
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="url"
+                            value={aiConfig.n8nWebhookUrl}
+                            onChange={(e) => handleSaveN8nUrl(e.target.value)}
+                            placeholder="https://sumopod.com/webhook/generate-soal..."
+                            className="flex-1 bg-white border border-slate-300 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 rounded-lg p-2.5 text-xs font-mono shadow-inner"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleTestN8nWebhook}
+                            disabled={testingN8n}
+                            className="bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-extrabold px-3.5 py-2 rounded-lg text-xs flex items-center gap-1.5 transition shadow-sm flex-shrink-0"
+                          >
+                            {testingN8n ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                            <span>{testingN8n ? 'Testing...' : 'Tes Webhook'}</span>
+                          </button>
+                        </div>
+
+                        {n8nTestStatus && (
+                          <div className={`p-2.5 rounded-lg text-[11px] font-bold flex items-start gap-2 border ${n8nTestStatus.success ? 'bg-emerald-50 text-emerald-800 border-emerald-300' : 'bg-red-50 text-red-800 border-red-300'}`}>
+                            {n8nTestStatus.success ? <Check className="h-4 w-4 text-emerald-600 flex-shrink-0 mt-0.5" /> : <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />}
+                            <span>{n8nTestStatus.message}</span>
+                          </div>
+                        )}
+
+                        <div className="bg-white/80 border border-orange-200/80 p-3 rounded-lg text-[11px] text-slate-700 space-y-1.5">
+                          <p className="font-bold text-orange-950 flex items-center gap-1">
+                            ℹ️ Struktur Payload JSON dikirim ke N8N Webhook:
+                          </p>
+                          <p className="font-mono text-[10px] bg-slate-900 text-emerald-400 p-2 rounded leading-relaxed overflow-x-auto">
+                            &#123; "mataPelajaran": "...", "kisi": &#123; "no": 1, "elemenMateri": "...", "subElemenMateri": "...", "kompetensi": "...", "bentukSoal": "pilihan_ganda_sederhana", "levelKognitif": "level_3" &#125;, "count": 1, "noSoalStart": 1 &#125;
+                          </p>
+                          <p className="text-[10px] text-slate-600">
+                            N8N harus mengembalikan JSON Array berisi objek butir soal (dengan properti <code className="bg-slate-100 px-1 py-0.5 rounded font-bold text-slate-800">soal</code>, <code className="bg-slate-100 px-1 py-0.5 rounded font-bold text-slate-800">opsi</code>, <code className="bg-slate-100 px-1 py-0.5 rounded font-bold text-slate-800">kunciJawaban</code>, <code className="bg-slate-100 px-1 py-0.5 rounded font-bold text-slate-800">pembahasan</code>).
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* API Key Configuration & Rotation Input */}
                   <div className="space-y-3 p-3.5 bg-indigo-50/60 border border-indigo-100 rounded-xl animate-fadeIn text-left mt-3">
@@ -7959,14 +8310,6 @@ PANDUAN EKSTRA:
                                 </div>
                                 <div className="flex flex-col gap-1.5 mt-1.5">
                                   <button
-                                    onClick={() => setIsImportAiModalOpen(true)}
-                                    className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 text-[10px] font-black py-1.5 px-1.5 rounded-lg flex items-center justify-center gap-1 transition cursor-pointer"
-                                    title="Masukkan atau upload file hasil Gemini Megaprompt AI"
-                                  >
-                                    <FileUp className="h-3 w-3 text-indigo-600" />
-                                    <span>📥 Masukkan Soal AI</span>
-                                  </button>
-                                  <button
                                     onClick={() => handleGenerateQuestionsForKisi(item)}
                                     disabled={isGeneratingSoal}
                                     className="w-full bg-emerald-50 text-emerald-800 hover:bg-emerald-100 text-[10px] font-bold py-1.5 px-1.5 rounded-lg border border-emerald-100 flex items-center justify-center gap-1 transition"
@@ -8011,14 +8354,6 @@ PANDUAN EKSTRA:
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => setIsImportAiModalOpen(true)}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 transition shadow-md cursor-pointer"
-                  title="Masukkan atau upload file hasil Megaprompt Gemini AI"
-                >
-                  <FileUp className="h-4.5 w-4.5 text-amber-300" />
-                  <span>📥 Masukkan Soal AI</span>
-                </button>
                 <button
                   onClick={() => exportQuestionsToExcel(questions, printConfig.subjectName || config.mataPelajaran, printConfig.examName, printConfig.showAnswerKey)}
                   className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition shadow-sm cursor-pointer"
@@ -12438,182 +12773,6 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                   </button>
                 </div>
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-
-        {/* Modal: Masukkan Soal AI (Hasil Gemini Megaprompt) */}
-        {isImportAiModalOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[999] flex items-center justify-center p-4 overflow-y-auto"
-          >
-            <motion.div
-              initial={{ scale: 0.95, y: 15 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.95, y: 15 }}
-              className="bg-white border border-slate-200 rounded-3xl max-w-3xl w-full my-8 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
-            >
-              {/* Header */}
-              <div className="px-6 py-4 bg-gradient-to-r from-indigo-900 via-indigo-800 to-slate-900 text-white flex items-center justify-between border-b border-indigo-700/50">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-2xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center shadow-inner">
-                    <FileUp className="h-5 w-5 text-amber-300" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-extrabold flex items-center gap-2">
-                      <span>Masukkan Soal AI</span>
-                      <span className="text-[10px] bg-amber-400 text-slate-950 font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
-                        Hasil Megaprompt Gemini
-                      </span>
-                    </h3>
-                    <p className="text-xs text-indigo-200">
-                      Upload file Word (.docx) / Teks (.txt) atau tempelkan naskah hasil buatan AI ke sini.
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setIsImportAiModalOpen(false)}
-                  className="p-2 text-indigo-200 hover:text-white hover:bg-white/10 rounded-xl transition cursor-pointer"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-
-              {/* Body */}
-              <div className="p-6 space-y-5 overflow-y-auto flex-1 text-slate-800">
-                
-                {/* Method 1: Upload File */}
-                <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
-                      <FileText className="h-4 w-4 text-indigo-600" />
-                      Opsi 1: Upload File Teks / File Word (.docx)
-                    </label>
-                    <span className="text-[11px] text-slate-400">Format: .docx, .doc, .txt, .json, .md</span>
-                  </div>
-
-                  <div className="relative border-2 border-dashed border-indigo-200 hover:border-indigo-400 bg-white rounded-xl p-4 text-center transition group">
-                    <input
-                      type="file"
-                      accept=".docx,.doc,.txt,.json,.md"
-                      onChange={handleFileUploadForImportAi}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                    />
-                    <div className="flex flex-col items-center justify-center space-y-1.5 pointer-events-none">
-                      <Upload className="h-8 w-8 text-indigo-500 group-hover:scale-110 transition-transform" />
-                      <span className="text-xs font-extrabold text-indigo-900">
-                        {importAiFileName ? `📄 File terpilih: ${importAiFileName}` : 'Klik untuk memilih file atau drag & drop ke sini'}
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        Sistem akan otomatis mengekstrak teks dari dokumen Word atau file teks.
-                      </span>
-                    </div>
-                  </div>
-
-                  {importAiError && (
-                    <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2">
-                      <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                      <span>{importAiError}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Method 2: Copy Paste Textarea */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
-                      <ClipboardPaste className="h-4 w-4 text-indigo-600" />
-                      Opsi 2: Tempelkan (Copy-Paste) Teks atau JSON dari Gemini AI
-                    </label>
-                    <span className="text-[11px] text-slate-400 font-mono">
-                      {importAiRawText.length} Karakter
-                    </span>
-                  </div>
-
-                  <textarea
-                    rows={8}
-                    value={importAiRawText}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setImportAiRawText(val);
-                      const parsed = parseAiQuestionsText(val);
-                      setImportAiParsedQuestions(parsed);
-                    }}
-                    placeholder={`Tempelkan (Paste) naskah soal hasil dari Gemini AI di sini...\n\nContoh format yang didukung:\n- Naskah Soal Word (Soal 1, Opsi A-E, Kunci, Pembahasan)\n- Format JSON Array [...]`}
-                    className="w-full p-3.5 bg-slate-900 text-slate-100 font-mono text-xs rounded-2xl border border-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none shadow-inner"
-                  />
-                </div>
-
-                {/* Live Parsed Status & Preview */}
-                <div className="p-4 bg-indigo-50/70 border border-indigo-100 rounded-2xl space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-extrabold text-indigo-950 flex items-center gap-2">
-                      <FileCheck className="h-4 w-4 text-emerald-600" />
-                      Hasil Deteksi Otomatis
-                    </span>
-                    <span className={`px-3 py-1 rounded-full text-xs font-black ${importAiParsedQuestions.length > 0 ? 'bg-emerald-500 text-white shadow-sm' : 'bg-slate-200 text-slate-600'}`}>
-                      {importAiParsedQuestions.length} Butir Soal Terdeteksi
-                    </span>
-                  </div>
-
-                  {importAiParsedQuestions.length > 0 ? (
-                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                      {importAiParsedQuestions.map((q, idx) => (
-                        <div key={idx} className="p-3 bg-white border border-indigo-100 rounded-xl shadow-xs text-xs space-y-1">
-                          <div className="flex items-center justify-between font-bold text-slate-800">
-                            <span>Soal #{idx + 1} ({q.opsi.length} Opsi)</span>
-                            <span className="text-[10px] bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded font-bold">Kunci: {q.kunciJawaban}</span>
-                          </div>
-                          <p className="text-slate-600 line-clamp-2 italic">"{q.soal}"</p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-slate-500 italic">
-                      Belum ada soal yang terdeteksi. Silakan upload file atau tempelkan teks hasil dari Gemini AI di atas.
-                    </p>
-                  )}
-                </div>
-
-              </div>
-
-              {/* Footer */}
-              <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() => setIsImportAiModalOpen(false)}
-                  className="w-full sm:w-auto px-4 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 font-bold rounded-xl text-xs transition cursor-pointer"
-                >
-                  Batal
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleSaveImportedAiQuestions}
-                  disabled={importAiParsedQuestions.length === 0 || isImportingAi}
-                  className={`w-full sm:w-auto px-6 py-2.5 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition shadow-lg ${
-                    importAiParsedQuestions.length > 0 && !isImportingAi
-                      ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white cursor-pointer'
-                      : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                  }`}
-                >
-                  {isImportingAi ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      <span>Memproses Soal...</span>
-                    </>
-                  ) : (
-                    <>
-                      <FileUp className="h-4 w-4 text-amber-300" />
-                      <span>Impor {importAiParsedQuestions.length} Soal ke Butir Soal TKA SMA</span>
-                    </>
-                  )}
-                </button>
-              </div>
-
             </motion.div>
           </motion.div>
         )}
