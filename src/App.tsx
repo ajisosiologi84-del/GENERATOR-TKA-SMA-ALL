@@ -8855,11 +8855,42 @@ PANDUAN EKSTRA:
 
             {/* Manual Question Form */}
             {isEditingQuestion && (
-              <div id="manual-question-form" className={`bg-white border rounded-2xl shadow-md p-6 no-print transition-all duration-300 ${editingQuestionId ? 'border-indigo-500 ring-2 ring-indigo-200 bg-indigo-50/20' : 'border-slate-200'}`}>
-                <h3 className="text-sm font-bold text-slate-800 mb-4 uppercase tracking-wider flex items-center gap-2">
-                  <Sliders className="h-4.5 w-4.5 text-blue-600" />
-                  {editingQuestionId ? 'Ubah Butir Soal' : 'Form Manual Pembuatan Soal'}
-                </h3>
+              <div 
+                id="manual-question-form" 
+                className={`bg-white rounded-2xl p-6 no-print transition-all duration-300 shadow-lg ${
+                  editingQuestionId 
+                    ? 'border-2 border-indigo-600 ring-4 ring-indigo-200/80 bg-gradient-to-b from-indigo-50/40 via-white to-white shadow-indigo-100' 
+                    : 'border-2 border-slate-300'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-200">
+                  <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                    <Sliders className={`h-4.5 w-4.5 ${editingQuestionId ? 'text-indigo-600 animate-bounce' : 'text-blue-600'}`} />
+                    <span>{editingQuestionId ? 'Ubah Butir Soal' : 'Form Manual Pembuatan Soal'}</span>
+                  </h3>
+                  {editingQuestionId ? (
+                    <div className="flex items-center gap-2">
+                      <span className="bg-indigo-600 text-white text-[11px] font-extrabold px-3 py-1 rounded-full animate-pulse shadow-sm flex items-center gap-1.5">
+                        <Edit className="h-3.5 w-3.5" />
+                        <span>Mode Ubah Soal Aktif</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsEditingQuestion(false);
+                          setEditingQuestionId(null);
+                        }}
+                        className="text-xs text-slate-500 hover:text-rose-600 font-bold underline px-2 py-1 transition cursor-pointer"
+                      >
+                        Batal
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="bg-slate-100 text-slate-600 text-[11px] font-semibold px-2.5 py-0.5 rounded-full border border-slate-200">
+                      Mode Soal Baru
+                    </span>
+                  )}
+                </div>
                 <form onSubmit={handleSaveQuestionForm} className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
@@ -12469,7 +12500,23 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
               ) : (
                 <div className={`${printConfig.layoutColumns === '2' ? 'columns-1 md:columns-2 gap-x-8 gap-y-6 print:columns-2 print:gap-x-8' : 'space-y-8'} ${printConfig.fontSize}`}>
                   {questions.map((q, idx) => (
-                    <div key={q.id ? `${q.id}-${idx}` : `q-${idx}`} className="inline-block w-full break-inside-avoid page-break-inside-avoid pb-6 mb-6 border-b border-slate-100 last:border-b-0 space-y-3">
+                    <div 
+                      key={q.id ? `${q.id}-${idx}` : `q-${idx}`} 
+                      className={`inline-block w-full break-inside-avoid page-break-inside-avoid transition-all duration-300 space-y-3 ${
+                        editingQuestionId === q.id
+                          ? 'border-2 border-indigo-600 bg-indigo-50/40 p-4 rounded-2xl ring-4 ring-indigo-200/80 shadow-md my-4'
+                          : 'pb-6 mb-6 border-b border-slate-100 last:border-b-0'
+                      }`}
+                    >
+                      {editingQuestionId === q.id && (
+                        <div className="flex items-center justify-between bg-indigo-600 text-white px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider mb-2 animate-pulse shadow-sm no-print">
+                          <span className="flex items-center gap-1.5">
+                            <Edit className="h-3.5 w-3.5" />
+                            Soal No. {q.noSoal} Sedang Di-edit di Form Atas
+                          </span>
+                          <span className="text-[9px] bg-white/20 px-2 py-0.5 rounded">Aktif</span>
+                        </div>
+                      )}
                       
                       {/* Question Header (Always contains technical metadata on screen, but can be formatted nicely or hidden on print if showCompetencyTag is false) */}
                       {printConfig.showCompetencyTag ? (
@@ -12509,15 +12556,19 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                                 <div className="flex gap-1.5 items-center">
                                   <button
                                     onClick={() => handleEditQuestion(q)}
-                                    className="flex items-center gap-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs cursor-pointer"
+                                    className={`group flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition-all duration-200 shadow-xs hover:shadow-md cursor-pointer ${
+                                      editingQuestionId === q.id
+                                        ? 'bg-indigo-600 text-white border border-indigo-700 ring-2 ring-indigo-300 animate-pulse shadow-md'
+                                        : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white border border-indigo-200 hover:scale-105 active:scale-95'
+                                    }`}
                                     title="Ubah Butir Soal"
                                   >
-                                    <Edit className="h-3 w-3" />
-                                    <span>Ubah Butir Soal</span>
+                                    <Edit className="h-3 w-3 group-hover:rotate-12 transition-transform duration-200" />
+                                    <span>{editingQuestionId === q.id ? 'Sedang Di-edit...' : 'Ubah Butir Soal'}</span>
                                   </button>
                                   <button
                                     onClick={() => setDeletingQuestionId(q.id)}
-                                    className="flex items-center gap-1 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs cursor-pointer"
+                                    className="flex items-center gap-1 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs cursor-pointer hover:scale-105 active:scale-95"
                                     title="Hapus Soal"
                                   >
                                     <Trash2 className="h-3 w-3" />
@@ -12556,15 +12607,19 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                               <div className="flex gap-1.5 items-center">
                                 <button
                                   onClick={() => handleEditQuestion(q)}
-                                  className="flex items-center gap-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs cursor-pointer"
+                                  className={`group flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-extrabold transition-all duration-200 shadow-xs hover:shadow-md cursor-pointer ${
+                                    editingQuestionId === q.id
+                                      ? 'bg-indigo-600 text-white border border-indigo-700 ring-2 ring-indigo-300 animate-pulse shadow-md'
+                                      : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-600 hover:text-white border border-indigo-200 hover:scale-105 active:scale-95'
+                                  }`}
                                   title="Ubah Butir Soal"
                                 >
-                                  <Edit className="h-3 w-3" />
-                                  <span>Ubah Butir Soal</span>
+                                  <Edit className="h-3 w-3 group-hover:rotate-12 transition-transform duration-200" />
+                                  <span>{editingQuestionId === q.id ? 'Sedang Di-edit...' : 'Ubah Butir Soal'}</span>
                                 </button>
                                 <button
                                   onClick={() => setDeletingQuestionId(q.id)}
-                                  className="flex items-center gap-1 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs cursor-pointer"
+                                  className="flex items-center gap-1 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs cursor-pointer hover:scale-105 active:scale-95"
                                   title="Hapus Soal"
                                 >
                                   <Trash2 className="h-3 w-3" />
