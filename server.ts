@@ -743,9 +743,10 @@ Draf Megaprompt yang Anda buat harus memuat:
 1. Peran AI yang diinstruksikan (misal: "Anda adalah dosen/guru senior pembuat soal TKA SMA...").
 2. Spesifikasi lengkap materi, tingkat kognitif (C1-C6/HOTS), serta integrasi Konteks Nusantara dan Stimulus Tambahan yang spesifik agar bernuansa ke-Indonesia-an yang otentik dan mendalam.
 3. ATURAN PENULISAN SOAL MANDATORI: Wajib menginstruksikan AI eksternal untuk MENGGABUNGKAN stimulus (paragraf/data/tabel/studi kasus) dan pertanyaan utama secara langsung menyatu di dalam satu bagian 'Soal:', tanpa dipisah menjadi section/field stimulus tersendiri, serta tanpa nomor soal di dalam teks.
-4. Aturan pengecoh pilihan ganda yang homogen, diawali huruf A, B, C, D, E dan titik, serta tidak mengandung tanda asteris (*).
-5. Format keluaran (soal, opsi A-E, kunci jawaban, dan pembahasan mendalam). Wajib menyertakan instruksi: "Jadikan Hasil soal Outpot Format word dan excel." dan Wajib menginstruksikan untuk menggabungkan stimulus dan pertanyaan utama secara langsung dalam bagian 'Soal'.
-6. Teknik melahirkan pertanyaan tingkat tinggi (HOTS) yang memicu daya analisis siswa.
+4. Aturan pengecoh pilihan ganda / daftar pernyataan yang homogen, diawali huruf A, B, C, D, E dan titik, serta tidak mengandung tanda asteris (*).
+5. Format keluaran Word & Excel: Wajib menyertakan instruksi: "Jadikan Hasil soal Output Format word dan excel." dan Wajib menginstruksikan untuk menggabungkan stimulus dan pertanyaan utama secara langsung dalam bagian 'Soal'.
+6. KHUSUS PILIHAN GANDA KOMPLEKS (MCMA) DAN PILIHAN GANDA KOMPLEKS KATEGORI: Soal Pilihan Jawaban/Pernyataan pada format Excel yang sebelumnya tergabung dalam satu sel WAJIB dipisahkan menjadi masing-masing kolom terpisah yaitu Opsi_A, Opsi_B, Opsi_C, Opsi_D, dan Opsi_E. DILARANG KERAS menggabungkan seluruh pilihan/pernyataan ke dalam satu sel Excel!
+7. Teknik melahirkan pertanyaan tingkat tinggi (HOTS) yang memicu daya analisis siswa.
 
 Tulis draf prompt tersebut langsung dalam format Markdown yang elegan, berwibawa, rapi, dan langsung bisa dicopy oleh pengguna. Jangan tambahkan penjelasan pembuka dari Anda sendiri seperti "Berikut adalah prompt yang Anda minta", melainkan langsung mulailah isi prompt tersebut dengan judul atau teks instruksi utama yang siap disalin.`;
 

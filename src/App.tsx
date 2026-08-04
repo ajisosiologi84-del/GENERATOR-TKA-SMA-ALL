@@ -3306,8 +3306,8 @@ Sajikan seluruh ${totalSoal} butir soal berurutan dari Kisi-Kisi No. 1 s.d. No. 
    - Narasi kasus/fenomena, data statistik, atau tabel kontekstual (2-4 paragraf) yang kaya informasi analitis.
 3. BUTIR PERTANYAAN & OPSI JAWABAN:
    - Pilihan Ganda Sederhana: Pertanyaan jelas + 5 Opsi (A, B, C, D, E). Pastikan distribusi kunci jawaban (A, B, C, D, E) tersebar proporsional.
-   - Pilihan Ganda Kompleks (MCMA): Pertanyaan + 4-5 opsi pernyataan + instruksi instruktif.
-   - Kategori / Menjodohkan: Skenario + daftar pernyataan & kategori berpasangan.
+   - Pilihan Ganda Kompleks (MCMA): Pertanyaan + 4-5 opsi/pernyataan terpisah (A, B, C, D, E) + instruksi memilih semua jawaban benar.
+   - Kategori / Menjodohkan: Skenario + 4-5 pernyataan terpisah (A, B, C, D, E) untuk direspon (misal Benar/Salah).
 4. KUNCI JAWABAN & PEMBAHASAN MENDALAM:
    - Kunci Jawaban Tepat + Pembahasan Komprehensif (Rationale ilmiah/sosiologis) serta penjelasan mengapa opsi lain tidak tepat.
 5. PEDOMAN PENSKORAN & RUBRIK (SKALA 0-100):
@@ -3317,7 +3317,10 @@ Sajikan seluruh ${totalSoal} butir soal berurutan dari Kisi-Kisi No. 1 s.d. No. 
 Di bagian paling akhir (setelah seluruh Naskah Word selesai), Anda WAJIB menyajikan TABEL REKAPITULASI BENTUK MARKDOWN / TSV CODEBLOCK yang siap di-copy-paste langsung ke Microsoft Excel atau Google Sheets.
 Tabel harus memuat seluruh ${totalSoal} soal dengan struktur kolom baku Excel sebagai berikut:
 
-| No Soal | Elemen / Materi Utama | Submateri | Level Kognitif | Bentuk Soal | Ringkasan Stimulus | Pertanyaan / Teks Soal | Opsi A | Opsi B | Opsi C | Opsi D | Opsi E | Kunci Jawaban | Pembahasan Singkat |
+| No Soal | Elemen / Materi Utama | Submateri | Level Kognitif | Bentuk Soal | Ringkasan Stimulus | Pertanyaan / Teks Soal | Opsi_A | Opsi_B | Opsi_C | Opsi_D | Opsi_E | Kunci Jawaban | Pembahasan Singkat |
+
+ATURAN MANDATORI PEMISAHAN OPSI EXCEL (KHUSUS MCMA & KATEGORI):
+Khusus untuk bentuk Pilihan Ganda Kompleks (MCMA) dan Pilihan Ganda Kompleks Kategori, soal Pilihan Jawaban / Pernyataan pada format Excel yang sebelumnya tergabung dalam satu sel WAJIB dipisahkan menjadi masing-masing kolom terpisah yaitu Opsi_A, Opsi_B, Opsi_C, Opsi_D, dan Opsi_E. DILARANG KERAS menggabungkan pilihan jawaban/pernyataan ke dalam 1 sel tunggal!
 
 --------------------------------------------------------------------------------
 PRINSIP BEBAS HALLUCINATION & ETIKA PENULISAN:
@@ -3979,13 +3982,13 @@ Bentuk Soal : [Jenis bentuk soal]
 Soal (Menggabungkan Stimulus dan Pertanyaan Utama):
 [Paragraf stimulus, data/tabel, atau situasi kontekstual, diikuti langsung dengan pertanyaan utama atau instruksi pengerjaan secara menyatu dalam satu kesatuan teks]
 
-Pilihan Jawaban:
-A. [Pilihan A]
-B. [Pilihan B]
-C. [Pilihan C]
-D. [Pilihan D]
-${config.jumlahOpsi === 5 ? 'E. [Pilihan E]\n' : ''}
-Kunci Jawaban: [Kunci Jawaban yang tepat, misal: A]
+Pilihan Jawaban / Pernyataan:
+A. [Pilihan / Pernyataan A]
+B. [Pilihan / Pernyataan B]
+C. [Pilihan / Pernyataan C]
+D. [Pilihan / Pernyataan D]
+${config.jumlahOpsi === 5 ? 'E. [Pilihan / Pernyataan E]\n' : ''}
+Kunci Jawaban: [Kunci Jawaban yang tepat, misal: A atau 'A, C' untuk MCMA / '1. Benar, 2. Salah...' untuk Kategori]
 
 Pembahasan:
 [Penjelasan analitis langkah demi langkah secara ilmiah dan terstruktur]
@@ -3995,13 +3998,14 @@ BAGIAN 2: FORMAT TABEL MS EXCEL (MARKDOWN TABLE DATA TERSTRUKTUR)
 --------------------------------------------------
 Sajikan JUGA seluruh butir soal di atas dalam bentuk TABEL MARKDOWN SINGLE-LINE CELL agar saat pengguna meng-copy tabel ini dan me-paste langsung ke Microsoft Excel atau Google Sheets, data otomatis terbagi secara presisi ke dalam kolom-kolom sel Excel tanpa merusak baris atau tatanan tabel:
 
-| No Soal | Elemen Materi | Sub Elemen | Level Kognitif | Bentuk Soal | Stimulus & Pertanyaan Soal | Opsi A | Opsi B | Opsi C | Opsi D | ${config.jumlahOpsi === 5 ? 'Opsi E | ' : ''}Kunci Jawaban | Pembahasan |
+| No Soal | Elemen Materi | Sub Elemen | Level Kognitif | Bentuk Soal | Stimulus & Pertanyaan Soal | Opsi_A | Opsi_B | Opsi_C | Opsi_D | ${config.jumlahOpsi === 5 ? 'Opsi_E | ' : ''}Kunci Jawaban | Pembahasan |
 |---|---|---|---|---|---|---|---|---|---|${config.jumlahOpsi === 5 ? '---|' : ''}---|---|
-| 1 | ... | ... | ... | ... | ... | ... | ... | ... | ... | ${config.jumlahOpsi === 5 ? '... | ' : ''}... | ... |
+| 1 | ... | ... | ... | ... | ... | Opsi/Pernyataan A | Opsi/Pernyataan B | Opsi/Pernyataan C | Opsi/Pernyataan D | ${config.jumlahOpsi === 5 ? 'Opsi/Pernyataan E | ' : ''}... | ... |
 
 PERINTAH KHUSUS INTEGRASI WORD & EXCEL:
 1. Pastikan hasil soal ketika di-copy di AI (Gemini, ChatGPT, Claude, dll.) secara utuh memuat Format Word (Bagian 1) dan Format Excel (Bagian 2).
-2. Pada bagian Tabel Excel (Bagian 2), jangan gunakan karakter baris baru (line-break / enter) di dalam sel tabel Markdown agar 1 nomor soal persis menduduki 1 baris sel di Microsoft Excel.`;
+2. Pada bagian Tabel Excel (Bagian 2), jangan gunakan karakter baris baru (line-break / enter) di dalam sel tabel Markdown agar 1 nomor soal persis menduduki 1 baris sel di Microsoft Excel.
+3. KHUSUS PILIHAN GANDA KOMPLEKS (MCMA) DAN PILIHAN GANDA KOMPLEKS KATEGORI: Soal Pilihan Jawaban / Pernyataan pada format Excel yang sebelumnya tergabung dalam satu sel WAJIB dipisahkan menjadi masing-masing kolom terpisah yaitu Opsi_A, Opsi_B, Opsi_C, Opsi_D, dan Opsi_E. DILARANG KERAS menggabungkan pilihan jawaban atau daftar pernyataan ke dalam satu sel Excel!`;
 
     setGeneratedKisiPrompt(promptKisiText);
     setGeneratedSoalPrompt(promptSoalText);
@@ -4418,11 +4422,13 @@ ${item.batasanCatatan ? `- Catatan Khusus: ${item.batasanCatatan}` : ''}
 PANDUAN PENYUSUNAN SOAL:
 1. **Analisis HOTS (C4-C6)**: Pertanyaan harus mengukur kemampuan menganalisis, mengevaluasi, atau merancang/berpikir kritis siswa, bukan hafalan tekstual.
 2. **PENGGABUNGAN STIMULUS DAN PERTANYAAN (MANDATORI)**: Wajib menyajikan stimulus (paragraf/data/tabel/studi kasus) dan pertanyaan utama secara langsung menyatu di dalam satu bagian 'Soal:'. JANGAN memisahkan field stimulus dan soal, dan JANGAN mencantumkan nomor soal (misal '1.', 'Soal 1.') di dalam teks soal.
-3. **Pengecoh Homogen & Ilmiah**: Seluruh pilihan jawaban (opsi) harus homogen secara sintaksis, setara panjangnya, logis, dan menantang siswa untuk mengeliminasi distraktor secara analitis. Setiap pilihan jawaban WAJIB diawali dengan huruf label A, B, C, D, E dan titik, contoh: A. ..., B. ..., C. ..., D. ..., E. ...
-4. **Pembahasan Ilmiah**: Sertakan pembahasan langkah demi langkah yang logis, mendalam, tanpa tanda asteris (*), serta membuktikan kebenaran kunci jawaban.
+3. **Pengecoh Homogen & Ilmiah**: Seluruh pilihan jawaban (opsi/pernyataan) harus homogen secara sintaksis, setara panjangnya, logis, dan menantang siswa untuk mengeliminasi distraktor secara analitis. Setiap pilihan jawaban WAJIB diawali dengan huruf label A, B, C, D, E dan titik, contoh: A. ..., B. ..., C. ..., D. ..., E. ...
+4. **PEMISAHAN OPSI EXCEL (KHUSUS MCMA & KATEGORI)**: Untuk bentuk Pilihan Ganda Kompleks (MCMA) dan Pilihan Ganda Kompleks Kategori, pilihan jawaban/pernyataan pada format Excel yang sebelumnya tergabung dalam satu sel WAJIB dipisahkan menjadi masing-masing kolom terpisah yaitu Opsi_A, Opsi_B, Opsi_C, Opsi_D, dan Opsi_E. DILARANG menggabungkan seluruh pilihan/pernyataan ke dalam 1 sel Excel.
+5. **Pembahasan Ilmiah**: Sertakan pembahasan langkah demi langkah yang logis, mendalam, tanpa tanda asteris (*), serta membuktikan kebenaran kunci jawaban.
 
-Sajikan output Anda dengan format teks terstruktur yang rapi seperti di bawah ini:
+Sajikan output Anda dengan DUA FORMAT KELUARAN LENGKAP:
 
+[BAGIAN 1: FORMAT NASKAH WORD]
 ===========================================
 No Soal : [Nomor Soal]
 Kompetensi : [Kompetensi yang diuji]
@@ -4432,18 +4438,21 @@ Bentuk Soal : [Jenis bentuk soal]
 Soal (Menggabungkan Stimulus dan Pertanyaan Utama):
 [Tuliskan paragraf stimulus, data/tabel, atau situasi kontekstual, lalu diikuti langsung dengan pertanyaan utama atau instruksi pengerjaan secara menyatu dalam satu kesatuan teks soal tanpa dipisah]
 
-Pilihan Jawaban:
-A. [Pilihan A]
-B. [Pilihan B]
-C. [Pilihan C]
-D. [Pilihan D]
-E. [Pilihan E] (Jika bentuk soal pilihan ganda sederhana/kompleks)
+Pilihan Jawaban / Pernyataan:
+A. [Pilihan / Pernyataan A]
+B. [Pilihan / Pernyataan B]
+C. [Pilihan / Pernyataan C]
+D. [Pilihan / Pernyataan D]
+E. [Pilihan / Pernyataan E]
 
-Kunci Jawaban: [Kunci Jawaban yang tepat, misal: A]
+Kunci Jawaban: [Kunci Jawaban yang tepat]
+Pembahasan: [Penjelasan analitis langkah demi langkah secara ilmiah dan terstruktur]
+===========================================
 
-Pembahasan:
-[Penjelasan analitis langkah demi langkah secara ilmiah dan terstruktur]
-===========================================`;
+[BAGIAN 2: FORMAT TABEL EXCEL]
+| No Soal | Kompetensi | Bentuk Soal | Soal (Stimulus + Pertanyaan) | Opsi_A | Opsi_B | Opsi_C | Opsi_D | Opsi_E | Kunci Jawaban | Pembahasan |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | ... | ... | ... | [Pernyataan/Opsi A] | [Pernyataan/Opsi B] | [Pernyataan/Opsi C] | [Pernyataan/Opsi D] | [Pernyataan/Opsi E] | ... | ... |`;
 
     setGeneratedPromptText(localPrompt);
     setIsPromptModalOpen(true);
@@ -4464,7 +4473,8 @@ ATURAN MANDATORI FORMAT OUTPUT:
 2. JANGAN mencantumkan nomor soal (seperti '1.', 'Soal 1.') di dalam teks soal.
 3. Setiap pilihan jawaban WAJIB diawali huruf A, B, C, D, E dan titik (misal 'A. ...').
 4. Hilangkan semua tanda bintang/asteris (*) dari teks soal, pilihan jawaban, dan pembahasan.
-5. Instruksikan agar hasil soal disajikan dalam format Word dan Excel.
+5. Wajib menginstruksikan agar hasil soal disajikan dalam DUA format: Format Word dan Format Excel.
+6. KHUSUS PILIHAN GANDA KOMPLEKS (MCMA) DAN PILIHAN GANDA KOMPLEKS KATEGORI: Wajib menginstruksikan AI bahwa pilihan jawaban/pernyataan pada format Excel yang sebelumnya tergabung dalam satu sel WAJIB dipisahkan menjadi masing-masing kolom terpisah yaitu Opsi_A, Opsi_B, Opsi_C, Opsi_D, dan Opsi_E. DILARANG KERAS menggabungkan pilihan/pernyataan ke dalam 1 sel.
 
 Masukan Parameter Kisi-Kisi:
 - Mata Pelajaran: ${config.mataPelajaran}
