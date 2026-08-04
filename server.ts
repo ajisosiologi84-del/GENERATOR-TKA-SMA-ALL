@@ -1,6 +1,5 @@
 import express from "express";
 import path from "path";
-import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
 // Load environment variables
@@ -14,7 +13,7 @@ app.use(express.json({ limit: "10mb" }));
 
 // Helper to extract and deduplicate multiple API keys (supports newline, comma, or semicolon)
 function parseApiKeys(rawInput?: string): string[] {
-  const combined = [rawInput, process.env.GEMINI_API_KEY]
+  const combined = [rawInput, process.env.KOBOILLM_API_KEY, process.env.LITELLM_API_KEY, process.env.GEMINI_API_KEY]
     .filter(Boolean)
     .join('\n');
   const keys = Array.from(new Set(
@@ -41,150 +40,126 @@ function formatServerAiError(error: any): { statusCode: number; message: string 
   if (isQuota) {
     return {
       statusCode: 429,
-      message: `⚠️ Kuota / Rate Limit API Gemini Server Telah Terlampaui (Error 429 Exceeded Quota).
+      message: `⚠️ Kuota / Rate Limit API LiteLLM (KoboILLM) Telah Terlampaui (Error 429 Exceeded Quota).
 
 💡 SOLUSI CARA MENGATASINYA:
 1. Buka Tab 1 ('Langkah 1: Pengaturan & Bobot Soal') dan pilih Pengaturan Koneksi AI.
-2. Masukkan Kunci API Gemini Anda sendiri pada kolom 'Kunci API Gemini' (Anda dapat memasukkan beberapa API Key dipisah koma/baris baru untuk Rotasi Otomatis).
-3. Dapatkan Kunci API Gemini secara GRATIS & INSTAN di: https://aistudio.google.com/app/apikey
-4. Atau tunggu beberapa menit hingga kuota publik di-reset kembali oleh Google.`
+2. Masukkan Kunci API LiteLLM / KoboILLM Anda sendiri pada kolom API Key.
+3. Anda dapat memasukkan beberapa API Key dipisah koma/baris baru untuk Rotasi Otomatis.`
     };
   }
 
   return {
     statusCode: 500,
-    message: errorString || "Terjadi kesalahan pada layanan AI Gemini."
+    message: errorString || "Terjadi kesalahan pada layanan API LiteLLM / KoboILLM."
   };
 }
 
-// Circuit breaker to avoid spamming rate-limited or quota-exhausted models
-const coolOffModels = new Map<string, number>();
-const COOL_OFF_DURATION = 180 * 1000; // 3 minutes cool-off
+// Helper to sanitize markdown JSON codeblocks (e.g. ```json ... ```)
+function cleanJsonOutput(text: string): string {
+  if (!text) return "[]";
+  let cleaned = text.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "").trim();
+  }
+  return cleaned;
+}
 
-// Robust content generation with retries, API Key rotation, and model fallbacks
-async function generateContentWithFallbackAndRetry(
+// LiteLLM / KoboILLM Chat Completions Caller
+async function generateContentWithLiteLLM(
   params: {
-    contents: any;
+    contents: string;
     config?: any;
     apiKeysRaw?: string;
     temperature?: number;
+    baseUrl?: string;
   }
-): Promise<{ response: any; meta: { keyIndex: number; totalKeys: number; rotated: boolean } }> {
+): Promise<{ text: string; meta: { keyIndex: number; totalKeys: number; rotated: boolean } }> {
   const keysToTry = parseApiKeys(params.apiKeysRaw);
   if (keysToTry.length === 0) {
     throw new Error(
-      "GEMINI_API_KEY tidak ditemukan. Silakan masukkan Kunci API Gemini pada Pengaturan Koneksi AI (Langkah 1)."
+      "Kunci API LiteLLM / KoboILLM tidak ditemukan. Silakan masukkan Kunci API pada Pengaturan Koneksi AI (Langkah 1)."
     );
   }
 
-  // Preferred models with auto fallback
+  const baseUrl = (params.baseUrl || params.config?.baseUrl || process.env.KOBOILLM_BASE_URL || process.env.LITELLM_BASE_URL || "https://api.koboillm.com/v1").replace(/\/+$/, '');
+  
   const preferredModel = params.config?.model || "gemini-2.0-flash";
-  const allModels = [
+  const defaultModels = [
+    preferredModel,
     "gemini-2.0-flash",
     "gemini-2.5-pro",
     "gemini-1.5-flash",
-    "gemini-1.5-pro",
-    "gemini-2.0-flash-lite"
+    "gpt-4o",
+    "claude-3-5-sonnet"
   ];
-  const modelsToTry = [preferredModel, ...allModels.filter(m => m !== preferredModel)];
+  const modelsToTry = Array.from(new Set(defaultModels));
 
-  const now = Date.now();
-  // Filter active models not in active cool-off
-  let activeModels = modelsToTry.filter(m => {
-    const lastFail = coolOffModels.get(m);
-    return !lastFail || (now - lastFail > COOL_OFF_DURATION);
-  });
-  
-  if (activeModels.length === 0) {
-    coolOffModels.clear();
-    activeModels = [...modelsToTry];
-  }
-
-  const deferredModels = modelsToTry.filter(m => !activeModels.includes(m));
-  const orderedModels = [...activeModels, ...deferredModels];
   let lastError: any = null;
 
-  // Key Rotation Loop: Rotates across all provided user API Keys
+  // Key Rotation Loop
   for (let keyIdx = 0; keyIdx < keysToTry.length; keyIdx++) {
     const apiKey = keysToTry[keyIdx];
-    const ai = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          "User-Agent": "aistudio-build",
-        },
-      },
-    });
+    console.log(`[LiteLLM API Rotation] Trying Key #${keyIdx + 1} of ${keysToTry.length} at ${baseUrl}/chat/completions...`);
 
-    console.log(`[API Key Rotation] Trying Key #${keyIdx + 1} of ${keysToTry.length}...`);
-
-    for (const model of orderedModels) {
-      const isCoolOff = coolOffModels.has(model) && (now - (coolOffModels.get(model) || 0) <= COOL_OFF_DURATION);
-      console.log(`Calling Gemini API (Key #${keyIdx + 1}) model ${model}${isCoolOff ? ' (deferred fallback)' : ''}...`);
-
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          let timeoutId: any;
-          const mergedConfig = {
-            ...params.config,
-            temperature: params.temperature ?? params.config?.temperature ?? 0.7
-          };
-
-          const apiCall = ai.models.generateContent({
-            model,
-            contents: params.contents,
-            config: mergedConfig,
-          });
-
-          const timeoutPromise = new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => reject(new Error(`Timeout waiting for model ${model}`)), 90000);
-          });
-
-          try {
-            const response = await Promise.race([apiCall, timeoutPromise]);
-            return {
-              response,
-              meta: {
-                keyIndex: keyIdx,
-                totalKeys: keysToTry.length,
-                rotated: keyIdx > 0
-              }
-            };
-          } finally {
-            if (timeoutId) clearTimeout(timeoutId);
-          }
-        } catch (error: any) {
-          lastError = error;
-          console.error(`Key #${keyIdx + 1} Model ${model} (attempt ${attempt}) failed with error:`, error?.message || error);
-
-          const errorString = typeof error === 'string' ? error : (error?.message || JSON.stringify(error) || '');
-          const isNotFound = 
-            error?.status === 404 || 
-            error?.statusCode === 404 || 
-            error?.code === 404 || 
-            /not_found|404|no longer available|requested entity was not found/i.test(errorString);
-
-          if (isNotFound) {
-            console.warn(`Model ${model} not found/deprecated. Skipping...`);
-            coolOffModels.set(model, Date.now() + 86400000); // 24 hours cool-off
-            break; // Move to next model
-          }
-
-          const isQuotaOrDemandError = 
-            error?.status === 429 || 
-            error?.statusCode === 429 || 
-            error?.status === 503 ||
-            error?.statusCode === 503 ||
-            error?.code === 429 ||
-            error?.code === 503 ||
-            /quota|limit|429|exhausted|503|demand|unavailable/i.test(errorString);
-
-          if (isQuotaOrDemandError) {
-            coolOffModels.set(model, Date.now());
-            break;
-          }
-          break;
+    for (const model of modelsToTry) {
+      try {
+        const messages: any[] = [];
+        if (params.config?.systemInstruction) {
+          messages.push({ role: "system", content: params.config.systemInstruction });
         }
+        messages.push({ role: "user", content: params.contents });
+
+        const requestBody: any = {
+          model,
+          messages,
+          temperature: params.temperature ?? params.config?.temperature ?? 0.7,
+        };
+
+        if (params.config?.responseMimeType === "application/json") {
+          requestBody.response_format = { type: "json_object" };
+        }
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 90000);
+
+        const response = await fetch(`${baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+            "x-api-key": apiKey
+          },
+          body: JSON.stringify(requestBody),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errText = await response.text();
+          console.warn(`LiteLLM model ${model} request failed (status ${response.status}): ${errText}`);
+          throw new Error(`API LiteLLM Error (${response.status}): ${errText}`);
+        }
+
+        const data = await response.json();
+        let contentText = data.choices?.[0]?.message?.content || "";
+
+        if (!contentText) {
+          throw new Error("Respon kosong dari LiteLLM API.");
+        }
+
+        return {
+          text: contentText,
+          meta: {
+            keyIndex: keyIdx,
+            totalKeys: keysToTry.length,
+            rotated: keyIdx > 0
+          }
+        };
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`Key #${keyIdx + 1} model ${model} failed:`, err?.message || err);
       }
     }
   }
@@ -205,10 +180,79 @@ function attachRotationHeader(res: express.Response, meta?: { keyIndex: number; 
 const apiRouter = express.Router();
 
 apiRouter.get("/health", (req, res) => {
-  res.json({ status: "ok", apiKeyPresent: !!process.env.GEMINI_API_KEY });
+  res.json({ 
+    status: "ok", 
+    provider: "litellm",
+    baseUrl: process.env.KOBOILLM_BASE_URL || "https://api.koboillm.com/v1",
+    apiKeyPresent: parseApiKeys().length > 0 
+  });
 });
 
-// Endpoint 1: Generate Kisi-Kisi (Matriks Asesmen) via AI
+// Endpoint: Fetch Available Models from Base URL (https://api.koboillm.com/v1/models)
+apiRouter.post("/fetch-models", async (req, res) => {
+  try {
+    const apiKeysRaw = (req.headers['x-api-key'] as string) || req.body.apiKey || undefined;
+    const keys = parseApiKeys(apiKeysRaw);
+    const baseUrl = (req.body.baseUrl || process.env.KOBOILLM_BASE_URL || "https://api.koboillm.com/v1").replace(/\/+$/, '');
+
+    const apiKey = keys[0] || '';
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json"
+    };
+    if (apiKey) {
+      headers["Authorization"] = `Bearer ${apiKey}`;
+      headers["x-api-key"] = apiKey;
+    }
+
+    const response = await fetch(`${baseUrl}/models`, {
+      method: "GET",
+      headers
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return res.status(response.status).json({ 
+        error: `Gagal mengambil daftar model dari ${baseUrl}/models: ${errText}` 
+      });
+    }
+
+    const data = await response.json();
+    let modelsList: string[] = [];
+
+    if (Array.isArray(data.data)) {
+      modelsList = data.data
+        .map((item: any) => typeof item === 'string' ? item : item.id || item.name || String(item))
+        .filter(Boolean);
+    } else if (Array.isArray(data)) {
+      modelsList = data
+        .map((item: any) => typeof item === 'string' ? item : item.id || item.name || String(item))
+        .filter(Boolean);
+    } else if (data.models && Array.isArray(data.models)) {
+      modelsList = data.models
+        .map((item: any) => typeof item === 'string' ? item : item.id || item.name || String(item))
+        .filter(Boolean);
+    }
+
+    if (modelsList.length === 0) {
+      modelsList = [
+        "gemini-2.0-flash",
+        "gemini-2.5-pro",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+        "gpt-4o",
+        "claude-3-5-sonnet"
+      ];
+    }
+
+    res.json({ baseUrl, totalModels: modelsList.length, models: modelsList });
+  } catch (error: any) {
+    console.error("Error fetching models:", error);
+    res.status(500).json({ error: error?.message || "Gagal mengambil daftar model dari LiteLLM API." });
+  }
+});
+
+// Endpoint 1: Generate Kisi-Kisi (Matriks Asesmen) via AI LiteLLM
 apiRouter.post("/generate-kisi", async (req, res) => {
   try {
     const {
@@ -219,6 +263,8 @@ apiRouter.post("/generate-kisi", async (req, res) => {
       elemenMateri,
       subElemenMateri,
       count = 3,
+      baseUrl,
+      model
     } = req.body;
 
     if (!mataPelajaran) {
@@ -229,7 +275,8 @@ apiRouter.post("/generate-kisi", async (req, res) => {
 
     const systemInstruction = `Anda adalah ahli kurikulum pendidikan menengah SMA di Indonesia (khususnya untuk penyusunan Tes Kemampuan Akademik / TKA). 
 Tugas Anda adalah membuat rancangan KISI-KISI SOAL dalam bentuk MATRIKS ASESMEN sesuai dengan Kurikulum Merdeka atau K-13 tingkat SMA kelas X, XI, atau XII.
-Rancanglah kisi-kisi soal yang berbobot, mengandung stimulus yang kuat, valid, dan seimbang berdasarkan input dari pengguna.`;
+Rancanglah kisi-kisi soal yang berbobot, mengandung stimulus yang kuat, valid, dan seimbang berdasarkan input dari pengguna.
+Hasilkan output berupa JSON Array murni yang valid tanpa teks pembungkus lain.`;
 
     const prompt = `Buatkan ${count} baris matriks asesmen kisi-kisi soal untuk mata pelajaran berikut:
 Mata Pelajaran: ${mataPelajaran}
@@ -244,54 +291,37 @@ Aturan Penyusunan Matriks:
 2. Tingkat kognitif harus bervariasi antara: 'level_1' (Pemahaman / Knowing: Mengenali, mengingat, dan memahami konsep dasar), 'level_2' (Penerapan / Applying: Menerapkan konsep pada fenomena nyata), atau 'level_3' (Penalaran / Reasoning: Berpikir kritis dan menalar secara logis).
 3. Buat rincian elemen, sub-elemen, kompetensi yang diukur, serta batasan materi secara logis dan mendalam.
 4. Distribusikan jumlah soal per kisi-kisi (misalnya antara 3-10 soal per baris).
-5. Hasilkan juga 'konteksNusantara' (rencana integrasi konteks lokal Nusantara/Indonesia yang spesifik dan relevan dengan materi ini, misal adat daerah, keragaman etnis, geografi kepulauan, sejarah lokal, dsb) serta 'stimulusTambahan' (rencana bentuk stimulus seperti teks bacaan, studi kasus riil, berita, data tabel, atau peristiwa konkret khas Indonesia) untuk meningkatkan kualitas stimulus soal.`;
+5. Hasilkan juga 'konteksNusantara' (rencana integrasi konteks lokal Nusantara/Indonesia yang spesifik dan relevan dengan materi ini, misal adat daerah, keragaman etnis, geografi kepulauan, sejarah lokal, dsb) serta 'stimulusTambahan' (rencana bentuk stimulus seperti teks bacaan, studi kasus riil, berita, data tabel, atau peristiwa konkret khas Indonesia) untuk meningkatkan kualitas stimulus soal.
 
-    const result = await generateContentWithFallbackAndRetry({
+Hasilkan format JSON Array objek dengan properti:
+[
+  {
+    "bentukSoal": "pilihan_ganda_sederhana" | "mcma" | "kategori",
+    "levelKognitif": "level_1" | "level_2" | "level_3",
+    "elemenMateri": "string",
+    "subElemenMateri": "string",
+    "kompetensi": "string",
+    "batasanCatatan": "string",
+    "jumlahSoal": 5,
+    "konteksNusantara": "string",
+    "stimulusTambahan": "string"
+  }
+]`;
+
+    const result = await generateContentWithLiteLLM({
       contents: prompt,
       apiKeysRaw,
+      baseUrl,
       config: {
+        model,
         systemInstruction,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              bentukSoal: { 
-                type: Type.STRING, 
-                description: "Nilai wajib berupa salah satu dari: 'pilihan_ganda_sederhana', 'mcma', atau 'kategori'" 
-              },
-              levelKognitif: { 
-                type: Type.STRING, 
-                description: "Nilai wajib berupa salah satu dari: 'level_1', 'level_2', atau 'level_3'" 
-              },
-              elemenMateri: { type: Type.STRING, description: "Nama elemen atau materi utama" },
-              subElemenMateri: { type: Type.STRING, description: "Nama sub-elemen atau sub-materi spesifik" },
-              kompetensi: { type: Type.STRING, description: "Deskripsi kompetensi spesifik yang akan diukur" },
-              batasanCatatan: { type: Type.STRING, description: "Batasan materi, batasan variabel, atau catatan khusus" },
-              jumlahSoal: { type: Type.INTEGER, description: "Jumlah soal yang dialokasikan untuk kisi-kisi ini" },
-              konteksNusantara: { type: Type.STRING, description: "Konteks lokal Nusantara spesifik (misal kebudayaan daerah, kearifan lokal, suku, adat, isu sosial/geografis Indonesia, dsb) yang relevan" },
-              stimulusTambahan: { type: Type.STRING, description: "Stimulus tambahan berupa skenario studi kasus, kutipan berita, data fiktif terstruktur, atau sketsa peristiwa nyata di Indonesia untuk memperkaya soal" }
-            },
-            required: [
-              "bentukSoal",
-              "levelKognitif",
-              "elemenMateri",
-              "subElemenMateri",
-              "kompetensi",
-              "batasanCatatan",
-              "jumlahSoal",
-              "konteksNusantara",
-              "stimulusTambahan"
-            ]
-          }
-        }
+        responseMimeType: "application/json"
       }
     });
 
     attachRotationHeader(res, result.meta);
-    const resultText = result.response.text || "[]";
-    const parsed = JSON.parse(resultText);
+    const cleanText = cleanJsonOutput(result.text);
+    const parsed = JSON.parse(cleanText);
     res.json(parsed);
   } catch (error: any) {
     console.error("Error generating kisi-kisi:", error);
@@ -300,7 +330,7 @@ Aturan Penyusunan Matriks:
   }
 });
 
-// Endpoint 2: Generate Soal (Pembuat Soal) dari Kisi-Kisi via AI
+// Endpoint 2: Generate Soal (Pembuat Soal) dari Kisi-Kisi via AI LiteLLM
 apiRouter.post("/generate-soal", async (req, res) => {
   try {
     const {
@@ -315,6 +345,8 @@ apiRouter.post("/generate-soal", async (req, res) => {
       kualitasChecklist = [],
       noSoalStart = 1,
       existingQuestions = [],
+      baseUrl,
+      model
     } = req.body;
 
     if (!kisi) {
@@ -325,9 +357,9 @@ apiRouter.post("/generate-soal", async (req, res) => {
 
     const systemInstruction = `Anda adalah ahli pembuat soal ujian nasional dan TKA (Tes Kemampuan Akademik) SMA di Indonesia.
 Anda sangat terampil menyusun soal tingkat tinggi (HOTS - Higher Order Thinking Skills), bervariasi, mendalam, dan bebas dari bias.
-Patuhi instruksi bentuk soal dan parameter kognitif yang ditentukan pengguna secara presisi.`;
+Patuhi instruksi bentuk soal dan parameter kognitif yang ditentukan pengguna secara presisi.
+Hasilkan output berupa JSON Array murni yang valid tanpa teks pembungkus markdown tambahan.`;
 
-    // Build context strings (prefer Kisi-specific parameters over global fallbacks)
     const activeKonteksLokal = (kisi.konteksLokal && kisi.konteksLokal.length > 0) ? kisi.konteksLokal : konteksLokal;
     const activeStimulusKonten = (kisi.stimulusKonten && kisi.stimulusKonten.length > 0) ? kisi.stimulusKonten : stimulusKonten;
     const activeKualitasChecklist = (kisi.kualitasChecklist && kisi.kualitasChecklist.length > 0) ? kisi.kualitasChecklist : kualitasChecklist;
@@ -353,7 +385,6 @@ Patuhi instruksi bentuk soal dan parameter kognitif yang ditentukan pengguna sec
 
     const countRequired = Number(req.body.count) || Number(kisi.jumlahSoal) || 1;
 
-    // Construct constraint for existing questions to avoid duplicates
     let existingQuestionsConstraint = '';
     if (Array.isArray(existingQuestions) && existingQuestions.length > 0) {
       const sanitizedList = existingQuestions
@@ -363,88 +394,68 @@ Patuhi instruksi bentuk soal dan parameter kognitif yang ditentukan pengguna sec
         existingQuestionsConstraint = `
 
 HINDARI PENGULANGAN SOAL (SANGAT PENTING):
-Jangan membuat soal yang sama, memiliki konsep atau contoh kasus/studi yang mirip, atau menggunakan narasi stimulus yang mirip dengan soal-soal berikut:
+Jangan membuat soal yang sama atau mirip dengan soal-soal berikut:
 ${sanitizedList.map((text: string, idx: number) => `- Soal ${idx + 1}: ${text.substring(0, 150)}...`).join('\n')}
 Pastikan butir soal yang Anda hasilkan saat ini benar-benar segar, baru, unik secara naratif, bervariasi, dan tidak mengulangi pertanyaan di atas.`;
       }
     }
 
-    let indonesianLanguageCriteria = '';
-    if (mataPelajaran && (mataPelajaran.toLowerCase().includes('bahasa indonesia') || mataPelajaran.toLowerCase().includes('indonesia'))) {
-      indonesianLanguageCriteria = `
-
-KAIDAH & KAIDAH MUATAN KHUSUS BAHASA INDONESIA (SANGAT PENTING):
-- Teks yang diujikan harus berupa Teks Informasi (Tunggal/Jamak yang berisi fakta, konsep, prosedur, metakognisi dari berbagai bidang pada skala lokal, nasional, global) ATAU Teks Fiksi (realisme/absurd dengan latar cerita konkret/abstrak, tokoh berkarakter bulat, konflik tunggal/jamak dengan penyelesaian terbuka, alur campuran, dan sudut pandang campuran).
-- Karakteristik Kosakata: Menggunakan kata khusus dan kata umum, kata berimbuhan kompleks, kata abstrak, makna denotatif, istilah teknis, atau konotatif konteks luas.
-- Karakteristik Kalimat: Setiap kalimat di dalam teks stimulus/soal harus berkisar antara 8-12 kata per kalimat, menggunakan kalimat kompleks berbagai pola serta kalimat inversi.
-- Karakteristik Wacana: Menggunakan konjungsi antarparagraf dengan makna 'pertentangan' dan 'sebab akibat', tanda baca pendukung makna yang tepat, dengan panjang teks berkisar antara 250-300 kata (kecuali jika bergenre puisi).`;
-    }
-
-    const prompt = `Buatkan tepat sebanyak ${countRequired} butir soal ujian TKA SMA yang berbeda untuk Mata Pelajaran ${mataPelajaran}.${indonesianLanguageCriteria}
+    const prompt = `Buatkan tepat sebanyak ${countRequired} butir soal ujian TKA SMA yang berbeda untuk Mata Pelajaran ${mataPelajaran}.
     
-PENTING: Jumlah objek soal yang dihasilkan dalam array JSON HARUS tepat sebanyak ${countRequired} butir soal, tidak kurang dan tidak lebih.
-Setiap butir soal harus unik, bervariasi, dan didasarkan pada kisi-kisi berikut.
+PENTING: Jumlah objek soal yang dihasilkan dalam array JSON HARUS tepat sebanyak ${countRequired} butir soal.
 
 INFORMASI MATRIKS ASESMEN KISI-KISI:
 - No Soal Mulai: ${noSoalStart}
 - Bentuk Soal: ${kisi.bentukSoal} (${bentukSoalDesc})
-- Tingkat Kognitif: ${kisi.levelKognitif} (${kisi.levelKognitif === 'level_1' ? 'Pemahaman (Knowing) - Mengenali, mengingat, dan memahami konsep dasar' : kisi.levelKognitif === 'level_2' ? 'Penerapan (Applying) - Menerapkan konsep pada fenomena nyata' : 'Penalaran (Reasoning) - Berpikir kritis dan menalar secara logis'})
+- Tingkat Kognitif: ${kisi.levelKognitif}
 - Elemen/Materi: ${kisi.elemenMateri}
 - Sub-Elemen/Submateri: ${kisi.subElemenMateri}
 - Kompetensi yang Diuji: ${kisi.kompetensi}
 - Batasan/Catatan Khusus: ${kisi.batasanCatatan || "Tidak ada"}
 - Konteks Nusantara: ${kisi.konteksNusantara || "Tidak ada khusus"}
 - Stimulus Tambahan: ${kisi.stimulusTambahan || "Tidak ada khusus"}
-- Jenis Soal: ${jenisSoal} (Soal Tunggal atau Soal Grup/Terhubung)
+- Jenis Soal: ${jenisSoal}
 ${existingQuestionsConstraint}
 
-PANDUAN EKSTRA:
-1. ${konteksStr} ${kisi.konteksNusantara ? `Integrasikan juga secara mendalam target Konteks Nusantara berikut ke dalam stimulus atau pokok soal agar bernuansa ke-Indonesia-an yang otentik: "${kisi.konteksNusantara}".` : ""}
-2. ${stimulusStr} ${kisi.stimulusTambahan ? `Gunakan secara aktif target Stimulus Tambahan berikut untuk merancang stimulus/skenario pendukung yang kaya dan berbobot: "${kisi.stimulusTambahan}".` : ""}
+PANDUAN UTAMA:
+1. ${konteksStr}
+2. ${stimulusStr}
 3. ${checklistStr}
-4. Kunci jawaban harus sangat akurat dan pembahasan harus lengkap, ilmiah, edukatif, dan terstruktur dengan rapi agar mudah dipahami siswa SMA. Tambahkan juga field 'kataKunci' yang berisi kata kunci atau konsep penting/topik utama yang digunakan/diuji dalam soal ini (misal: 'Sistem Persamaan Linear', 'Gaya Gravitasi', 'Asimilasi Sosial').
-5. JIKA soal membutuhkan visual pendukung (seperti grafik fungsi, diagram kartesius, bangun geometri, siklus biologi, diagram sirkuit, kurva ekonomi, dsb.), Anda disarankan untuk membuat kode SVG inline yang valid (dimulai dengan '<svg' and ditutup '</svg>' lengkap dengan viewBox, stroke, fill, teks label agar indah dan responsive) ATAU mencantumkan URL gambar Unsplash yang relevan pada field 'gambarUrl'. Jika tidak membutuhkan visual, isi 'gambarUrl' dengan string kosong "".
-6. Harap sesuaikan bahasa agar baku, formal, sesuai EBI (Ejaan Bahasa Indonesia), namun mudah dimengerti.
-7. Hasilkan tepat ${countRequired} objek soal di dalam array hasil.
-8. SANGAT PENTING (MANDATORI): Gabungkan paragraf stimulus/pengantar/studi kasus (bila ada) langsung ke bagian awal field 'soal' (diikuti pertanyaan utama di bawahnya), dan kosongkan field 'stimulus' (isi dengan string kosong ""). Jangan memisahkannya agar struktur soal konsisten dengan prompt.
-9. SANGAT PENTING: JANGAN mencantumkan nomor soal (seperti '1.', 'Soal 1.', 'No. 1') di dalam teks field 'soal'. Tulis langsung isi stimulus dan pertanyaan utama.
-10. SANGAT PENTING: Setiap pilihan jawaban di dalam array 'opsi' WAJIB diawali dengan huruf label pilihan dan titik, contoh: ['A. ...', 'B. ...', 'C. ...', 'D. ...', 'E. ...'].`;
+4. Kunci jawaban harus sangat akurat dan pembahasan harus lengkap, ilmiah, edukatif, dan terstruktur dengan rapi.
+5. SANGAT PENTING (MANDATORI): Gabungkan paragraf stimulus/pengantar/studi kasus (bila ada) langsung ke bagian awal field 'soal' (diikuti pertanyaan utama di bawahnya), dan kosongkan field 'stimulus' (isi dengan string kosong ""). Jangan memisahkannya.
+6. SANGAT PENTING: JANGAN mencantumkan nomor soal (seperti '1.', 'Soal 1.') di dalam teks field 'soal'.
+7. SANGAT PENTING: Setiap pilihan jawaban di dalam array 'opsi' WAJIB diawali dengan huruf label pilihan dan titik, contoh: ['A. ...', 'B. ...', 'C. ...', 'D. ...', 'E. ...'].
 
-    const result = await generateContentWithFallbackAndRetry({
+Hasilkan format JSON Array:
+[
+  {
+    "kompetensi": "${kisi.kompetensi}",
+    "subKompetensi": "${kisi.subElemenMateri}",
+    "bentukSoal": "${kisi.bentukSoal}",
+    "stimulus": "",
+    "soal": "Teks stimulus/pengantar dan pertanyaan utama...",
+    "opsi": ["A. Opsi A", "B. Opsi B", "C. Opsi C", "D. Opsi D", "E. Opsi E"],
+    "kunciJawaban": "A",
+    "pembahasan": "Penjelasan...",
+    "kataKunci": "Topik Utama",
+    "gambarUrl": ""
+  }
+]`;
+
+    const result = await generateContentWithLiteLLM({
       contents: prompt,
       apiKeysRaw,
+      baseUrl,
       config: {
+        model,
         systemInstruction,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              kompetensi: { type: Type.STRING },
-              subKompetensi: { type: Type.STRING },
-              bentukSoal: { type: Type.STRING },
-              stimulus: { type: Type.STRING, description: "Sengaja dikosongkan karena stimulus digabungkan langsung ke dalam field 'soal' (isi dengan string kosong '')" },
-              soal: { type: Type.STRING, description: "Teks soal lengkap yang menggabungkan stimulus (paragraf stimulus/pengantar/teks bacaan/studi kasus jika ada) dan pertanyaan/pokok soal utama secara menyatu" },
-              opsi: { 
-                type: Type.ARRAY, 
-                items: { type: Type.STRING }, 
-                description: "Array pilihan jawaban (misal ['A. ...', 'B. ...']) atau daftar pernyataan untuk tipe kategori" 
-              },
-              kunciJawaban: { type: Type.STRING, description: "Kunci jawaban yang tepat dan presisi" },
-              pembahasan: { type: Type.STRING, description: "Pembahasan mendalam, terstruktur, dan ilmiah" },
-              kataKunci: { type: Type.STRING, description: "Kata kunci atau konsep utama yang digunakan dalam soal ini" },
-              gambarUrl: { type: Type.STRING, description: "Kode SVG inline lengkap (dimulai dengan '<svg' dan diakhiri '</svg>') atau URL gambar eksternal, atau string kosong '' jika tidak ada ilustrasi." }
-            },
-            required: ["kompetensi", "subKompetensi", "bentukSoal", "soal", "opsi", "kunciJawaban", "pembahasan", "kataKunci", "gambarUrl"]
-          }
-        }
+        responseMimeType: "application/json"
       }
     });
 
     attachRotationHeader(res, result.meta);
-    const resultText = result.response.text || "[]";
-    let parsed = JSON.parse(resultText);
+    const cleanText = cleanJsonOutput(result.text);
+    let parsed = JSON.parse(cleanText);
 
     if (Array.isArray(parsed)) {
       parsed = parsed.map((q: any) => {
@@ -477,10 +488,10 @@ PANDUAN EKSTRA:
   }
 });
 
-// Endpoint 3: Generate Custom SVG Illustration/Graphic via AI Gemini
+// Endpoint 3: Generate Custom SVG Illustration/Graphic via AI LiteLLM
 apiRouter.post("/generate-illustration", async (req, res) => {
   try {
-    const { prompt, context } = req.body;
+    const { prompt, context, baseUrl, model } = req.body;
     if (!prompt) {
       return res.status(400).json({ error: "Permintaan ilustrasi (prompt) harus diisi." });
     }
@@ -495,21 +506,19 @@ ${context ? `Konteks Soal yang berkaitan: "${context}"` : ""}
 
 Ingat, hanya hasilkan kode SVG langsung tanpa penanda kode atau pembungkus markdown apapun. Dimulai dari '<svg' sampai '</svg>'.`;
 
-    const result = await generateContentWithFallbackAndRetry({
+    const result = await generateContentWithLiteLLM({
       contents: userPrompt,
       apiKeysRaw,
+      baseUrl,
       config: {
+        model,
         systemInstruction,
         temperature: 0.2,
       },
     });
 
     attachRotationHeader(res, result.meta);
-    let svgCode = result.response.text || "";
-    svgCode = svgCode.trim();
-    if (svgCode.startsWith("```")) {
-      svgCode = svgCode.replace(/^```[a-zA-Z]*\n/, "").replace(/\n```$/, "").trim();
-    }
+    let svgCode = cleanJsonOutput(result.text);
     
     res.json({ svg: svgCode });
   } catch (error: any) {
@@ -519,11 +528,12 @@ Ingat, hanya hasilkan kode SVG langsung tanpa penanda kode atau pembungkus markd
   }
 });
 
-// Endpoint 4: Test Health and Validity of Multiple API Keys
+// Endpoint 4: Test Health and Validity of Multiple API Keys via LiteLLM
 apiRouter.post("/test-key-health", async (req, res) => {
   try {
     const apiKeysRaw = (req.headers['x-api-key'] as string) || req.body.apiKey || undefined;
     const keys = parseApiKeys(apiKeysRaw);
+    const baseUrl = (req.body.baseUrl || process.env.KOBOILLM_BASE_URL || "https://api.koboillm.com/v1").replace(/\/+$/, '');
 
     if (keys.length === 0) {
       return res.status(400).json({ error: "Tidak ada API Key yang diberikan." });
@@ -534,21 +544,32 @@ apiRouter.post("/test-key-health", async (req, res) => {
       const key = keys[i];
       const snippet = key.substring(0, 7) + "..." + key.substring(key.length - 4);
       try {
-        const ai = new GoogleGenAI({ apiKey: key });
-        await ai.models.generateContent({
-          model: "gemini-2.0-flash",
-          contents: "Ping",
-          config: { maxOutputTokens: 5 }
+        const response = await fetch(`${baseUrl}/models`, {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${key}`,
+            "x-api-key": key
+          }
         });
-        results.push({ keyIndex: i, snippet, status: "valid", message: "API Key Aktif & Normal" });
+
+        if (response.ok) {
+          results.push({ keyIndex: i, snippet, status: "valid", message: "API Key Aktif & Normal" });
+        } else {
+          const errText = await response.text();
+          const isQuota = response.status === 429 || /quota|limit|429/i.test(errText);
+          results.push({ 
+            keyIndex: i, 
+            snippet, 
+            status: isQuota ? "exhausted" : "invalid", 
+            message: isQuota ? "Limit Kuota Terlampaui (429)" : `Error HTTP ${response.status}`
+          });
+        }
       } catch (err: any) {
-        const errMsg = err?.message || String(err);
-        const isQuota = /quota|limit|429|exhausted|503/i.test(errMsg);
         results.push({ 
           keyIndex: i, 
           snippet, 
-          status: isQuota ? "exhausted" : "invalid", 
-          message: isQuota ? "Limit Kuota Terlampaui (429)" : "Key Tidak Valid / Error"
+          status: "invalid", 
+          message: err?.message || "Gagal terhubung"
         });
       }
     }
@@ -559,10 +580,10 @@ apiRouter.post("/test-key-health", async (req, res) => {
   }
 });
 
-// Endpoint 4: Optimize/Generate Professional AI Prompt for a Kisi-Kisi Row
+// Endpoint 5: Optimize/Generate Professional AI Prompt for a Kisi-Kisi Row
 apiRouter.post("/optimize-prompt", async (req, res) => {
   try {
-    const { kisi, mataPelajaran } = req.body;
+    const { kisi, mataPelajaran, baseUrl, model } = req.body;
     if (!kisi) {
       return res.status(400).json({ error: "Data kisi-kisi harus disediakan." });
     }
@@ -595,18 +616,19 @@ Draf Megaprompt yang Anda buat harus memuat:
 
 Tulis draf prompt tersebut langsung dalam format Markdown yang elegan, berwibawa, rapi, dan langsung bisa dicopy oleh pengguna. Jangan tambahkan penjelasan pembuka dari Anda sendiri seperti "Berikut adalah prompt yang Anda minta", melainkan langsung mulailah isi prompt tersebut dengan judul atau teks instruksi utama yang siap disalin.`;
 
-    const { response, meta } = await generateContentWithFallbackAndRetry({
+    const { text, meta } = await generateContentWithLiteLLM({
       contents: userPrompt,
       apiKeysRaw,
+      baseUrl,
       config: {
+        model,
         systemInstruction,
         temperature: 0.7,
       },
     });
 
     attachRotationHeader(res, meta);
-    const optimizedPrompt = response.text || "";
-    res.json({ prompt: optimizedPrompt });
+    res.json({ prompt: text });
   } catch (error: any) {
     console.error("Error optimizing prompt:", error);
     const formatted = formatServerAiError(error);
@@ -614,10 +636,10 @@ Tulis draf prompt tersebut langsung dalam format Markdown yang elegan, berwibawa
   }
 });
 
-// Endpoint 5: Generate Systematic Learning Material from Kisi-Kisi Row (Supports Ringkasan Materi & Mega-Prompt for NotebookLM & Gemini AI)
+// Endpoint 6: Generate Systematic Learning Material from Kisi-Kisi Row
 apiRouter.post("/generate-materi", async (req, res) => {
   try {
-    const { kisi, mataPelajaran, mode } = req.body;
+    const { kisi, mataPelajaran, mode, baseUrl, model } = req.body;
     if (!kisi) {
       return res.status(400).json({ error: "Data kisi-kisi harus disediakan." });
     }
@@ -634,25 +656,16 @@ Tugas Anda adalah menyusun RINGKASAN MATERI AJAR yang sangat detail, akademis, k
 PEDOMAN GAYA PENULISAN & FORMATTING TERIKAT:
 1. Tulis dengan gaya bahasa yang sangat MENARIK BACA, KOMUNIKATIF, INSPIRATIF, DAN MENGGUGAH MINAT BACA SISWA MAUPUN GURU.
 2. ATURAN BOLD DAN ITALIC (CETAK TEBAL DAN MIRING):
-   - WAJIB MENGGUNAKAN CETAK MIRING (Markdown *istilah*) KHUSUS UNTUK SEMUA ISTILAH BAHASA ASING, BAHASA LATIN, ATAU BAHASA INGGRIS (contoh: *social mobility*, *status quo*, *Gemeinschaft*, *Gesellschaft*, *Verstehen*, *anomie*, *looking-glass self*, *pattern variables*).
-   - WAJIB MENGGUNAKAN CETAK TEBAL (Markdown **Konsep**) KHUSUS UNTUK KATA ATAU KONSEP KHUSUS, NAMA TEORI, NAMA TOKOH/AHLI SOSIOLOGI, DAN KUNCI UTAMA MATERI (contoh: **Emile Durkheim**, **Teori Konflik**, **Mobilitas Sosial Vertikal**, **Solidaritas Mekanis**).
-3. DILARANG KERAS MENGGUNAKAN TABEL: Jangan membuat tabel Markdown (| Kolom 1 | Kolom 2 |). Sajikan semua perbandingan, dimensi, klasifikasi, atau materi dalam bentuk narasi paragraf yang rapi, sub-bab yang jelas, serta daftar poin (1, 2, 3 atau bullet points).
-4. DILARANG MENGGUNAKAN TANDA BINTANG / ASTERISK ('*') SECARA ACAK ATAU BERANTAKAN. Hanya gunakan tanda bintang ganda (**konsep**) untuk bold dan bintang tunggal (*foreign term*) untuk italic.
+   - WAJIB MENGGUNAKAN CETAK MIRING (Markdown *istilah*) KHUSUS UNTUK SEMUA ISTILAH BAHASA ASING, BAHASA LATIN, ATAU BAHASA INGGRIS.
+   - WAJIB MENGGUNAKAN CETAK TEBAL (Markdown **Konsep**) KHUSUS UNTUK KATA ATAU KONSEP KHUSUS, NAMA TEORI, NAMA TOKOH/AHLI SOSIOLOGI.
+3. DILARANG KERAS MENGGUNAKAN TABEL. Sajikan semua perbandingan dalam bentuk narasi paragraf yang rapi dan daftar poin.
+4. DILARANG MENGGUNAKAN TANDA BINTANG / ASTERISK ('*') SECARA ACAK ATAU BERANTAKAN.
 
 Materi ajar ini wajib terdiri dari 4 bagian utama yang diberi judul Markdown (#):
 # 1. PENDAHULUAN & DEFINISI
-Berikan pengantar inspiratif tentang latar belakang sejarah konsep dan definisi teoretis mendalam berdasarkan pandangan para tokoh/ahli sosiologi terkemuka (seperti Auguste Comte, Emile Durkheim, Max Weber, Karl Marx, dsb. yang relevan).
-
 # 2. KONSEP UTAMA & TEORI PENDEKATAN
-Berikan penjelasan teoretis sosiologis yang kuat, klasifikasi, dimensi, indikator, serta mekanisme penting. Jelaskan klasifikasi/perbandingan secara naratif dan terstruktur menggunakan daftar poin yang rapi tanpa tabel.
-
 # 3. STUDI KASUS KONKRIT (KONTEKSTUAL INDONESIA)
-Berikan penjelasan dan narasi faktual yang memikat tentang satu studi kasus nyata, spesifik, atau fenomena sosial kontemporer di masyarakat Indonesia saat ini yang sangat menarik untuk dibaca.
-
-# 4. ANALISIS KRITIS & REFLEKSI
-Tuliskan 2-3 pertanyaan reflektif tingkat tinggi (HOTS) yang mendalam untuk merangsang pemikiran kritis siswa.
-
-Tulis isi materi secara detail, panjang lebar, kaya analogi kontekstual Indonesia, tanpa memberikan kata pengantar/penutup atau penjelasan tambahan di luar isi materi itu sendiri.`;
+# 4. ANALISIS KRITIS & REFLEKSI`;
 
       userPrompt = `Buatkan RINGKASAN MATERI AJAR yang komprehensif, inspiratif, dan sangat menarik untuk dibaca untuk tingkat SMA Kelas XII berdasarkan unit berikut:
 Mata Pelajaran: ${mataPelajaran || "Sosiologi"}
@@ -664,17 +677,8 @@ Batasan & Catatan Kurikulum: ${kisi.batasanCatatan || "Tidak ada batasan khusus"
 
 Tulis secara panjang lebar, menarik, dan rapi. Gunakan cetak miring (*...*) untuk bahasa asing dan cetak tebal (**...**) untuk kata/konsep khusus. TANPA TABEL.`;
     } else {
-      // Default to "prompt" mode
       systemInstruction = `Anda adalah ahli prompt engineering pendidikan dan desainer instruksional kelas dunia.
-Tugas Anda adalah merumuskan sebuah MEGA-PROMPT yang sangat detail, komprehensif, terstruktur rapi, dan siap saji (copy-pasteable) untuk digunakan oleh guru/pengajar di NOTEBOOK LM atau GEMINI AI guna menghasilkan INFOGRAFIS PEMBELAJARAN atau SLIDE PRESENTASI INTERAKTIF yang berkualitas tinggi, estetis, dan mendalam.
-
-Mega-prompt yang Anda susun harus secara utuh menggabungkan dan mendetailkan seluruh materi pokok berdasarkan parameter kisi-kisi matriks yang diberikan. Di dalam mega-prompt tersebut, Anda harus:
-1. Mendefinisikan peran AI penerima prompt (sebagai desainer infografis & slide presentasi edukasi profesional).
-2. Menguraikan seluruh materi pokok secara sangat detail, panjang lebar, akademis, dan terperinci (cantumkan definisi tokoh/ahli, teori pendekatan sosiologis/ilmiah, klasifikasi/dimensi, serta analogi yang memudahkan pemahaman siswa) agar NotebookLM atau Gemini AI memiliki bahan konten yang sangat kaya tanpa perlu mencari dari luar.
-3. Memberikan panduan visual dan struktur slide/infografis (misalnya outline slide per slide dari Slide 1 s.d. Slide 10, atau pembagian seksi infografis yang menarik, beserta saran visual, tabel, diagram, dan studi kasus lokal Indonesia).
-4. Menyertakan instruksi aktivitas reflektif, studi kasus interaktif, atau kuis singkat untuk disisipkan di dalam slide/infografis.
-
-Format keluaran Anda harus langsung berupa teks MEGA-PROMPT utuh siap pakai yang rapi, menggunakan Markdown yang sangat estetis (seperti menggunakan blockquotes, penomoran, tabel, atau pembatas yang jelas) sehingga pengguna tinggal menyalin (copy) seluruh teks tersebut dan menempelkannya (paste) ke NotebookLM atau Gemini AI.`;
+Tugas Anda adalah merumuskan sebuah MEGA-PROMPT yang sangat detail, komprehensif, terstruktur rapi, dan siap saji (copy-pasteable) untuk digunakan oleh guru/pengajar di NOTEBOOK LM atau GEMINI AI guna menghasilkan INFOGRAFIS PEMBELAJARAN atau SLIDE PRESENTASI INTERAKTIF yang berkualitas tinggi, estetis, dan mendalam.`;
 
       userPrompt = `Buatkan MEGA-PROMPT siap pakai untuk menyusun Slide Presentasi dan Infografis Pembelajaran tingkat SMA Kelas XII yang sangat detail dan kaya konten untuk unit berikut:
 Mata Pelajaran: ${mataPelajaran || "Sosiologi"}
@@ -682,23 +686,22 @@ Topik / Elemen Materi: ${kisi.elemenMateri}
 Sub-elemen / Sub-materi: ${kisi.subElemenMateri}
 Target Kompetensi Siswa: ${kisi.kompetensi}
 Level Kognitif: ${kisi.levelKognitif === 'level_1' ? 'Pemahaman & Pengetahuan (Knowing - C1/C2)' : kisi.levelKognitif === 'level_2' ? 'Penerapan/Aplikasi (Applying - C3)' : 'Penalaran/Analisis Tinggi (Reasoning/HOTS - C4/C5/C6)'}
-Batasan & Catatan Kurikulum: ${kisi.batasanCatatan || "Tidak ada batasan khusus"}
-
-Sediakan di dalam prompt tersebut uraian materi yang sangat kaya, komprehensif, dan detail terkait topik ini (termasuk definisi tokoh, teori, dimensi sosiologis/ilmiah, serta studi kasus nyata sosiologis/kontekstual Indonesia yang sedang hangat) agar konten presentasi/infografisnya memiliki bobot akademis tinggi dan tidak superfisial. Sajikan langsung dalam bentuk MEGA-PROMPT utuh siap salin dalam format Markdown lengkap tanpa teks pengantar atau penutup dari Anda.`;
+Batasan & Catatan Kurikulum: ${kisi.batasanCatatan || "Tidak ada batasan khusus"}`;
     }
 
-    const { response, meta } = await generateContentWithFallbackAndRetry({
+    const { text, meta } = await generateContentWithLiteLLM({
       contents: userPrompt,
       apiKeysRaw,
+      baseUrl,
       config: {
+        model,
         systemInstruction,
         temperature: 0.7,
       },
     });
 
     attachRotationHeader(res, meta);
-    const materi = response.text || "";
-    res.json({ materi });
+    res.json({ materi: text });
   } catch (error: any) {
     console.error("Error generating materi:", error);
     const formatted = formatServerAiError(error);
@@ -710,7 +713,7 @@ Sediakan di dalam prompt tersebut uraian materi yang sangat kaya, komprehensif, 
 app.use("/api", apiRouter);
 app.use("/", apiRouter);
 
-// Global Error Handling Middleware to guarantee JSON response format on failure
+// Global Error Handling Middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error("Global error handler caught unexpected error:", err);
   res.status(500).json({ error: err.message || "Terjadi kesalahan internal pada server." });

@@ -2635,14 +2635,18 @@ export default function App() {
   const [aiIllustratorStatus, setAiIllustratorStatus] = useState('');
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
   const [activePromptTab, setActivePromptTab] = useState<'ilustrasi' | 'tabel' | 'grafik' | 'stimulus'>('ilustrasi');
+  
+  // Menu 1 Sub-Tab State ('parameter' for Admin Input Parameter, 'prompt' for Promt Generator & AI)
+  const [configSubTab, setConfigSubTab] = useState<'parameter' | 'prompt'>('parameter');
+  const effectiveSubTab = userRole === 'admin' ? configSubTab : 'prompt';
 
   // AI Config state (Support client-side direct bypass of Vercel 10s timeouts & N8N Sumopod Webhook)
   const [aiConfig, setAiConfig] = useState(() => {
     const savedKey = localStorage.getItem('gemini_api_key') || '';
     const savedMode = localStorage.getItem('gemini_api_mode') || 'server';
+    const savedBaseUrl = localStorage.getItem('litellm_base_url') || 'https://api.koboillm.com/v1';
     const savedN8nUrl = localStorage.getItem('n8n_webhook_url') || 'https://sumopod.com/webhook/generate-soal';
     let savedModel = localStorage.getItem('gemini_api_model') || 'gemini-2.0-flash';
-    // Upgrade deprecated or invalid models automatically
     if (
       !savedModel ||
       savedModel.includes('3.5') || 
@@ -2654,12 +2658,22 @@ export default function App() {
     return {
       mode: savedMode as 'server' | 'client' | 'n8n',
       apiKey: savedKey,
+      baseUrl: savedBaseUrl,
       model: savedModel,
       n8nWebhookUrl: savedN8nUrl,
       temperature: parseFloat(localStorage.getItem('gemini_api_temperature') || '0.7'),
       requestDelayMs: parseInt(localStorage.getItem('gemini_api_delay') || '0', 10)
     };
   });
+  const [availableModels, setAvailableModels] = useState<string[]>([
+    "gemini-2.0-flash",
+    "gemini-2.5-pro",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "gpt-4o",
+    "claude-3-5-sonnet"
+  ]);
+  const [fetchingModels, setFetchingModels] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [showApiKeySaved, setShowApiKeySaved] = useState(false);
   const [testingN8n, setTestingN8n] = useState(false);
@@ -2683,12 +2697,51 @@ export default function App() {
   }>>([]);
   const [testingKeyHealth, setTestingKeyHealth] = useState(false);
 
+  const handleFetchModels = async () => {
+    setFetchingModels(true);
+    try {
+      const res = await fetch('/api/fetch-models', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': getCleanApiKey(aiConfig.apiKey)
+        },
+        body: JSON.stringify({
+          apiKey: aiConfig.apiKey,
+          baseUrl: aiConfig.baseUrl || 'https://api.koboillm.com/v1'
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.models) && data.models.length > 0) {
+          setAvailableModels(data.models);
+          if (!data.models.includes(aiConfig.model)) {
+            const firstModel = data.models[0];
+            setAiConfig(prev => ({ ...prev, model: firstModel }));
+            localStorage.setItem('gemini_api_model', firstModel);
+          }
+          alert(`Berhasil memuat ${data.totalModels} model dari ${data.baseUrl}!`);
+        } else {
+          alert("Tidak ada model yang ditemukan dari Base URL.");
+        }
+      } else {
+        const errText = await res.text();
+        alert(`Gagal mengambil model: ${errText}`);
+      }
+    } catch (err: any) {
+      alert(`Terjadi kesalahan saat mengambil daftar model: ${err.message}`);
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+
   // Helper triggers for API Key Rotation Toast / Quota Exhaustion Alerts
   const triggerApiKeyRotationToast = (fromIdx: number, toIdx: number, totalKeys: number) => {
     setApiKeyToast({
       id: `rotation-${Date.now()}`,
       type: 'rotation',
-      title: '🔄 Rotasi Otomatis Kunci API Gemini',
+      title: '🔄 Rotasi Otomatis Kunci API LiteLLM',
       message: `Kunci API #${fromIdx + 1} mengalami limit kuota/rate limit. Sistem otomatis berpindah ke Kunci API #${toIdx + 1} dari total ${totalKeys} kunci tanpa menghentikan pembuatan soal.`,
       keyIndex: toIdx + 1,
       totalKeys
@@ -2706,14 +2759,14 @@ export default function App() {
       id: `quota-${Date.now()}`,
       type: 'quota_exhausted',
       title: '⚠️ Kuota Kunci API Habis (Error 429)',
-      message: customMessage || `Seluruh ${totalKeys} Kunci API Gemini Anda telah mencapai batas kuota harian/menit. Silakan tambahkan Kunci API baru atau beralih ke N8N Sumopod Webhook.`
+      message: customMessage || `Seluruh ${totalKeys} Kunci API Anda telah mencapai batas kuota harian/menit.`
     });
   };
 
   const handleTestApiKeyHealth = async () => {
     const keys = (aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5);
     if (keys.length === 0) {
-      alert("Masukkan minimal satu Kunci API Gemini terlebih dahulu di Langkah 1.");
+      alert("Masukkan minimal satu Kunci API terlebih dahulu di Langkah 1.");
       return;
     }
 
@@ -2725,7 +2778,10 @@ export default function App() {
           'Content-Type': 'application/json',
           'x-api-key': getCleanApiKey(aiConfig.apiKey)
         },
-        body: JSON.stringify({ apiKey: aiConfig.apiKey })
+        body: JSON.stringify({
+          apiKey: aiConfig.apiKey,
+          baseUrl: aiConfig.baseUrl || 'https://api.koboillm.com/v1'
+        })
       });
 
       if (res.ok) {
@@ -2800,7 +2856,7 @@ export default function App() {
     responseSchema?: any
   ): Promise<string> => {
     if (!aiConfig.apiKey) {
-      throw new Error("Kunci API Gemini belum diatur! Silakan masukkan kunci API terlebih dahulu di Tab 1 (Pengaturan Koneksi AI) atau beralih ke mode Server.");
+      throw new Error("Kunci API LiteLLM belum diatur! Silakan masukkan kunci API terlebih dahulu di Tab 1 (Pengaturan Koneksi AI).");
     }
 
     const apiKeys = (aiConfig.apiKey || '')
@@ -2809,123 +2865,83 @@ export default function App() {
       .filter(k => k.length > 5);
 
     if (apiKeys.length === 0) {
-      throw new Error("Kunci API Gemini tidak valid! Silakan masukkan Kunci API Gemini terlebih dahulu di Langkah 1.");
+      throw new Error("Kunci API tidak valid! Silakan masukkan Kunci API terlebih dahulu di Langkah 1.");
     }
 
-    const preferredModel = (aiConfig.model && !aiConfig.model.includes('2.5-flash') && !aiConfig.model.includes('3.5-flash'))
-      ? aiConfig.model
-      : "gemini-2.0-flash";
-
-    const allModels = [
-      "gemini-2.0-flash",
-      "gemini-2.5-pro",
-      "gemini-1.5-flash",
-      "gemini-1.5-pro",
-      "gemini-2.0-flash-lite"
-    ];
-
-    const modelsToTry = [preferredModel, ...allModels.filter(m => m !== preferredModel)];
+    const baseUrl = (aiConfig.baseUrl || 'https://api.koboillm.com/v1').replace(/\/+$/, '');
+    const selectedModel = aiConfig.model || "gemini-2.0-flash";
 
     let lastError: any = null;
 
-    // Apply configured request delay (throttling) if set
     if (aiConfig.requestDelayMs && aiConfig.requestDelayMs > 0) {
       await new Promise(r => setTimeout(r, aiConfig.requestDelayMs));
     }
 
-    // API Key Rotation Loop across all user-provided keys
     for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx++) {
       const apiKey = apiKeys[keyIdx];
-      console.log(`[Client API Key Rotation] Trying Key #${keyIdx + 1} of ${apiKeys.length}...`);
+      console.log(`[Client API Key Rotation] Trying Key #${keyIdx + 1} of ${apiKeys.length} at ${baseUrl}...`);
 
       if (keyIdx > 0) {
         triggerApiKeyRotationToast(keyIdx - 1, keyIdx, apiKeys.length);
       }
 
-      for (const model of modelsToTry) {
-        try {
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model.trim())}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
-
-          const requestBody: any = {
-            contents: [
-              {
-                parts: [{ text: promptText }]
-              }
-            ],
-            generationConfig: {
-              temperature: aiConfig.temperature || 0.7,
-            }
-          };
-
-          if (systemInstruction) {
-            requestBody.systemInstruction = {
-              parts: [{ text: systemInstruction }]
-            };
-          }
-
-          if (responseSchema) {
-            requestBody.generationConfig.responseMimeType = "application/json";
-            requestBody.generationConfig.responseSchema = responseSchema;
-          }
-
-          const res = await fetch(url, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(requestBody)
-          });
-
-          if (!res.ok) {
-            let errorText = '';
-            try {
-              const errObj = await res.json();
-              errorText = errObj.error?.message || JSON.stringify(errObj);
-            } catch {
-              errorText = await res.text();
-            }
-            throw new Error(`Google API Error (${res.status}): ${errorText || res.statusText}`);
-          }
-
-          const result = await res.json();
-          const candidateText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (!candidateText) {
-            throw new Error("Tidak ada respon yang dihasilkan oleh model Gemini.");
-          }
-          return candidateText;
-        } catch (err: any) {
-          lastError = err;
-          console.warn(`Direct call with Key #${keyIdx + 1} model ${model} failed:`, err?.message || err);
-
-          const errorString = typeof err === 'string' ? err : (err?.message || JSON.stringify(err) || '');
-          const isNotFound = /not_found|404|no longer available/i.test(errorString);
-          if (isNotFound) {
-            continue; // Move to next model
-          }
-
-          const isQuotaOrDemandError = 
-            /quota|limit|429|exhausted|503|demand|unavailable/i.test(errorString);
-
-          if (isQuotaOrDemandError) {
-            continue; // Try next model for this key before switching keys
-          }
+      try {
+        const messages: any[] = [];
+        if (systemInstruction) {
+          messages.push({ role: "system", content: systemInstruction });
         }
+        messages.push({ role: "user", content: promptText });
+
+        const requestBody: any = {
+          model: selectedModel,
+          messages,
+          temperature: aiConfig.temperature || 0.7
+        };
+
+        if (responseSchema) {
+          requestBody.response_format = { type: "json_object" };
+        }
+
+        const res = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            'x-api-key': apiKey
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!res.ok) {
+          let errorText = '';
+          try {
+            const errObj = await res.json();
+            errorText = errObj.error?.message || JSON.stringify(errObj);
+          } catch {
+            errorText = await res.text();
+          }
+          throw new Error(`API LiteLLM Error (${res.status}): ${errorText || res.statusText}`);
+        }
+
+        const result = await res.json();
+        const candidateText = result.choices?.[0]?.message?.content;
+        if (!candidateText) {
+          throw new Error("Respon kosong dari API LiteLLM.");
+        }
+        return candidateText;
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`Direct call with Key #${keyIdx + 1} model ${selectedModel} failed:`, err?.message || err);
       }
     }
 
     const errorString = typeof lastError === 'string' ? lastError : (lastError?.message || JSON.stringify(lastError) || '');
-    if (/quota|limit|429|exhausted|503|demand|unavailable/i.test(errorString)) {
+    if (/quota|limit|429|exhausted|503/i.test(errorString)) {
       triggerApiKeyQuotaExhaustedToast('Seluruh Kunci API Direct Client Anda telah mencapai batas kuota (Error 429).');
-      throw new Error(`⚠️ Kuota API Gemini Direct (Client) Telah Terlampaui (Error 429 Exceeded Quota).
-
-💡 SOLUSI CARA MENGATASINYA:
-1. Periksa Kunci API Gemini Anda di Pengaturan Koneksi AI (Langkah 1).
-2. Dapatkan Kunci API Gemini baru/tambahan secara GRATIS di: https://aistudio.google.com/app/apikey
-3. Masukkan beberapa Kunci API dipisah koma/baris baru agar sistem merotasi kunci secara otomatis jika salah satu kuota habis.
-4. Atau tunggu beberapa menit hingga kuota di-reset kembali oleh Google.`);
+      throw new Error(`⚠️ Kuota API LiteLLM Direct (Client) Telah Terlampaui (Error 429 Exceeded Quota).`);
     }
 
-    throw lastError || new Error("Gagal memanggil API Gemini setelah merotasi seluruh API Key dan model.");
+    throw lastError || new Error("Gagal memanggil API LiteLLM setelah merotasi seluruh API Key.");
   };
 
   // Prompt Generator outputs
@@ -6861,7 +6877,7 @@ PANDUAN EKSTRA:
               }`}
             >
               <Sliders className="h-4.5 w-4.5" />
-              <span>1. Input Parameter & Prompt</span>
+              <span>1. Input Parameter & Promt</span>
             </button>
             <button
               id="tab-btn-kisi"
@@ -6961,724 +6977,786 @@ PANDUAN EKSTRA:
         
         {/* Tab 1: Parameter & Prompt Generator */}
         {activeTab === 'config' && (
-          <div id="config-panel" className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-fadeIn no-print">
-            
-            {/* Left: Input parameters */}
-            <section className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-6">
-              <div className="flex items-center gap-2 pb-4 border-b border-slate-100">
-                <Sliders className="h-5 w-5 text-blue-600" />
-                <h2 className="text-lg font-bold text-slate-800">Isian Parameter Asesmen</h2>
+          <div id="config-panel" className="space-y-6 animate-fadeIn no-print">
+            {/* Info Banner */}
+            <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white rounded-2xl shadow-sm p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-blue-600/50 rounded-xl border border-blue-400/40">
+                  <Sliders className="h-5 w-5 text-blue-200" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                    <span>1. Input Parameter Asesmen & Promt Generator</span>
+                    <span className="text-[10px] bg-emerald-400 text-slate-950 font-black px-2.5 py-0.5 rounded-full uppercase">
+                      Akses Semua Pengguna
+                    </span>
+                  </h3>
+                  <p className="text-xs text-blue-200 font-medium">
+                    Lengkapi parameter asesmen dan salin prompt atau gunakan AI instan untuk menyusun kisi-kisi dan butir soal.
+                  </p>
+                </div>
               </div>
 
-              <div className="space-y-4">
-                {/* 1. Mata Pelajaran */}
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1 flex items-center justify-between">
-                    <span>1. Mata Pelajaran TKA</span>
-                    {userRole !== 'admin' && (
-                      <span className="text-[10px] font-extrabold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
-                        <Lock className="h-3 w-3 text-amber-600" /> Mapel Ampuan Guru
-                      </span>
-                    )}
-                  </label>
-                  {userRole !== 'admin' && (
-                    <div className="bg-amber-50 border border-amber-200 text-amber-800 p-2.5 rounded-xl text-xs flex items-center gap-2 mb-2">
-                      <Lock className="h-4 w-4 text-amber-600 shrink-0" />
-                      <span>Hak akses Mata Pelajaran Anda dikunci sesuai dengan Mata Pelajaran Ampuan: <b>{config.mataPelajaran || 'Sosiologi'}</b> (Dikonfigurasi oleh Admin).</span>
-                    </div>
-                  )}
-                  <select
-                    disabled={userRole !== 'admin'}
-                    value={config.mataPelajaran}
-                    onChange={(e) => setConfig({ ...config, mataPelajaran: e.target.value })}
-                    className={`w-full border rounded-xl px-4 py-2.5 text-sm ${
-                      userRole !== 'admin' 
-                        ? 'bg-slate-100 border-slate-200 text-slate-700 cursor-not-allowed font-bold' 
-                        : 'bg-slate-50 border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-medium'
-                    }`}
-                  >
-                    <option value="">-- Pilih Mata Pelajaran --</option>
-                    <optgroup label="Mata Pelajaran Wajib">
-                      <option value="Matematika">Matematika</option>
-                      <option value="Bahasa Indonesia">Bahasa Indonesia</option>
-                      <option value="Bahasa Inggris">Bahasa Inggris</option>
-                    </optgroup>
-                    <optgroup label="Mata Pelajaran Pilihan">
-                      <option value="Matematika Tingkat Lanjut">Matematika Tingkat Lanjut</option>
-                      <option value="Bahasa Indonesia Tingkat Lanjut">Bahasa Indonesia Tingkat Lanjut</option>
-                      <option value="Bahasa Inggris Tingkat Lanjut">Bahasa Inggris Tingkat Lanjut</option>
-                      <option value="Fisika">Fisika</option>
-                      <option value="Kimia">Kimia</option>
-                      <option value="Biologi">Biologi</option>
-                      <option value="Pendidikan Pancasila dan Kewarganegaraan">Pendidikan Pancasila dan Kewarganegaraan</option>
-                      <option value="Ekonomi">Ekonomi</option>
-                      <option value="Geografi">Geografi</option>
-                      <option value="Sosiologi">Sosiologi</option>
-                      <option value="Sejarah">Sejarah</option>
-                      <option value="Antropologi">Antropologi</option>
-                      <option value="Bahasa Prancis">Bahasa Prancis</option>
-                      <option value="Bahasa Jerman">Bahasa Jerman</option>
-                      <option value="Bahasa Jepang">Bahasa Jepang</option>
-                      <option value="Bahasa Mandarin">Bahasa Mandarin</option>
-                      <option value="Bahasa Korea">Bahasa Korea</option>
-                      <option value="Bahasa Arab">Bahasa Arab</option>
-                      <option value="Produk atau Projek Kreatif dan Kewirausahaan SMK dan MAK">Produk atau Projek Kreatif dan Kewirausahaan SMK dan MAK</option>
-                    </optgroup>
-                  </select>
-                </div>
-
-                {/* 2. Definisi */}
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                    2. Definisi / Tujuan Asesmen
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={config.definisi}
-                    onChange={(e) => setConfig({ ...config, definisi: e.target.value })}
-                    placeholder="Tujuan spesifik asesmen ini..."
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2 text-sm"
-                  />
-                </div>
-
-                {/* 3. Muatan */}
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                    3. Muatan Kurikulum / Tingkat
-                  </label>
-                  <input
-                    type="text"
-                    value={config.muatan}
-                    onChange={(e) => setConfig({ ...config, muatan: e.target.value })}
-                    placeholder="Contoh: Kurikulum Merdeka - Fase F Kelas XII"
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-sm"
-                  />
-                </div>
-
-                {/* 4. Kompetensi */}
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                    4. Kompetensi Dasar / Capaian
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={config.kompetensi}
-                    onChange={(e) => setConfig({ ...config, kompetensi: e.target.value })}
-                    placeholder="Kompetensi umum yang akan diuji..."
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2 text-sm"
-                  />
-                </div>
-
-                {/* Two column layouts */}
-                <div className="grid grid-cols-2 gap-4">
-                  {/* 5. Bentuk Soal */}
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                      5. Bentuk Soal
-                    </label>
-                    <select
-                      value={config.bentukSoal}
-                      onChange={(e) => setConfig({ ...config, bentukSoal: e.target.value as BentukSoal })}
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2.5 text-sm"
-                    >
-                      <option value="pilihan_ganda_sederhana">PG Sederhana (1 Jawaban)</option>
-                      <option value="mcma">PG Kompleks (MCMA)</option>
-                      <option value="kategori">PG Kompleks (Kategori)</option>
-                    </select>
-                  </div>
-
-                  {/* 6. Level Kognitif */}
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                      6. Level Kognitif
-                    </label>
-                    <select
-                      value={config.levelKognitif}
-                      onChange={(e) => setConfig({ ...config, levelKognitif: e.target.value as LevelKognitif })}
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-700"
-                    >
-                      <option value="level_1">Pemahaman (Knowing)</option>
-                      <option value="level_2">Penerapan (Applying)</option>
-                      <option value="level_3">Penalaran (Reasoning)</option>
-                    </select>
-
-                    {/* Interactive Level Kognitif Deep Definitions */}
-                    <div className="mt-2 p-3 bg-slate-50 rounded-xl border border-slate-200/60 text-xs leading-relaxed text-slate-600 space-y-1">
-                      {config.levelKognitif === 'level_1' && (
-                        <div>
-                          <span className="inline-flex items-center gap-1 font-bold text-amber-700 uppercase text-[10px] bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100 mb-0.5">🧠 Pemahaman (Knowing)</span>
-                          <p className="text-slate-600 font-medium text-[11px]">Mengenali, mengingat, dan memahami konsep dasar secara teoretis.</p>
-                        </div>
-                      )}
-                      {config.levelKognitif === 'level_2' && (
-                        <div>
-                          <span className="inline-flex items-center gap-1 font-bold text-sky-700 uppercase text-[10px] bg-sky-50 px-1.5 py-0.5 rounded border border-sky-100 mb-0.5">⚙️ Penerapan (Applying)</span>
-                          <p className="text-slate-600 font-medium text-[11px]">Menerapkan konsep, rumus, atau prosedur ilmiah pada situasi nyata / konkret.</p>
-                        </div>
-                      )}
-                      {config.levelKognitif === 'level_3' && (
-                        <div>
-                          <span className="inline-flex items-center gap-1 font-bold text-purple-700 uppercase text-[10px] bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100 mb-0.5">🧩 Penalaran (Reasoning)</span>
-                          <p className="text-slate-600 font-medium text-[11px]">Berpikir kritis, menganalisis hubungan sebab-akibat, memecahkan masalah non-rutin, dan menalar secara logis.</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* 7. Elemen & 8. Sub-Elemen */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                      7. Elemen/Materi
-                    </label>
-                    <input
-                      type="text"
-                      value={config.elemenMateri}
-                      onChange={(e) => setConfig({ ...config, elemenMateri: e.target.value })}
-                      placeholder="Materi utama"
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2.5 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                      8. Sub-Elemen
-                    </label>
-                    <input
-                      type="text"
-                      value={config.subElemenMateri}
-                      onChange={(e) => setConfig({ ...config, subElemenMateri: e.target.value })}
-                      placeholder="Submateri"
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2.5 text-sm"
-                    />
-                  </div>
-                </div>
-
-                {/* 9. Batasan / Catatan */}
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                    9. Batasan / Catatan (Opsional)
-                  </label>
-                  <input
-                    type="text"
-                    value={config.batasanCatatan}
-                    onChange={(e) => setConfig({ ...config, batasanCatatan: e.target.value })}
-                    placeholder="Contoh: Maksimum variabel, jenis bilangan..."
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-sm"
-                  />
-                </div>
-
-                {/* 10. Opsi & 11. Jenis Soal */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                      10. Pilihan Jawaban
-                    </label>
-                    <select
-                      value={config.jumlahOpsi}
-                      onChange={(e) => setConfig({ ...config, jumlahOpsi: Number(e.target.value) as JumlahOpsi })}
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2.5 text-sm"
-                    >
-                      <option value={4}>4 Opsi (A, B, C, D)</option>
-                      <option value={5}>5 Opsi (A, B, C, D, E)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                      11. Jenis Soal
-                    </label>
-                    <select
-                      value={config.jenisSoal}
-                      onChange={(e) => setConfig({ ...config, jenisSoal: e.target.value as JenisSoal })}
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2.5 text-sm"
-                    >
-                      <option value="tunggal">Soal Tunggal</option>
-                      <option value="grup">Soal Grup / Bersama</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Jumlah Soal */}
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
-                    Distribusi Target Jumlah Soal
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={50}
-                    value={config.jumlahSoal}
-                    onChange={(e) => setConfig({ ...config, jumlahSoal: Number(e.target.value) })}
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-sm"
-                  />
-                </div>
+              <div className="text-xs font-medium text-slate-200 bg-white/10 border border-white/20 px-3 py-1.5 rounded-xl flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>{userRole === 'admin' ? 'Akses Admin: Akses Penuh (Termasuk Koneksi AI)' : 'Akses Guru: Parameter & Prompt Generator'}</span>
               </div>
-            </section>
+            </div>
 
-            {/* Right: Extra Aspects + Prompts Outputs */}
-            <div className="lg:col-span-7 space-y-6">
-              
-              {/* AI Connection Settings Card */}
-              <section id="ai-settings-card" className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-fadeIn">
+              {/* Left Column: Form Parameter */}
+              <section className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-6">
+                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
                   <div className="flex items-center gap-2">
-                    <Sparkles className="h-5 w-5 text-indigo-600 animate-pulse" />
-                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Pengaturan Koneksi AI (Gemini & N8N Sumopod)</h3>
+                    <Sliders className="h-5 w-5 text-blue-600" />
+                    <h2 className="text-lg font-bold text-slate-800">Isian Parameter Asesmen TKA</h2>
                   </div>
-                  <span className={`px-2.5 py-0.5 text-[10px] font-bold uppercase rounded-full ${aiConfig.mode === 'n8n' ? 'bg-orange-100 text-orange-800 border border-orange-300' : aiConfig.mode === 'client' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-50 text-slate-600 border border-slate-200'}`}>
-                    Mode Aktif: {aiConfig.mode === 'n8n' ? '🔗 N8N Sumopod Webhook' : aiConfig.mode === 'client' ? '⚡ Direct Browser API' : '🌐 Server Default'}
+                  <span className="text-[10px] bg-emerald-50 text-emerald-700 font-extrabold px-2.5 py-1 rounded-full border border-emerald-200">
+                    Dapat Digunakan Semua Guru
                   </span>
                 </div>
 
-                <div className="space-y-4 text-xs">
-                  <p className="text-slate-600 leading-relaxed">
-                    Pilih jalur pemrosesan pembuat soal AI. Anda dapat menggunakan server bawaan, bypass browser langsung, atau menghubungkan workflow otomatisasi <b>N8N Sumopod (https://sumopod.com)</b>.
-                  </p>
+                  <div className="space-y-4">
+                    {/* 1. Mata Pelajaran */}
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                        1. Mata Pelajaran TKA
+                      </label>
+                      <select
+                        value={config.mataPelajaran}
+                        onChange={(e) => setConfig({ ...config, mataPelajaran: e.target.value })}
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-sm font-medium"
+                      >
+                        <option value="">-- Pilih Mata Pelajaran --</option>
+                        <optgroup label="Mata Pelajaran Wajib">
+                          <option value="Matematika">Matematika</option>
+                          <option value="Bahasa Indonesia">Bahasa Indonesia</option>
+                          <option value="Bahasa Inggris">Bahasa Inggris</option>
+                        </optgroup>
+                        <optgroup label="Mata Pelajaran Pilihan">
+                          <option value="Matematika Tingkat Lanjut">Matematika Tingkat Lanjut</option>
+                          <option value="Bahasa Indonesia Tingkat Lanjut">Bahasa Indonesia Tingkat Lanjut</option>
+                          <option value="Bahasa Inggris Tingkat Lanjut">Bahasa Inggris Tingkat Lanjut</option>
+                          <option value="Fisika">Fisika</option>
+                          <option value="Kimia">Kimia</option>
+                          <option value="Biologi">Biologi</option>
+                          <option value="Pendidikan Pancasila dan Kewarganegaraan">Pendidikan Pancasila dan Kewarganegaraan</option>
+                          <option value="Ekonomi">Ekonomi</option>
+                          <option value="Geografi">Geografi</option>
+                          <option value="Sosiologi">Sosiologi</option>
+                          <option value="Sejarah">Sejarah</option>
+                          <option value="Antropologi">Antropologi</option>
+                          <option value="Bahasa Prancis">Bahasa Prancis</option>
+                          <option value="Bahasa Jerman">Bahasa Jerman</option>
+                          <option value="Bahasa Jepang">Bahasa Jepang</option>
+                          <option value="Bahasa Mandarin">Bahasa Mandarin</option>
+                          <option value="Bahasa Korea">Bahasa Korea</option>
+                          <option value="Bahasa Arab">Bahasa Arab</option>
+                          <option value="Produk atau Projek Kreatif dan Kewirausahaan SMK dan MAK">Produk atau Projek Kreatif dan Kewirausahaan SMK dan MAK</option>
+                        </optgroup>
+                      </select>
+                    </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleSetAiMode('server')}
-                      className={`py-2 px-3 rounded-xl border text-center font-bold transition flex items-center justify-center gap-1.5 ${aiConfig.mode === 'server' ? 'bg-slate-900 border-slate-900 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
-                    >
-                      <span>🌐 Server Default</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSetAiMode('client')}
-                      className={`py-2 px-3 rounded-xl border text-center font-bold transition flex items-center justify-center gap-1.5 ${aiConfig.mode === 'client' ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
-                    >
-                      <span>⚡ Direct Browser</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSetAiMode('n8n')}
-                      className={`py-2 px-3 rounded-xl border text-center font-bold transition flex items-center justify-center gap-1.5 ${aiConfig.mode === 'n8n' ? 'bg-orange-600 border-orange-600 text-white shadow-sm ring-2 ring-orange-400/30' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
-                    >
-                      <Zap className="h-3.5 w-3.5 text-amber-300" />
-                      <span>🔗 N8N Sumopod</span>
-                    </button>
-                  </div>
+                    {/* 2. Definisi */}
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                        2. Definisi / Tujuan Asesmen
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={config.definisi}
+                        onChange={(e) => setConfig({ ...config, definisi: e.target.value })}
+                        placeholder="Tujuan spesifik asesmen ini..."
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2 text-sm"
+                      />
+                    </div>
 
-                  {/* N8N Sumopod Webhook Configuration Panel */}
-                  {aiConfig.mode === 'n8n' && (
-                    <div className="space-y-3 p-4 bg-orange-50/70 border border-orange-200 rounded-xl text-left animate-fadeIn">
-                      <div className="flex justify-between items-center flex-wrap gap-1 border-b border-orange-200/60 pb-2">
-                        <label className="block text-[11px] font-extrabold text-orange-950 uppercase tracking-wide flex items-center gap-1.5">
-                          <Globe className="h-4 w-4 text-orange-600" />
-                          <span>Pengaturan Webhook N8N (Sumopod Hosting)</span>
+                    {/* 3. Muatan */}
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                        3. Muatan Kurikulum / Tingkat
+                      </label>
+                      <input
+                        type="text"
+                        value={config.muatan}
+                        onChange={(e) => setConfig({ ...config, muatan: e.target.value })}
+                        placeholder="Contoh: Kurikulum Merdeka - Fase F Kelas XII"
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-sm"
+                      />
+                    </div>
+
+                    {/* 4. Kompetensi */}
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                        4. Kompetensi Dasar / Capaian
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={config.kompetensi}
+                        onChange={(e) => setConfig({ ...config, kompetensi: e.target.value })}
+                        placeholder="Kompetensi umum yang akan diuji..."
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2 text-sm"
+                      />
+                    </div>
+
+                    {/* Two column layouts */}
+                    <div className="grid grid-cols-2 gap-4">
+                      {/* 5. Bentuk Soal */}
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                          5. Bentuk Soal
                         </label>
-                        <a
-                          href="https://sumopod.com"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[10.5px] text-orange-700 hover:underline font-bold"
+                        <select
+                          value={config.bentukSoal}
+                          onChange={(e) => setConfig({ ...config, bentukSoal: e.target.value as BentukSoal })}
+                          className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2.5 text-sm"
                         >
-                          Buka N8N Sumopod ↗
-                        </a>
+                          <option value="pilihan_ganda_sederhana">PG Sederhana (1 Jawaban)</option>
+                          <option value="mcma">PG Kompleks (MCMA)</option>
+                          <option value="kategori">PG Kompleks (Kategori)</option>
+                        </select>
                       </div>
 
-                      <div className="space-y-2">
-                        <label className="block text-[11px] font-bold text-slate-700">
-                          URL Webhook Trigger N8N Sumopod:
+                      {/* 6. Level Kognitif */}
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                          6. Level Kognitif
                         </label>
-                        <div className="flex gap-2">
-                          <input
-                            type="url"
-                            value={aiConfig.n8nWebhookUrl}
-                            onChange={(e) => handleSaveN8nUrl(e.target.value)}
-                            placeholder="https://sumopod.com/webhook/generate-soal..."
-                            className="flex-1 bg-white border border-slate-300 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 rounded-lg p-2.5 text-xs font-mono shadow-inner"
-                          />
+                        <select
+                          value={config.levelKognitif}
+                          onChange={(e) => setConfig({ ...config, levelKognitif: e.target.value as LevelKognitif })}
+                          className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-700"
+                        >
+                          <option value="level_1">Pemahaman (Knowing)</option>
+                          <option value="level_2">Penerapan (Applying)</option>
+                          <option value="level_3">Penalaran (Reasoning)</option>
+                        </select>
+
+                        {/* Interactive Level Kognitif Definitions */}
+                        <div className="mt-2 p-3 bg-slate-50 rounded-xl border border-slate-200/60 text-xs leading-relaxed text-slate-600 space-y-1">
+                          {config.levelKognitif === 'level_1' && (
+                            <div>
+                              <span className="inline-flex items-center gap-1 font-bold text-amber-700 uppercase text-[10px] bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100 mb-0.5">🧠 Pemahaman (Knowing)</span>
+                              <p className="text-slate-600 font-medium text-[11px]">Mengenali, mengingat, dan memahami konsep dasar secara teoretis.</p>
+                            </div>
+                          )}
+                          {config.levelKognitif === 'level_2' && (
+                            <div>
+                              <span className="inline-flex items-center gap-1 font-bold text-sky-700 uppercase text-[10px] bg-sky-50 px-1.5 py-0.5 rounded border border-sky-100 mb-0.5">⚙️ Penerapan (Applying)</span>
+                              <p className="text-slate-600 font-medium text-[11px]">Menerapkan konsep, rumus, atau prosedur ilmiah pada situasi nyata / konkret.</p>
+                            </div>
+                          )}
+                          {config.levelKognitif === 'level_3' && (
+                            <div>
+                              <span className="inline-flex items-center gap-1 font-bold text-purple-700 uppercase text-[10px] bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100 mb-0.5">🧩 Penalaran (Reasoning)</span>
+                              <p className="text-slate-600 font-medium text-[11px]">Berpikir kritis, menganalisis hubungan sebab-akibat, memecahkan masalah non-rutin, dan menalar secara logis.</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 7. Elemen & 8. Sub-Elemen */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                          7. Elemen/Materi
+                        </label>
+                        <input
+                          type="text"
+                          value={config.elemenMateri}
+                          onChange={(e) => setConfig({ ...config, elemenMateri: e.target.value })}
+                          placeholder="Materi utama"
+                          className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2.5 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                          8. Sub-Elemen
+                        </label>
+                        <input
+                          type="text"
+                          value={config.subElemenMateri}
+                          onChange={(e) => setConfig({ ...config, subElemenMateri: e.target.value })}
+                          placeholder="Submateri"
+                          className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2.5 text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    {/* 9. Batasan / Catatan */}
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                        9. Batasan / Catatan (Opsional)
+                      </label>
+                      <input
+                        type="text"
+                        value={config.batasanCatatan}
+                        onChange={(e) => setConfig({ ...config, batasanCatatan: e.target.value })}
+                        placeholder="Contoh: Maksimum variabel, jenis bilangan..."
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-sm"
+                      />
+                    </div>
+
+                    {/* 10. Opsi & 11. Jenis Soal */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                          10. Pilihan Jawaban
+                        </label>
+                        <select
+                          value={config.jumlahOpsi}
+                          onChange={(e) => setConfig({ ...config, jumlahOpsi: Number(e.target.value) as JumlahOpsi })}
+                          className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2.5 text-sm"
+                        >
+                          <option value={4}>4 Opsi (A, B, C, D)</option>
+                          <option value={5}>5 Opsi (A, B, C, D, E)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                          11. Jenis Soal
+                        </label>
+                        <select
+                          value={config.jenisSoal}
+                          onChange={(e) => setConfig({ ...config, jenisSoal: e.target.value as JenisSoal })}
+                          className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-3 py-2.5 text-sm"
+                        >
+                          <option value="tunggal">Soal Tunggal</option>
+                          <option value="grup">Soal Grup / Bersama</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Jumlah Soal */}
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                        Distribusi Target Jumlah Soal
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={config.jumlahSoal}
+                        onChange={(e) => setConfig({ ...config, jumlahSoal: Number(e.target.value) })}
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-xl px-4 py-2.5 text-sm"
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                {/* Right Column: Konteks & Quality & Navigation Action */}
+                <div className="lg:col-span-7 space-y-6">
+                  <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
+                    <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-1.5 uppercase tracking-wide">
+                      <Globe className="h-4 w-4 text-indigo-600" />
+                      Konteks Nusantara & Stimulus Tambahan
+                    </h3>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* Local Context Indonesia */}
+                      <div>
+                        <span className="block text-xs font-bold text-slate-500 mb-2">KONTEKS LOKAL INDONESIA</span>
+                        <div className="space-y-1.5 max-h-40 overflow-y-auto pr-2 border border-slate-100 p-2 rounded-xl bg-slate-50/50">
+                          {[
+                            { key: 'Budaya Nusantara', label: '🎭 Budaya Nusantara (Adat & Seni)' },
+                            { key: 'Geografis Indonesia', label: '🗺️ Geografis & Kewilayahan ID' },
+                            { key: 'Kehidupan Sosial', label: '👥 Kehidupan Sosial & Kemasyarakatan' },
+                            { key: 'Ekonomi Rakyat', label: '💰 Ekonomi Rakyat, Pasar & UMKM' },
+                            { key: 'Teknologi Tradisional', label: '⚙️ Etno-Sains & Teknologi Tradisional' },
+                            { key: 'Kearifan Lokal', label: '🏛️ Kearifan Lokal & Ekologi' },
+                            { key: 'Keragaman Etnis', label: '🌈 Keragaman Etnis & Inklusivitas' },
+                            { key: 'Profil Pelajar Pancasila', label: '🇮🇩 Profil Pelajar Pancasila & Karakter' },
+                            { key: 'Isu Kontemporer', label: '📢 Isu Kontemporer & Realitas Empiris' },
+                            { key: 'Kebahasaan Diksi', label: '🗣️ Aksesibilitas Diksi & Bahasa ID' }
+                          ].map((item) => (
+                            <label key={item.key} className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:bg-slate-100 p-1 rounded">
+                              <input
+                                type="checkbox"
+                                checked={config.konteksLokal.includes(item.key)}
+                                onChange={() => handleToggleContext(item.key)}
+                                className="rounded text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                              />
+                              <span>{item.label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Stimulus Content */}
+                      <div>
+                        <span className="block text-xs font-bold text-slate-500 mb-2">STIMULUS & PENGEMBANGAN KONTEN</span>
+                        <div className="space-y-1.5 max-h-40 overflow-y-auto pr-2 border border-slate-100 p-2 rounded-xl bg-slate-50/50">
+                          {[
+                            { key: 'Teks Bacaan', label: '📖 Teks Bacaan Naratif/Sains' },
+                            { key: 'Gambar/Ilustrasi', label: '🖼️ Gambar / Infografis' },
+                            { key: 'Data/Tabel', label: '📊 Data Statistik / Tabel Empiris' },
+                            { key: 'Grafik/Diagram', label: '📈 Grafik / Diagram Tren' },
+                            { key: 'Kasus Nyata', label: '🔍 Kasus Nyata / Skenario Masalah' },
+                            { key: 'Cerita Pendek', label: '📚 Cerita Pendek / Anekdot' },
+                            { key: 'Berita/Artikel', label: '📰 Artikel Berita / Opini Media' },
+                            { key: 'Peta/Denah', label: '🗺️ Peta Geospasial / Denah' },
+                            { key: 'Dokumen Resmi', label: '📜 Dokumen / Regulasi Kebijakan' },
+                            { key: 'Pernyataan Tokoh', label: '🎙️ Wawancara / Pernyataan Tokoh' }
+                          ].map((item) => (
+                            <label key={item.key} className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:bg-slate-100 p-1 rounded">
+                              <input
+                                type="checkbox"
+                                checked={config.stimulusKonten.includes(item.key)}
+                                onChange={() => handleToggleStimulus(item.key)}
+                                className="rounded text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                              />
+                              <span>{item.label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Quality Standard Checklist */}
+                    <div className="mt-4 pt-4 border-t border-slate-100">
+                      <span className="block text-xs font-bold text-slate-500 mb-2">CHECKLIST STANDAR KUALITAS SOAL TKA</span>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {[
+                          'Validasi Bahasa', 'Konstruksi Soal', 'Kesesuaian Materi', 
+                          'Level Kognitif', 'Konteks Relevan', 'Tidak Bias', 
+                          'Kejelasan Instruksi', 'Kunci Jawaban Tepat', 'Distractor Berkualitas', 
+                          'Sesuai Kurikulum', 'Waktu Pengerjaan', 'Inklusivitas'
+                        ].map((item) => (
+                          <label key={item} className="flex items-center gap-2 text-[11px] text-slate-700 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={config.kualitasChecklist.includes(item)}
+                              onChange={() => handleToggleQuality(item)}
+                              className="rounded text-emerald-600 focus:ring-emerald-500 h-3 w-3"
+                            />
+                            <span className="truncate">{item}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* Pengaturan Koneksi AI (Khusus Admin) */}
+                  {userRole === 'admin' ? (
+                    <section id="ai-settings-card" className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 space-y-4">
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-5 w-5 text-indigo-600 animate-pulse" />
+                          <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">Pengaturan Koneksi AI (Gemini & LiteLLM)</h3>
+                        </div>
+                        <span className={`px-2.5 py-0.5 text-[10px] font-bold uppercase rounded-full ${aiConfig.mode === 'n8n' ? 'bg-orange-100 text-orange-800 border border-orange-300' : aiConfig.mode === 'client' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-50 text-slate-600 border border-slate-200'}`}>
+                          {aiConfig.mode === 'n8n' ? '🔗 N8N Sumopod' : aiConfig.mode === 'client' ? '⚡ Direct Browser' : '🌐 Server Default'}
+                        </span>
+                      </div>
+
+                      <div className="space-y-4 text-xs">
+                        <p className="text-slate-600 leading-relaxed">
+                          Pilih jalur pemrosesan pembuat soal AI. Anda dapat menggunakan server bawaan, bypass browser langsung, atau menghubungkan workflow otomatisasi <b>N8N Sumopod (https://sumopod.com)</b>.
+                        </p>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                           <button
                             type="button"
-                            onClick={handleTestN8nWebhook}
-                            disabled={testingN8n}
-                            className="bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-extrabold px-3.5 py-2 rounded-lg text-xs flex items-center gap-1.5 transition shadow-sm flex-shrink-0"
+                            onClick={() => handleSetAiMode('server')}
+                            className={`py-2 px-3 rounded-xl border text-center font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${aiConfig.mode === 'server' ? 'bg-slate-900 border-slate-900 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
                           >
-                            {testingN8n ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                            <span>{testingN8n ? 'Testing...' : 'Tes Webhook'}</span>
+                            <span>🌐 Server Default</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSetAiMode('client')}
+                            className={`py-2 px-3 rounded-xl border text-center font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${aiConfig.mode === 'client' ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                          >
+                            <span>⚡ Direct Browser</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSetAiMode('n8n')}
+                            className={`py-2 px-3 rounded-xl border text-center font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${aiConfig.mode === 'n8n' ? 'bg-orange-600 border-orange-600 text-white shadow-sm ring-2 ring-orange-400/30' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                          >
+                            <Zap className="h-3.5 w-3.5 text-amber-300" />
+                            <span>🔗 N8N Sumopod</span>
                           </button>
                         </div>
 
-                        {n8nTestStatus && (
-                          <div className={`p-2.5 rounded-lg text-[11px] font-bold flex items-start gap-2 border ${n8nTestStatus.success ? 'bg-emerald-50 text-emerald-800 border-emerald-300' : 'bg-red-50 text-red-800 border-red-300'}`}>
-                            {n8nTestStatus.success ? <Check className="h-4 w-4 text-emerald-600 flex-shrink-0 mt-0.5" /> : <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />}
-                            <span>{n8nTestStatus.message}</span>
-                          </div>
-                        )}
+                        {/* N8N Sumopod Webhook Configuration Panel */}
+                        {aiConfig.mode === 'n8n' && (
+                          <div className="space-y-3 p-4 bg-orange-50/70 border border-orange-200 rounded-xl text-left animate-fadeIn">
+                            <div className="flex justify-between items-center flex-wrap gap-1 border-b border-orange-200/60 pb-2">
+                              <label className="block text-[11px] font-extrabold text-orange-950 uppercase tracking-wide flex items-center gap-1.5">
+                                <Globe className="h-4 w-4 text-orange-600" />
+                                <span>Pengaturan Webhook N8N (Sumopod Hosting)</span>
+                              </label>
+                              <a
+                                href="https://sumopod.com"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[10.5px] text-orange-700 hover:underline font-bold"
+                              >
+                                Buka N8N Sumopod ↗
+                              </a>
+                            </div>
 
-                        <div className="bg-white/80 border border-orange-200/80 p-3 rounded-lg text-[11px] text-slate-700 space-y-1.5">
-                          <p className="font-bold text-orange-950 flex items-center gap-1">
-                            ℹ️ Struktur Payload JSON dikirim ke N8N Webhook:
-                          </p>
-                          <p className="font-mono text-[10px] bg-slate-900 text-emerald-400 p-2 rounded leading-relaxed overflow-x-auto">
-                            &#123; "mataPelajaran": "...", "kisi": &#123; "no": 1, "elemenMateri": "...", "subElemenMateri": "...", "kompetensi": "...", "bentukSoal": "pilihan_ganda_sederhana", "levelKognitif": "level_3" &#125;, "count": 1, "noSoalStart": 1 &#125;
-                          </p>
-                          <p className="text-[10px] text-slate-600">
-                            N8N harus mengembalikan JSON Array berisi objek butir soal (dengan properti <code className="bg-slate-100 px-1 py-0.5 rounded font-bold text-slate-800">soal</code>, <code className="bg-slate-100 px-1 py-0.5 rounded font-bold text-slate-800">opsi</code>, <code className="bg-slate-100 px-1 py-0.5 rounded font-bold text-slate-800">kunciJawaban</code>, <code className="bg-slate-100 px-1 py-0.5 rounded font-bold text-slate-800">pembahasan</code>).
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* API Key Configuration & Rotation Input */}
-                  <div className="space-y-3 p-3.5 bg-indigo-50/60 border border-indigo-100 rounded-xl animate-fadeIn text-left mt-3">
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center flex-wrap gap-1">
-                        <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
-                          <span>Kunci API Gemini (Dukungan Rotasi Multi-Key)</span>
-                          {((aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5).length) > 0 && (
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold flex items-center gap-1 ${((aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5).length) > 1 ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-indigo-100 text-indigo-800 border border-indigo-200'}`}>
-                              {((aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5).length) === 1 
-                                ? '1 Key Terdeteksi' 
-                                : `🔄 Rotasi Otomatis Aktif: ${(aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5).length} Key`}
-                            </span>
-                          )}
-                        </label>
-                        <a
-                          href="https://aistudio.google.com/"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-[10px] text-indigo-600 hover:underline font-bold"
-                        >
-                          Dapatkan API Key Gratis ↗
-                        </a>
-                      </div>
-
-                      <div className="space-y-2">
-                        <textarea
-                          rows={((aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5).length) > 1 ? 3 : 2}
-                          value={aiConfig.apiKey}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setAiConfig(prev => ({ ...prev, apiKey: val }));
-                            localStorage.setItem('gemini_api_key', val);
-                          }}
-                          placeholder="Masukkan satu atau beberapa Kunci API (pisahkan dengan koma atau baris baru untuk Rotasi Otomatis)...&#10;Contoh:&#10;AIzaSyKeyPertama...&#10;AIzaSyKeyKedua..."
-                          className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg p-2.5 text-xs font-mono leading-relaxed shadow-inner"
-                        />
-                        
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <p className="text-[10.5px] text-slate-600 font-medium leading-normal flex-1 min-w-[200px]">
-                            💡 <b>Fitur Rotasi API Key:</b> Masukkan beberapa API Key dari akun berbeda (pisahkan dengan koma atau enter). Jika 1 key mencapai limit kuota (429), sistem otomatis pindah ke key berikutnya tanpa menghentikan pembuatan soal.
-                          </p>
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <button
-                              type="button"
-                              onClick={handleTestApiKeyHealth}
-                              disabled={testingKeyHealth}
-                              className="bg-white hover:bg-slate-50 text-indigo-700 border border-indigo-300 text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-sm cursor-pointer disabled:opacity-50"
-                              title="Uji keaktifan dan limit kuota seluruh API Key yang diinput"
-                            >
-                              {testingKeyHealth ? <RefreshCw className="h-3.5 w-3.5 animate-spin text-indigo-600" /> : <Zap className="h-3.5 w-3.5 text-amber-500" />}
-                              <span>{testingKeyHealth ? 'Menguji Key...' : 'Tes Kesehatan Key'}</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                localStorage.setItem('gemini_api_key', aiConfig.apiKey);
-                                if (currentUser) {
-                                  try {
-                                    await updateDoc(doc(db, 'users', currentUser.uid), {
-                                      geminiApiKey: aiConfig.apiKey
-                                    });
-                                  } catch (err) {
-                                    console.error("Gagal menyimpan API Key ke cloud:", err);
-                                  }
-                                }
-                                setShowApiKeySaved(true);
-                                setTimeout(() => setShowApiKeySaved(false), 3000);
-                              }}
-                              className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold px-3.5 py-1.5 rounded-lg flex items-center gap-1 transition shadow-sm hover:shadow active:scale-95 flex-shrink-0 cursor-pointer"
-                            >
-                              <Save className="h-3.5 w-3.5" />
-                              <span>SIMPAN</span>
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* API Key Health Badges List */}
-                        {apiKeyHealthList.length > 0 && (
-                          <div className="p-2.5 bg-white border border-indigo-100 rounded-lg space-y-1.5 mt-2 animate-fadeIn">
-                            <span className="text-[10.5px] font-bold text-slate-700 block">Status Kesehatan Kunci API:</span>
-                            <div className="flex flex-wrap gap-1.5">
-                              {apiKeyHealthList.map((item, idx) => (
-                                <span
-                                  key={idx}
-                                  className={`text-[10px] px-2.5 py-1 rounded-md font-mono font-bold flex items-center gap-1 border ${
-                                    item.status === 'valid'
-                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                      : item.status === 'exhausted'
-                                      ? 'bg-amber-50 text-amber-800 border-amber-300'
-                                      : 'bg-rose-50 text-rose-800 border-rose-300'
-                                  }`}
+                            <div className="space-y-2">
+                              <label className="block text-[11px] font-bold text-slate-700">
+                                URL Webhook Trigger N8N Sumopod:
+                              </label>
+                              <div className="flex gap-2">
+                                <input
+                                  type="url"
+                                  value={aiConfig.n8nWebhookUrl}
+                                  onChange={(e) => handleSaveN8nUrl(e.target.value)}
+                                  placeholder="https://sumopod.com/webhook/generate-soal..."
+                                  className="flex-1 bg-white border border-slate-300 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 rounded-lg p-2.5 text-xs font-mono shadow-inner"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={handleTestN8nWebhook}
+                                  disabled={testingN8n}
+                                  className="bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-extrabold px-3.5 py-2 rounded-lg text-xs flex items-center gap-1.5 transition shadow-sm flex-shrink-0 cursor-pointer"
                                 >
-                                  <span>Key #{item.keyIndex + 1} ({item.snippet}):</span>
-                                  <span>{item.status === 'valid' ? '🟢 Aktif' : item.status === 'exhausted' ? '🟡 Limit (429)' : '🔴 Error'}</span>
-                                </span>
-                              ))}
+                                  {testingN8n ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                                  <span>{testingN8n ? 'Testing...' : 'Tes Webhook'}</span>
+                                </button>
+                              </div>
+
+                              {n8nTestStatus && (
+                                <div className={`p-2.5 rounded-lg text-[11px] font-bold flex items-start gap-2 border ${n8nTestStatus.success ? 'bg-emerald-50 text-emerald-800 border-emerald-300' : 'bg-red-50 text-red-800 border-red-300'}`}>
+                                  {n8nTestStatus.success ? <Check className="h-4 w-4 text-emerald-600 flex-shrink-0 mt-0.5" /> : <AlertCircle className="h-4 w-4 text-red-600 flex-shrink-0 mt-0.5" />}
+                                  <span>{n8nTestStatus.message}</span>
+                                </div>
+                              )}
                             </div>
                           </div>
                         )}
+
+                        {/* API Key Configuration & Rotation Input */}
+                        <div className="space-y-3 p-3.5 bg-indigo-50/60 border border-indigo-100 rounded-xl animate-fadeIn text-left mt-3">
+                          <div className="space-y-3">
+                            {/* Base URL LiteLLM Config */}
+                            <div className="space-y-1">
+                              <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wide">
+                                Base URL API LiteLLM / KoboILLM
+                              </label>
+                              <input
+                                type="text"
+                                value={aiConfig.baseUrl || 'https://api.koboillm.com/v1'}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setAiConfig(prev => ({ ...prev, baseUrl: val }));
+                                  localStorage.setItem('litellm_base_url', val);
+                                }}
+                                placeholder="https://api.koboillm.com/v1"
+                                className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-2 text-xs font-mono font-medium text-slate-800 shadow-inner"
+                              />
+                              <p className="text-[10px] text-slate-500">
+                                Base URL Default: <code className="bg-indigo-50 px-1 py-0.5 rounded font-mono text-indigo-700 font-bold">https://api.koboillm.com/v1</code>
+                              </p>
+                            </div>
+
+                            <div className="flex justify-between items-center flex-wrap gap-1">
+                              <label className="block text-[11px] font-bold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                                <span>Kunci API KoboILLM / LiteLLM (Multi-Key Rotation)</span>
+                                {((aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5).length) > 0 && (
+                                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-extrabold flex items-center gap-1 ${((aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5).length) > 1 ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-indigo-100 text-indigo-800 border border-indigo-200'}`}>
+                                    {((aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5).length) === 1 
+                                      ? '1 Key Terdeteksi' 
+                                      : `🔄 Rotasi Otomatis Aktif: ${(aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5).length} Key`}
+                                  </span>
+                                )}
+                              </label>
+                            </div>
+
+                            <div className="space-y-2">
+                              <textarea
+                                rows={((aiConfig.apiKey || '').split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 5).length) > 1 ? 3 : 2}
+                                value={aiConfig.apiKey}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setAiConfig(prev => ({ ...prev, apiKey: val }));
+                                  localStorage.setItem('gemini_api_key', val);
+                                }}
+                                placeholder="Masukkan Kunci API LiteLLM / KoboILLM (pisahkan dengan koma atau baris baru)...&#10;Contoh:&#10;AQ.Ab8RN6Lf5UnqlNvo6Wi9fqJ6DJrwydp...&#10;sk-xxxx..."
+                                className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg p-2.5 text-xs font-mono leading-relaxed shadow-inner"
+                              />
+                              
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <p className="text-[10.5px] text-slate-600 font-medium leading-normal flex-1 min-w-[200px]">
+                                  💡 <b>Rotasi API Key:</b> Masukkan beberapa API Key. Jika 1 key mencapai limit kuota (429), sistem otomatis merotasi ke key berikutnya.
+                                </p>
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={handleTestApiKeyHealth}
+                                    disabled={testingKeyHealth}
+                                    className="bg-white hover:bg-slate-50 text-indigo-700 border border-indigo-300 text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-sm cursor-pointer disabled:opacity-50"
+                                    title="Uji keaktifan dan limit kuota seluruh API Key yang diinput"
+                                  >
+                                    {testingKeyHealth ? <RefreshCw className="h-3.5 w-3.5 animate-spin text-indigo-600" /> : <Zap className="h-3.5 w-3.5 text-amber-500" />}
+                                    <span>{testingKeyHealth ? 'Menguji Key...' : 'Tes Kesehatan Key'}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      localStorage.setItem('gemini_api_key', aiConfig.apiKey);
+                                      localStorage.setItem('litellm_base_url', aiConfig.baseUrl);
+                                      if (currentUser) {
+                                        try {
+                                          await updateDoc(doc(db, 'users', currentUser.uid), {
+                                            geminiApiKey: aiConfig.apiKey
+                                          });
+                                        } catch (err) {
+                                          console.error("Gagal menyimpan API Key ke cloud:", err);
+                                        }
+                                      }
+                                      setShowApiKeySaved(true);
+                                      setTimeout(() => setShowApiKeySaved(false), 3000);
+                                    }}
+                                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold px-3.5 py-1.5 rounded-lg flex items-center gap-1 transition shadow-sm hover:shadow active:scale-95 flex-shrink-0 cursor-pointer"
+                                  >
+                                    <Save className="h-3.5 w-3.5" />
+                                    <span>SIMPAN</span>
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* API Key Health Badges List */}
+                              {apiKeyHealthList.length > 0 && (
+                                <div className="p-2.5 bg-white border border-indigo-100 rounded-lg space-y-1.5 mt-2 animate-fadeIn">
+                                  <span className="text-[10.5px] font-bold text-slate-700 block">Status Kesehatan Kunci API:</span>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {apiKeyHealthList.map((item, idx) => (
+                                      <span
+                                        key={idx}
+                                        className={`text-[10px] px-2.5 py-1 rounded-md font-mono font-bold flex items-center gap-1 border ${
+                                          item.status === 'valid'
+                                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                            : item.status === 'exhausted'
+                                            ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                            : 'bg-rose-50 text-rose-800 border-rose-300'
+                                        }`}
+                                      >
+                                        <span>Key #{item.keyIndex + 1} ({item.snippet}):</span>
+                                        <span>{item.status === 'valid' ? '🟢 Aktif' : item.status === 'exhausted' ? '🟡 Limit (429)' : '🔴 Error'}</span>
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            <AnimatePresence>
+                              {showApiKeySaved && (
+                                <motion.div
+                                  initial={{ opacity: 0, height: 0, y: -4 }}
+                                  animate={{ opacity: 1, height: 'auto', y: 0 }}
+                                  exit={{ opacity: 0, height: 0, y: -4 }}
+                                  className="flex items-center gap-1.5 text-[10.5px] font-bold text-emerald-600 mt-1 bg-emerald-50 border border-emerald-200/50 py-1 px-2.5 rounded-lg overflow-hidden"
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                  <span>Kunci API & Base URL KoboILLM berhasil disimpan!</span>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </div>
+
+                          <div className="space-y-1.5 mt-3 pt-2 border-t border-indigo-100">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wide">
+                                Pilih Model KoboILLM / LiteLLM
+                              </label>
+                              <button
+                                type="button"
+                                onClick={handleFetchModels}
+                                disabled={fetchingModels}
+                                className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[10.5px] font-bold px-2.5 py-1 rounded-md flex items-center gap-1 transition cursor-pointer disabled:opacity-50"
+                                title="Fetch semua model dari Base URL KoboILLM"
+                              >
+                                <RefreshCw className={`h-3 w-3 text-indigo-600 ${fetchingModels ? 'animate-spin' : ''}`} />
+                                <span>{fetchingModels ? 'Memuat Model...' : 'Fetch Semua Model dari Server'}</span>
+                              </button>
+                            </div>
+
+                            <select
+                              value={aiConfig.model}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setAiConfig(prev => ({ ...prev, model: val }));
+                                localStorage.setItem('gemini_api_model', val);
+                              }}
+                              className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2.5 py-2 text-xs font-medium text-slate-700 focus:outline-none"
+                            >
+                              {availableModels.map((m) => (
+                                <option key={m} value={m}>{m}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Temperature Parameter Slider */}
+                          <div className="space-y-1 mt-2.5 pt-2 border-t border-indigo-100">
+                            <div className="flex justify-between items-center text-[11px] font-bold text-slate-700">
+                              <span className="uppercase tracking-wide">Parameter Kreativitas (Temperature)</span>
+                              <span className="text-indigo-600 font-mono bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">{aiConfig.temperature || 0.7}</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.1"
+                              max="1.0"
+                              step="0.05"
+                              value={aiConfig.temperature || 0.7}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value);
+                                setAiConfig(prev => ({ ...prev, temperature: val }));
+                                localStorage.setItem('gemini_api_temperature', String(val));
+                              }}
+                              className="w-full accent-indigo-600 h-1.5 bg-indigo-100 rounded-lg cursor-pointer"
+                            />
+                            <p className="text-[10px] text-slate-500">
+                              0.1 - 0.4: Konsisten/Presisi | 0.7: Standar Seimbang (Rekomendasi) | 0.9 - 1.0: Lebih Kreatif
+                            </p>
+                          </div>
+
+                          {/* Throttling Request Delay Parameter */}
+                          <div className="space-y-1 mt-2 pt-2 border-t border-indigo-100">
+                            <div className="flex justify-between items-center text-[11px] font-bold text-slate-700">
+                              <span className="uppercase tracking-wide">Jeda Waktu Antar-Request (Throttling)</span>
+                              <span className="text-indigo-600 font-mono bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">{aiConfig.requestDelayMs || 0} ms</span>
+                            </div>
+                            <select
+                              value={aiConfig.requestDelayMs || 0}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value, 10);
+                                setAiConfig(prev => ({ ...prev, requestDelayMs: val }));
+                                localStorage.setItem('gemini_api_delay', String(val));
+                              }}
+                              className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2.5 py-1 text-xs font-medium text-slate-700"
+                            >
+                              <option value={0}>0 ms (Tanpa Jeda - Maksimum Kecepatan)</option>
+                              <option value={500}>500 ms (Jeda Ringan - Mencegah Rate Limit)</option>
+                              <option value={1000}>1000 ms (1 Detik - Stabil untuk Akun Free)</option>
+                              <option value={2000}>2000 ms (2 Detik - Sangat Aman dari Error 429)</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+                  ) : (
+                    <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm text-white space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-4.5 w-4.5 text-yellow-400 animate-pulse" />
+                          <h3 className="text-xs font-bold uppercase tracking-wider text-white">
+                            Pengaturan Koneksi AI (Gemini & LiteLLM)
+                          </h3>
+                        </div>
+                        <span className="text-[10px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-sm">
+                          <Lock className="h-3 w-3 text-slate-900" /> Khusus Admin
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed font-medium">
+                        Koneksi AI (API Key, Base URL, & Model LLM) dikelola dan dikonfigurasi secara terpusat oleh Admin. Anda dapat langsung menggunakan parameter asesmen dan penggenerasi prompt/soal secara otomatis.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right Column: Prompt Engine Output & Actions */}
+                  <div className="lg:col-span-7 space-y-6">
+                    <section className="bg-slate-900 text-slate-100 rounded-2xl shadow-lg p-6 overflow-hidden relative">
+                      <div className="absolute top-0 right-0 p-3 flex gap-2">
+                        <span className="bg-indigo-500/20 text-indigo-300 text-[10px] uppercase font-mono px-2 py-0.5 rounded border border-indigo-500/30">
+                          Prompt Engine v3.5
+                        </span>
                       </div>
 
-                      <AnimatePresence>
-                        {showApiKeySaved && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0, y: -4 }}
-                            animate={{ opacity: 1, height: 'auto', y: 0 }}
-                            exit={{ opacity: 0, height: 0, y: -4 }}
-                            className="flex items-center gap-1.5 text-[10.5px] font-bold text-emerald-600 mt-1 bg-emerald-50 border border-emerald-200/50 py-1 px-2.5 rounded-lg overflow-hidden"
+                      <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
+                        <Sparkles className="h-5 w-5 text-yellow-400" />
+                        Salin Prompt atau Gunakan AI Instan
+                      </h3>
+
+                      <div className="space-y-4">
+                        {/* Button Generate Prompt above Salin Prompt */}
+                        <div>
+                          <button
+                            onClick={handleGenerateKisiViaAI}
+                            disabled={isGeneratingKisi}
+                            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-slate-700 disabled:to-slate-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition flex items-center justify-center gap-2 text-sm cursor-pointer"
                           >
-                            <Check className="h-3.5 w-3.5" />
-                            <span>Kunci API & Pengaturan Rotasi berhasil disimpan!</span>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
+                            {isGeneratingKisi ? (
+                              <>
+                                <RefreshCw className="h-4.5 w-4.5 animate-spin text-white" />
+                                <span>Menggenerasi Prompt...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="h-4.5 w-4.5 text-yellow-300" />
+                                <span>Generate Prompt</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
 
-                    <div className="space-y-1.5 mt-3 pt-2 border-t border-indigo-100">
-                      <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wide">
-                        Pilih Model Gemini Utamamu
-                      </label>
-                      <select
-                        value={aiConfig.model}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setAiConfig(prev => ({ ...prev, model: val }));
-                          localStorage.setItem('gemini_api_model', val);
-                        }}
-                        className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:outline-none"
-                      >
-                        <option value="gemini-2.0-flash">Gemini 2.0 Flash (Sangat Cepat & Stabil - Direkomendasikan)</option>
-                        <option value="gemini-2.5-pro">Gemini 2.5 Pro (Penalaran Berpikir Lebih Dalam)</option>
-                        <option value="gemini-1.5-flash">Gemini 1.5 Flash (Model Alternatif)</option>
-                        <option value="gemini-1.5-pro">Gemini 1.5 Pro (Model Alternatif Pro)</option>
-                        <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite (Model Ringan & Hemat)</option>
-                      </select>
-                    </div>
-
-                    {/* Temperature Parameter Slider */}
-                    <div className="space-y-1 mt-2.5 pt-2 border-t border-indigo-100">
-                      <div className="flex justify-between items-center text-[11px] font-bold text-slate-700">
-                        <span className="uppercase tracking-wide">Parameter Kreativitas (Temperature)</span>
-                        <span className="text-indigo-600 font-mono bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">{aiConfig.temperature || 0.7}</span>
+                        {/* Prompt Soal TKA SMA */}
+                        <div className="space-y-1.5 pt-2 border-t border-slate-800">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-300 uppercase tracking-wide">
+                              PROMPT: PEMBUAT SOAL TKA SMA
+                            </span>
+                            <button
+                              onClick={() => handleCopy(generatedSoalPrompt, 'soal')}
+                              className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded flex items-center gap-1 transition-all cursor-pointer"
+                            >
+                              {copiedSoal ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                              <span>{copiedSoal ? 'Tersalin!' : 'Salin Prompt'}</span>
+                            </button>
+                          </div>
+                          <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 max-h-36 overflow-y-auto text-xs font-mono text-slate-300 whitespace-pre-wrap">
+                            {generatedSoalPrompt}
+                          </div>
+                        </div>
                       </div>
-                      <input
-                        type="range"
-                        min="0.1"
-                        max="1.0"
-                        step="0.05"
-                        value={aiConfig.temperature || 0.7}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value);
-                          setAiConfig(prev => ({ ...prev, temperature: val }));
-                          localStorage.setItem('gemini_api_temperature', String(val));
-                        }}
-                        className="w-full accent-indigo-600 h-1.5 bg-indigo-100 rounded-lg cursor-pointer"
-                      />
-                      <p className="text-[10px] text-slate-500">
-                        0.1 - 0.4: Konsisten/Presisi | 0.7: Standar Seimbang (Rekomendasi) | 0.9 - 1.0: Lebih Kreatif
-                      </p>
-                    </div>
+                    </section>
 
-                    {/* Throttling Request Delay Parameter */}
-                    <div className="space-y-1 mt-2 pt-2 border-t border-indigo-100">
-                      <div className="flex justify-between items-center text-[11px] font-bold text-slate-700">
-                        <span className="uppercase tracking-wide">Jeda Waktu Antar-Request (Throttling)</span>
-                        <span className="text-indigo-600 font-mono bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">{aiConfig.requestDelayMs || 0} ms</span>
+                    {/* Instructions / Pedoman */}
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-xs text-blue-900 space-y-2">
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <Info className="h-4 w-4 text-blue-700 flex-shrink-0" />
+                        <span>Petunjuk Kerja Aplikasi:</span>
                       </div>
-                      <select
-                        value={aiConfig.requestDelayMs || 0}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value, 10);
-                          setAiConfig(prev => ({ ...prev, requestDelayMs: val }));
-                          localStorage.setItem('gemini_api_delay', String(val));
-                        }}
-                        className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2.5 py-1 text-xs font-medium text-slate-700"
-                      >
-                        <option value={0}>0 ms (Tanpa Jeda - Maksimum Kecepatan)</option>
-                        <option value={500}>500 ms (Jeda Ringan - Mencegah Rate Limit)</option>
-                        <option value={1000}>1000 ms (1 Detik - Stabil untuk Akun Free)</option>
-                        <option value={2000}>2000 ms (2 Detik - Sangat Aman dari Error 429)</option>
-                      </select>
-                      <p className="text-[10px] text-slate-500 leading-relaxed">
-                        💡 <b>Sistem Fallback & Rotasi API Key:</b> Jika model utama atau API Key pertama mengalami limit (429/503), sistem akan otomatis merotasi ke API Key berikutnya dan mencoba model alternatif secara otomatis dengan notifikasi animasi visual.
-                      </p>
+                      <ul className="list-disc pl-4 space-y-1">
+                        <li>Langkah 1: Tentukan parameter mata pelajaran serta muatan kurikulum (khusus Admin).</li>
+                        <li>Langkah 2: Tekan tombol <b>"Generate Prompt"</b> atau salin prompt rancangan AI untuk digunakan pada AI playground/pilihan Anda.</li>
+                        <li>Langkah 3: Tinjau dan edit matriks asesmen kisi-kisi Anda di tab kedua.</li>
+                        <li>Langkah 4: Jalankan penyusunan butir soal, kemudian cetak atau download dalam format MS Word (.doc) atau Excel (.xls).</li>
+                      </ul>
                     </div>
 
-                    <p className="text-[10px] text-slate-500 pt-1 border-t border-indigo-100">
-                      🔒 Kunci API disimpan secara lokal di browser Anda / akun Cloud Anda secara aman.
-                    </p>
-                  </div>
-                </div>
-              </section>
+                    {/* Next Step Action Button */}
+                    <div className="bg-gradient-to-r from-indigo-900 to-slate-900 text-white rounded-2xl p-6 shadow-md flex flex-col sm:flex-row items-center justify-between gap-4">
+                      <div>
+                        <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                          <Check className="h-4 w-4 text-emerald-400" />
+                          <span>Koneksi & Prompt AI Siap</span>
+                        </h4>
+                        <p className="text-xs text-indigo-200 mt-0.5">
+                          Lanjutkan ke Langkah 2 untuk melihat dan mengelola Matriks Asesmen (Kisi-Kisi).
+                        </p>
+                      </div>
 
-              {/* Context and Quality Checklist Selector */}
-              <section className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
-                <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-1.5 uppercase tracking-wide">
-                  <Globe className="h-4 w-4 text-indigo-600" />
-                  Konteks Nusantara & Stimulus Tambahan
-                </h3>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Local Context Indonesia */}
-                  <div>
-                    <span className="block text-xs font-bold text-slate-500 mb-2">KONTEKS LOKAL INDONESIA</span>
-                    <div className="space-y-1.5 max-h-40 overflow-y-auto pr-2 border border-slate-100 p-2 rounded-xl bg-slate-50/50">
-                      {[
-                        { key: 'Budaya Nusantara', label: '🎭 Budaya Nusantara (Adat & Seni)' },
-                        { key: 'Geografis Indonesia', label: '🗺️ Geografis & Kewilayahan ID' },
-                        { key: 'Kehidupan Sosial', label: '👥 Kehidupan Sosial & Kemasyarakatan' },
-                        { key: 'Ekonomi Rakyat', label: '💰 Ekonomi Rakyat, Pasar & UMKM' },
-                        { key: 'Teknologi Tradisional', label: '⚙️ Etno-Sains & Teknologi Tradisional' },
-                        { key: 'Kearifan Lokal', label: '🏛️ Kearifan Lokal & Ekologi' },
-                        { key: 'Keragaman Etnis', label: '🌈 Keragaman Etnis & Inklusivitas' },
-                        { key: 'Profil Pelajar Pancasila', label: '🇮🇩 Profil Pelajar Pancasila & Karakter' },
-                        { key: 'Isu Kontemporer', label: '📢 Isu Kontemporer & Realitas Empiris' },
-                        { key: 'Kebahasaan Diksi', label: '🗣️ Aksesibilitas Diksi & Bahasa ID' }
-                      ].map((item) => (
-                        <label key={item.key} className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:bg-slate-100 p-1 rounded">
-                          <input
-                            type="checkbox"
-                            checked={config.konteksLokal.includes(item.key)}
-                            onChange={() => handleToggleContext(item.key)}
-                            className="rounded text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
-                          />
-                          <span>{item.label}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Stimulus Content */}
-                  <div>
-                    <span className="block text-xs font-bold text-slate-500 mb-2">STIMULUS & PENGEMBANGAN KONTEN</span>
-                    <div className="space-y-1.5 max-h-40 overflow-y-auto pr-2 border border-slate-100 p-2 rounded-xl bg-slate-50/50">
-                      {[
-                        { key: 'Teks Bacaan', label: '📖 Teks Bacaan Naratif/Sains' },
-                        { key: 'Gambar/Ilustrasi', label: '🖼️ Gambar / Infografis' },
-                        { key: 'Data/Tabel', label: '📊 Data Statistik / Tabel Empiris' },
-                        { key: 'Grafik/Diagram', label: '📈 Grafik / Diagram Tren' },
-                        { key: 'Kasus Nyata', label: '🔍 Kasus Nyata / Skenario Masalah' },
-                        { key: 'Cerita Pendek', label: '📚 Cerita Pendek / Anekdot' },
-                        { key: 'Berita/Artikel', label: '📰 Artikel Berita / Opini Media' },
-                        { key: 'Peta/Denah', label: '🗺️ Peta Geospasial / Denah' },
-                        { key: 'Dokumen Resmi', label: '📜 Dokumen / Regulasi Kebijakan' },
-                        { key: 'Pernyataan Tokoh', label: '🎙️ Wawancara / Pernyataan Tokoh' }
-                      ].map((item) => (
-                        <label key={item.key} className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:bg-slate-100 p-1 rounded">
-                          <input
-                            type="checkbox"
-                            checked={config.stimulusKonten.includes(item.key)}
-                            onChange={() => handleToggleStimulus(item.key)}
-                            className="rounded text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
-                          />
-                          <span>{item.label}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Quality Standard Checklist */}
-                <div className="mt-4 pt-4 border-t border-slate-100">
-                  <span className="block text-xs font-bold text-slate-500 mb-2">CHECKLIST STANDAR KUALITAS SOAL TKA</span>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {[
-                      'Validasi Bahasa', 'Konstruksi Soal', 'Kesesuaian Materi', 
-                      'Level Kognitif', 'Konteks Relevan', 'Tidak Bias', 
-                      'Kejelasan Instruksi', 'Kunci Jawaban Tepat', 'Distractor Berkualitas', 
-                      'Sesuai Kurikulum', 'Waktu Pengerjaan', 'Inklusivitas'
-                    ].map((item) => (
-                      <label key={item} className="flex items-center gap-2 text-[11px] text-slate-700 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={config.kualitasChecklist.includes(item)}
-                          onChange={() => handleToggleQuality(item)}
-                          className="rounded text-emerald-600 focus:ring-emerald-500 h-3 w-3"
-                        />
-                        <span className="truncate">{item}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </section>
-
-              {/* Generated Prompts Preview */}
-              <section className="bg-slate-900 text-slate-100 rounded-2xl shadow-lg p-6 overflow-hidden relative">
-                <div className="absolute top-0 right-0 p-3 flex gap-2">
-                  <span className="bg-indigo-500/20 text-indigo-300 text-[10px] uppercase font-mono px-2 py-0.5 rounded border border-indigo-500/30">
-                    Prompt Engine v3.5
-                  </span>
-                </div>
-
-                <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-yellow-400" />
-                  Salin Prompt atau Gunakan AI Instan
-                </h3>
-
-                <div className="space-y-4">
-                  {/* Button Generate Prompt above Salin Prompt */}
-                  <div>
-                    <button
-                      onClick={handleGenerateKisiViaAI}
-                      disabled={isGeneratingKisi}
-                      className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-slate-700 disabled:to-slate-700 text-white font-bold py-3 px-4 rounded-xl shadow-md transition flex items-center justify-center gap-2 text-sm cursor-pointer"
-                    >
-                      {isGeneratingKisi ? (
-                        <>
-                          <RefreshCw className="h-4.5 w-4.5 animate-spin text-white" />
-                          <span>Menggenerasi Prompt...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="h-4.5 w-4.5 text-yellow-300" />
-                          <span>Generate Prompt</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  {/* Prompt Soal TKA SMA */}
-                  <div className="space-y-1.5 pt-2 border-t border-slate-800">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-300 uppercase tracking-wide">
-                        PROMPT: PEMBUAT SOAL TKA SMA
-                      </span>
                       <button
-                        onClick={() => handleCopy(generatedSoalPrompt, 'soal')}
-                        className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded flex items-center gap-1 transition-all cursor-pointer"
+                        type="button"
+                        onClick={() => setActiveTab('kisi')}
+                        className="w-full sm:w-auto bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold px-6 py-3 rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg transition cursor-pointer shrink-0"
                       >
-                        {copiedSoal ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
-                        <span>{copiedSoal ? 'Tersalin!' : 'Salin Prompt'}</span>
+                        <span>Lanjutkan ke Step 2: Matriks Asesmen</span>
+                        <ArrowRight className="h-4 w-4" />
                       </button>
                     </div>
-                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 max-h-36 overflow-y-auto text-xs font-mono text-slate-300 whitespace-pre-wrap">
-                      {generatedSoalPrompt}
-                    </div>
                   </div>
                 </div>
-              </section>
-
-              {/* Instructions / Pedoman */}
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-xs text-blue-900 space-y-2">
-                <div className="flex items-center gap-1.5 font-bold">
-                  <Info className="h-4 w-4 text-blue-700 flex-shrink-0" />
-                  <span>Petunjuk Kerja Aplikasi:</span>
-                </div>
-                <ul className="list-disc pl-4 space-y-1">
-                  <li>Langkah 1: Tentukan 11 parameter mata pelajaran serta muatan kurikulum di panel kiri.</li>
-                  <li>Langkah 2: Tekan tombol <b>"Generate Prompt"</b> atau salin prompt rancangan AI untuk digunakan pada AI playground/pilihan Anda.</li>
-                  <li>Langkah 3: Tinjau dan edit matriks asesmen kisi-kisi Anda di tab kedua.</li>
-                  <li>Langkah 4: Jalankan penyusunan butir soal, kemudian cetak atau download dalam format MS Word (.doc) atau Excel (.xls).</li>
-                </ul>
               </div>
-            </div>
-          </div>
-        )}
+            )}
 
         {/* Tab 2: Matriks Asesmen (Kisi-Kisi) */}
         {activeTab === 'kisi' && (
