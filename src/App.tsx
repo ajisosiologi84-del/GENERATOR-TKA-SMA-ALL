@@ -4619,8 +4619,21 @@ GABUNGKAN stimulus langsung ke awal field 'soal' dan kosongkan 'stimulus' (strin
         });
 
         if (!response.ok) {
-          const txt = await response.text();
-          throw new Error(`Server Error (${response.status}): ${txt}`);
+          let errorMsg = `Gagal menyusun soal untuk kisi-kisi No. ${kisi.no}`;
+          try {
+            const textError = await response.text();
+            if (textError.includes('<!doctype') || textError.includes('<html')) {
+              errorMsg = 'Server AI mengalami timeout atau sedang sibuk (Gateway Timeout). Silakan coba beberapa saat lagi.';
+            } else {
+              try {
+                const errorData = JSON.parse(textError);
+                errorMsg = errorData.error || errorMsg;
+              } catch {
+                errorMsg = textError || errorMsg;
+              }
+            }
+          } catch {}
+          throw new Error(errorMsg);
         }
         data = await response.json();
       }

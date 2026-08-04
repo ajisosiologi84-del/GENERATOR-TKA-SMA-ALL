@@ -68,14 +68,71 @@ function formatServerAiError(error: any): { statusCode: number; message: string 
   };
 }
 
-// Helper to sanitize markdown JSON codeblocks (e.g. ```json ... ```)
+// Helper to sanitize markdown JSON codeblocks and extract pure JSON strings
 function cleanJsonOutput(text: string): string {
   if (!text) return "[]";
   let cleaned = text.trim();
-  if (cleaned.startsWith("```")) {
+
+  // 1. Extract content inside markdown ```json ... ``` or ``` ... ```
+  const codeblockMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (codeblockMatch && codeblockMatch[1] && codeblockMatch[1].trim().length > 0) {
+    cleaned = codeblockMatch[1].trim();
+  } else {
     cleaned = cleaned.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "").trim();
   }
+
+  // 2. Extract JSON Array [...] if embedded inside conversational text
+  const arrayMatch = cleaned.match(/\[\s*\{[\s\S]*\}\s*\]/);
+  if (arrayMatch) {
+    return arrayMatch[0].trim();
+  }
+
+  // 3. Extract JSON Object {...} if embedded inside conversational text
+  const objectMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (objectMatch) {
+    return objectMatch[0].trim();
+  }
+
   return cleaned;
+}
+
+// Ultra-robust JSON parser with multi-stage auto-repair for LLM output
+function safeParseJson(jsonString: string): any {
+  const cleaned = cleanJsonOutput(jsonString);
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (err1) {
+    // Attempt 1: Fix trailing commas in arrays/objects (e.g. [1, 2,] -> [1, 2])
+    let repaired = cleaned.replace(/,\s*([}\]])/g, '$1');
+    try {
+      return JSON.parse(repaired);
+    } catch (err2) {
+      // Attempt 2: Escape unescaped control characters inside string values (raw newlines, tabs)
+      repaired = repaired.replace(/[\u0000-\u001F]+/g, (match) => {
+        if (match === '\n') return '\\n';
+        if (match === '\r') return '\\r';
+        if (match === '\t') return '\\t';
+        return '';
+      });
+      try {
+        return JSON.parse(repaired);
+      } catch (err3) {
+        // Attempt 3: Extract individual valid JSON objects using regex
+        const objectMatches = repaired.match(/\{[^{}]*\}/g);
+        if (objectMatches && objectMatches.length > 0) {
+          const items: any[] = [];
+          for (const m of objectMatches) {
+            try {
+              items.push(JSON.parse(m));
+            } catch {}
+          }
+          if (items.length > 0) return items;
+        }
+        throw err1; // Throw original error if repair fails completely
+      }
+    }
+  }
 }
 
 // Helper to dynamically query available models from LiteLLM server
@@ -382,8 +439,15 @@ Hasilkan format JSON Array objek dengan properti:
     });
 
     attachRotationHeader(res, result.meta);
-    const cleanText = cleanJsonOutput(result.text);
-    const parsed = JSON.parse(cleanText);
+    let parsed = safeParseJson(result.text);
+
+    if (!Array.isArray(parsed) && parsed && typeof parsed === 'object') {
+      if (Array.isArray(parsed.kisi)) parsed = parsed.kisi;
+      else if (Array.isArray(parsed.data)) parsed = parsed.data;
+      else if (Array.isArray(parsed.items)) parsed = parsed.items;
+      else parsed = [parsed];
+    }
+
     res.json(parsed);
   } catch (error: any) {
     console.error("Error generating kisi-kisi:", error);
@@ -516,15 +580,22 @@ Hasilkan format JSON Array:
     });
 
     attachRotationHeader(res, result.meta);
-    const cleanText = cleanJsonOutput(result.text);
-    let parsed = JSON.parse(cleanText);
+    let parsed = safeParseJson(result.text);
+
+    if (!Array.isArray(parsed) && parsed && typeof parsed === 'object') {
+      if (Array.isArray(parsed.soal)) parsed = parsed.soal;
+      else if (Array.isArray(parsed.questions)) parsed = parsed.questions;
+      else if (Array.isArray(parsed.data)) parsed = parsed.data;
+      else if (Array.isArray(parsed.items)) parsed = parsed.items;
+      else parsed = [parsed];
+    }
 
     if (Array.isArray(parsed)) {
       parsed = parsed.map((q: any) => {
-        let cleanSoal = typeof q.soal === 'string' ? q.soal.trim() : '';
+        let cleanSoal = typeof q.soal === 'string' ? q.soal.trim() : (typeof q.question === 'string' ? q.question.trim() : '');
         cleanSoal = cleanSoal.replace(/^(soal\s*)?(no\.?\s*)?\d+[\.\)\:\-]\s*/i, '').trim();
 
-        let cleanOpsi = Array.isArray(q.opsi) ? q.opsi : [];
+        let cleanOpsi = Array.isArray(q.opsi) ? q.opsi : (Array.isArray(q.options) ? q.options : []);
         cleanOpsi = cleanOpsi.map((opt: string, idx: number) => {
           let text = String(opt || '').trim();
           text = text.replace(/^\*\*([^*]+)\*\*/, '$1').trim();
