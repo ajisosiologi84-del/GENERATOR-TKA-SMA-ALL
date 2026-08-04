@@ -2870,6 +2870,18 @@ export default function App() {
 
     const baseUrl = (aiConfig.baseUrl || 'https://api.koboillm.com/v1').replace(/\/+$/, '');
     const selectedModel = aiConfig.model || "gemini-2.0-flash";
+    const candidateModels = Array.from(new Set([
+      selectedModel,
+      `google/${selectedModel}`,
+      `gemini/${selectedModel}`,
+      ...(availableModels || []),
+      "gemini-1.5-flash",
+      "google/gemini-1.5-flash",
+      "gemini-2.0-flash-exp",
+      "gemini-2.5-pro",
+      "gpt-4o",
+      "gpt-4o-mini"
+    ].filter(Boolean)));
 
     let lastError: any = null;
 
@@ -2885,53 +2897,55 @@ export default function App() {
         triggerApiKeyRotationToast(keyIdx - 1, keyIdx, apiKeys.length);
       }
 
-      try {
-        const messages: any[] = [];
-        if (systemInstruction) {
-          messages.push({ role: "system", content: systemInstruction });
-        }
-        messages.push({ role: "user", content: promptText });
-
-        const requestBody: any = {
-          model: selectedModel,
-          messages,
-          temperature: aiConfig.temperature || 0.7
-        };
-
-        if (responseSchema) {
-          requestBody.response_format = { type: "json_object" };
-        }
-
-        const res = await fetch(`${baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-            'x-api-key': apiKey
-          },
-          body: JSON.stringify(requestBody)
-        });
-
-        if (!res.ok) {
-          let errorText = '';
-          try {
-            const errObj = await res.json();
-            errorText = errObj.error?.message || JSON.stringify(errObj);
-          } catch {
-            errorText = await res.text();
+      for (const modelCandidate of candidateModels) {
+        try {
+          const messages: any[] = [];
+          if (systemInstruction) {
+            messages.push({ role: "system", content: systemInstruction });
           }
-          throw new Error(`API LiteLLM Error (${res.status}): ${errorText || res.statusText}`);
-        }
+          messages.push({ role: "user", content: promptText });
 
-        const result = await res.json();
-        const candidateText = result.choices?.[0]?.message?.content;
-        if (!candidateText) {
-          throw new Error("Respon kosong dari API LiteLLM.");
+          const requestBody: any = {
+            model: modelCandidate,
+            messages,
+            temperature: aiConfig.temperature || 0.7
+          };
+
+          if (responseSchema) {
+            requestBody.response_format = { type: "json_object" };
+          }
+
+          const res = await fetch(`${baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`,
+              'x-api-key': apiKey
+            },
+            body: JSON.stringify(requestBody)
+          });
+
+          if (!res.ok) {
+            let errorText = '';
+            try {
+              const errObj = await res.json();
+              errorText = errObj.error?.message || JSON.stringify(errObj);
+            } catch {
+              errorText = await res.text();
+            }
+            throw new Error(`API LiteLLM Error (${res.status}): ${errorText || res.statusText}`);
+          }
+
+          const result = await res.json();
+          const candidateText = result.choices?.[0]?.message?.content;
+          if (!candidateText) {
+            throw new Error("Respon kosong dari API LiteLLM.");
+          }
+          return candidateText;
+        } catch (err: any) {
+          lastError = err;
+          console.warn(`Direct call with Key #${keyIdx + 1} model ${modelCandidate} failed:`, err?.message || err);
         }
-        return candidateText;
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`Direct call with Key #${keyIdx + 1} model ${selectedModel} failed:`, err?.message || err);
       }
     }
 

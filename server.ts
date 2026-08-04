@@ -43,9 +43,22 @@ function formatServerAiError(error: any): { statusCode: number; message: string 
       message: `⚠️ Kuota / Rate Limit API LiteLLM (KoboILLM) Telah Terlampaui (Error 429 Exceeded Quota).
 
 💡 SOLUSI CARA MENGATASINYA:
-1. Buka Tab 1 ('Langkah 1: Pengaturan & Bobot Soal') dan pilih Pengaturan Koneksi AI.
+1. Buka Tab 1 ('1. Input Parameter & Promt') dan pilih Pengaturan Koneksi AI (Gemini & LiteLLM).
 2. Masukkan Kunci API LiteLLM / KoboILLM Anda sendiri pada kolom API Key.
 3. Anda dapat memasukkan beberapa API Key dipisah koma/baris baru untuk Rotasi Otomatis.`
+    };
+  }
+
+  const isInvalidModel = /invalid model|model_not_found|not found|view available models|invalid model name/i.test(errorString);
+  if (isInvalidModel) {
+    return {
+      statusCode: 400,
+      message: `⚠️ Nama Model AI Tidak Valid / Tidak Didukung oleh Server LiteLLM.
+
+💡 SOLUSI:
+1. Buka Tab '1. Input Parameter & Promt' > 'Pengaturan Koneksi AI (Gemini & LiteLLM)'.
+2. Klik tombol '🔄 Ambil Daftar Model dari Server' untuk memuat daftar model resmi yang didukung oleh API Key Anda.
+3. Pilih model aktif yang tersedia dari menu dropdown.`
     };
   }
 
@@ -63,6 +76,31 @@ function cleanJsonOutput(text: string): string {
     cleaned = cleaned.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n?```$/, "").trim();
   }
   return cleaned;
+}
+
+// Helper to dynamically query available models from LiteLLM server
+async function fetchServerModelsList(baseUrl: string, apiKey: string): Promise<string[]> {
+  try {
+    const res = await fetch(`${baseUrl}/models`, {
+      method: "GET",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "x-api-key": apiKey
+      }
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    let rawList: any[] = [];
+    if (Array.isArray(data.data)) rawList = data.data;
+    else if (Array.isArray(data)) rawList = data;
+    else if (Array.isArray(data.models)) rawList = data.models;
+
+    return rawList
+      .map((item: any) => typeof item === 'string' ? item : item.id || item.name || String(item))
+      .filter(Boolean);
+  } catch (e) {
+    return [];
+  }
 }
 
 // LiteLLM / KoboILLM Chat Completions Caller
@@ -85,15 +123,20 @@ async function generateContentWithLiteLLM(
   const baseUrl = (params.baseUrl || params.config?.baseUrl || process.env.KOBOILLM_BASE_URL || process.env.LITELLM_BASE_URL || "https://api.koboillm.com/v1").replace(/\/+$/, '');
   
   const preferredModel = params.config?.model || "gemini-2.0-flash";
-  const defaultModels = [
+  const candidateModels = [
     preferredModel,
-    "gemini-2.0-flash",
-    "gemini-2.5-pro",
+    `google/${preferredModel}`,
+    `gemini/${preferredModel}`,
     "gemini-1.5-flash",
+    "google/gemini-1.5-flash",
+    "gemini-2.0-flash-exp",
+    "gemini-2.5-pro",
+    "gemini-1.5-pro",
     "gpt-4o",
+    "gpt-4o-mini",
     "claude-3-5-sonnet"
   ];
-  const modelsToTry = Array.from(new Set(defaultModels));
+  const modelsToTry = Array.from(new Set(candidateModels.filter(Boolean)));
 
   let lastError: any = null;
 
@@ -102,7 +145,10 @@ async function generateContentWithLiteLLM(
     const apiKey = keysToTry[keyIdx];
     console.log(`[LiteLLM API Rotation] Trying Key #${keyIdx + 1} of ${keysToTry.length} at ${baseUrl}/chat/completions...`);
 
-    for (const model of modelsToTry) {
+    let serverModelsFetched = false;
+
+    for (let i = 0; i < modelsToTry.length; i++) {
+      const model = modelsToTry[i];
       try {
         const messages: any[] = [];
         if (params.config?.systemInstruction) {
@@ -139,6 +185,22 @@ async function generateContentWithLiteLLM(
         if (!response.ok) {
           const errText = await response.text();
           console.warn(`LiteLLM model ${model} request failed (status ${response.status}): ${errText}`);
+          
+          // If model name is invalid, dynamically discover models from server if not done yet
+          if (!serverModelsFetched && /invalid model|model_not_found|view available models/i.test(errText)) {
+            serverModelsFetched = true;
+            console.log(`[LiteLLM Auto-Discovery] Fetching available models directly from ${baseUrl}/models...`);
+            const remoteModels = await fetchServerModelsList(baseUrl, apiKey);
+            if (remoteModels.length > 0) {
+              console.log(`[LiteLLM Auto-Discovery] Found ${remoteModels.length} models:`, remoteModels);
+              for (const rm of remoteModels) {
+                if (!modelsToTry.includes(rm)) {
+                  modelsToTry.push(rm);
+                }
+              }
+            }
+          }
+
           throw new Error(`API LiteLLM Error (${response.status}): ${errText}`);
         }
 
