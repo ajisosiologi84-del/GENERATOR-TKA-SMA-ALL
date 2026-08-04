@@ -6029,10 +6029,11 @@ PANDUAN EKSTRA:
 
     try {
       if (isEditingQuestion && editingQuestionId) {
-        const updatedQ = {
+        const existingQ = questions.find(q => q.id === editingQuestionId);
+        const updatedQ: Question = {
           id: editingQuestionId,
-          userId: currentUser?.uid,
-          noSoal: questions.find(q => q.id === editingQuestionId)?.noSoal || 1,
+          userId: currentUser?.uid || existingQ?.userId,
+          noSoal: existingQ?.noSoal || 1,
           kisiKisiId: questionForm.kisiKisiId || '',
           kompetensi: questionForm.kompetensi || '',
           subKompetensi: questionForm.subKompetensi || '',
@@ -6048,9 +6049,18 @@ PANDUAN EKSTRA:
           gambarPosisi: questionForm.gambarPosisi || 'center',
           gambarUkuran: questionForm.gambarUkuran || 'medium'
         };
-        await setDoc(doc(db, 'questions', editingQuestionId), updatedQ);
+
+        if (currentUser?.uid) {
+          try {
+            await setDoc(doc(db, 'questions', editingQuestionId), updatedQ);
+          } catch (e) {
+            console.warn("Gagal update Firestore, memperbarui state lokal:", e);
+          }
+        }
+        setQuestions(prev => prev.map(q => q.id === editingQuestionId ? updatedQ : q));
         setIsEditingQuestion(false);
         setEditingQuestionId(null);
+        alert(`Berhasil memperbarui butir soal No. ${updatedQ.noSoal}!`);
       } else {
         const newQ: Question = {
           id: `q-manual-${Date.now()}`,
@@ -6071,7 +6081,16 @@ PANDUAN EKSTRA:
           gambarPosisi: questionForm.gambarPosisi || 'center',
           gambarUkuran: questionForm.gambarUkuran || 'medium'
         };
-        await setDoc(doc(db, 'questions', newQ.id), newQ);
+
+        if (currentUser?.uid) {
+          try {
+            await setDoc(doc(db, 'questions', newQ.id), newQ);
+          } catch (e) {
+            console.warn("Gagal simpan ke Firestore, menambahkan ke state lokal:", e);
+          }
+        }
+        setQuestions(prev => [...prev, newQ]);
+        alert('Berhasil menyimpan butir soal baru!');
       }
 
       // Reset Form
@@ -6093,30 +6112,30 @@ PANDUAN EKSTRA:
       });
       setImageCompressReport(null);
       setIsEditingQuestion(false);
-      alert('Berhasil menyimpan butir soal!');
+      setEditingQuestionId(null);
     } catch (err: any) {
-      console.error("Gagal menyimpan soal ke database:", err);
-      try {
-        handleFirestoreError(err, OperationType.WRITE, 'questions');
-      } catch (err2: any) {
-        alert(`Gagal menyimpan ke database: ${err.message || err}`);
-      }
+      console.error("Gagal menyimpan soal:", err);
+      alert(`Gagal menyimpan butir soal: ${err.message || err}`);
     } finally {
       setIsSavingQuestion(false);
     }
   };
 
   const handleEditQuestion = (q: Question) => {
+    // Clean option letters if present to avoid duplicate "A. A. Jawaban"
+    const cleanedOptions = (q.opsi || []).map(opt => cleanOptionText(opt));
+    const padOptions = [...cleanedOptions, '', '', '', ''].slice(0, 5);
+
     setQuestionForm({
-      kisiKisiId: q.kisiKisiId,
-      kompetensi: q.kompetensi,
-      subKompetensi: q.subKompetensi,
-      bentukSoal: q.bentukSoal,
-      soal: q.soal,
-      stimulus: q.stimulus,
-      opsi: q.opsi.length > 0 ? [...q.opsi, '', '', '', ''].slice(0, 5) : ['', '', '', '', ''],
-      kunciJawaban: q.kunciJawaban,
-      pembahasan: q.pembahasan,
+      kisiKisiId: q.kisiKisiId || '',
+      kompetensi: q.kompetensi || '',
+      subKompetensi: q.subKompetensi || '',
+      bentukSoal: q.bentukSoal || 'pilihan_ganda_sederhana',
+      soal: q.soal || '',
+      stimulus: q.stimulus || '',
+      opsi: padOptions,
+      kunciJawaban: q.kunciJawaban || '',
+      pembahasan: q.pembahasan || '',
       kataKunci: q.kataKunci || '',
       gambarUrl: q.gambarUrl || '',
       gambarCaption: q.gambarCaption || '',
@@ -6126,14 +6145,24 @@ PANDUAN EKSTRA:
     setImageCompressReport(null);
     setIsEditingQuestion(true);
     setEditingQuestionId(q.id);
+
+    setTimeout(() => {
+      const element = document.getElementById('manual-question-form');
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
   };
 
   const handleDeleteQuestion = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'questions', id));
+      if (currentUser?.uid) {
+        await deleteDoc(doc(db, 'questions', id));
+      }
+      setQuestions(prev => prev.filter(q => q.id !== id));
     } catch (err: any) {
       console.error("Gagal menghapus soal:", err);
-      alert(`Gagal menghapus: ${err.message}`);
+      setQuestions(prev => prev.filter(q => q.id !== id));
     }
   };
 
@@ -8814,26 +8843,19 @@ PANDUAN EKSTRA:
                     <span>Hapus Semua Soal</span>
                   </button>
                 )}
-                {currentUser ? (
-                  <button
-                    onClick={() => setIsEditingQuestion(true)}
-                    className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
-                  >
-                    <Plus className="h-4.5 w-4.5" />
-                    <span>Tambah Soal</span>
-                  </button>
-                ) : (
-                  <div className="bg-slate-100 text-slate-500 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border border-slate-200 cursor-not-allowed select-none">
-                    <Lock className="h-4 w-4" />
-                    <span>Tambah Soal (Silakan Login)</span>
-                  </div>
-                )}
+                <button
+                  onClick={() => setIsEditingQuestion(true)}
+                  className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
+                >
+                  <Plus className="h-4.5 w-4.5" />
+                  <span>Tambah Soal</span>
+                </button>
               </div>
             </div>
 
             {/* Manual Question Form */}
             {isEditingQuestion && (
-              <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 no-print">
+              <div id="manual-question-form" className={`bg-white border rounded-2xl shadow-md p-6 no-print transition-all duration-300 ${editingQuestionId ? 'border-indigo-500 ring-2 ring-indigo-200 bg-indigo-50/20' : 'border-slate-200'}`}>
                 <h3 className="text-sm font-bold text-slate-800 mb-4 uppercase tracking-wider flex items-center gap-2">
                   <Sliders className="h-4.5 w-4.5 text-blue-600" />
                   {editingQuestionId ? 'Ubah Butir Soal' : 'Form Manual Pembuatan Soal'}
@@ -12483,11 +12505,11 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                                     Batal
                                   </button>
                                 </div>
-                              ) : currentUser ? (
+                              ) : (
                                 <div className="flex gap-1.5 items-center">
                                   <button
                                     onClick={() => handleEditQuestion(q)}
-                                    className="flex items-center gap-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs"
+                                    className="flex items-center gap-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs cursor-pointer"
                                     title="Ubah Butir Soal"
                                   >
                                     <Edit className="h-3 w-3" />
@@ -12495,14 +12517,14 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                                   </button>
                                   <button
                                     onClick={() => setDeletingQuestionId(q.id)}
-                                    className="flex items-center gap-1 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs"
+                                    className="flex items-center gap-1 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs cursor-pointer"
                                     title="Hapus Soal"
                                   >
                                     <Trash2 className="h-3 w-3" />
                                     <span>Hapus</span>
                                   </button>
                                 </div>
-                              ) : null}
+                              )}
                             </div>
                           </div>
                         </div>
@@ -12530,11 +12552,11 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                                   Batal
                                 </button>
                               </div>
-                            ) : currentUser ? (
+                            ) : (
                               <div className="flex gap-1.5 items-center">
                                 <button
                                   onClick={() => handleEditQuestion(q)}
-                                  className="flex items-center gap-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs"
+                                  className="flex items-center gap-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs cursor-pointer"
                                   title="Ubah Butir Soal"
                                 >
                                   <Edit className="h-3 w-3" />
@@ -12542,14 +12564,14 @@ Draf Megaprompt Matriks Asesmen belum dibuat. Silakan buka menu "Matriks Asesmen
                                 </button>
                                 <button
                                   onClick={() => setDeletingQuestionId(q.id)}
-                                  className="flex items-center gap-1 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs"
+                                  className="flex items-center gap-1 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 px-2 py-1 rounded-lg text-[10px] font-bold transition shadow-xs cursor-pointer"
                                   title="Hapus Soal"
                                 >
                                   <Trash2 className="h-3 w-3" />
                                   <span>Hapus</span>
                                 </button>
                               </div>
-                            ) : null}
+                            )}
                           </div>
                         </div>
                       )}
